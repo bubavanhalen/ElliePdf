@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="ElliePdf.Pages.EditPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:local="using:ElliePdf.Pages"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Page.Resources>
+        <!-- Signature Dialog as a resource -->
+        <ContentDialog
+            x:Name="SignatureDialog"
+            Title="Capture Signature"
+            PrimaryButtonText="OK"
+            SecondaryButtonText="Cancel"
+            AutomationProperties.AutomationId="SignatureDialog">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Border Grid.Row="0" Background="{ThemeResource SystemControlBackgroundAltHighBrush}" CornerRadius="4" Padding="8">
+                    <Canvas x:Name="SignatureCanvas" Width="400" Height="200" AutomationProperties.AutomationId="SignatureCanvas" />
+                </Border>
+                <Button x:Name="BtnClearSignature" Grid.Row="1" Content="Clear" HorizontalAlignment="Left" Margin="0,8,0,0" AutomationProperties.AutomationId="BtnClearSignature" />
+            </Grid>
+        </ContentDialog>
+    </Page.Resources>
+
+    <Grid Padding="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <StackPanel Orientation="Horizontal" Spacing="8" Grid.Row="0" HorizontalAlignment="Right">
+            <ToggleButton x:Name="ToggleInkButton" Content="Ink" AutomationProperties.AutomationId="ToggleInk" />
+            <Button x:Name="BtnAddText" Content="Add Text" AutomationProperties.AutomationId="BtnAddText" />
+            <Button x:Name="BtnSignature" Content="Signature" AutomationProperties.AutomationId="BtnSignature" />
+        </StackPanel>
+        <Border Grid.Row="1" Background="{ThemeResource SystemControlBackgroundAltHighBrush}" CornerRadius="8" Padding="8">
+            <Canvas x:Name="MainCanvas" AutomationProperties.AutomationId="MainCanvas">
+                <!-- Ink strokes and overlays will be rendered here -->
+            </Canvas>
+        </Border>
+    </Grid>
+</Page>

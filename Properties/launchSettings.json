@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "ElliePdf (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "ElliePdf (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}
