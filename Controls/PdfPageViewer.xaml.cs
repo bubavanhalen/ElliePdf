@@ -21,6 +21,13 @@ public sealed partial class PdfPageViewer : UserControl
             typeof(PdfPageViewer),
             new PropertyMetadata(false, OnChromelessChanged));
 
+    public static readonly DependencyProperty ContentBottomInsetProperty =
+        DependencyProperty.Register(
+            nameof(ContentBottomInset),
+            typeof(double),
+            typeof(PdfPageViewer),
+            new PropertyMetadata(0.0, OnContentBottomInsetChanged));
+
     public PdfPageViewer()
     {
         InitializeComponent();
@@ -40,6 +47,12 @@ public sealed partial class PdfPageViewer : UserControl
     {
         get => (bool)GetValue(IsChromelessProperty);
         set => SetValue(IsChromelessProperty, value);
+    }
+
+    public double ContentBottomInset
+    {
+        get => (double)GetValue(ContentBottomInsetProperty);
+        set => SetValue(ContentBottomInsetProperty, value);
     }
 
     public event EventHandler<double>? ViewportWidthChanged;
@@ -67,6 +80,14 @@ public sealed partial class PdfPageViewer : UserControl
         }
     }
 
+    private static void OnContentBottomInsetChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is PdfPageViewer viewer)
+        {
+            viewer.ApplyContentInset();
+        }
+    }
+
     private void ApplyChromeless()
     {
         if (IsChromeless)
@@ -75,6 +96,7 @@ public sealed partial class PdfPageViewer : UserControl
             PageChrome.Background = null;
             PageChrome.CornerRadius = new CornerRadius(0);
             PageScrollViewer.Background = null;
+            ApplyContentInset();
             return;
         }
 
@@ -82,7 +104,11 @@ public sealed partial class PdfPageViewer : UserControl
         PageChrome.Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"];
         PageChrome.CornerRadius = new CornerRadius(4);
         PageScrollViewer.Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["LayerFillColorDefaultBrush"];
+        ApplyContentInset();
     }
+
+    private void ApplyContentInset() =>
+        PageChrome.Margin = new Thickness(0, 0, 0, Math.Max(0, ContentBottomInset));
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {

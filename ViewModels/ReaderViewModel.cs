@@ -57,6 +57,8 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
 
     public bool ShowRecentFiles => !HasDocument && RecentFiles.Count > 0;
 
+    public bool ShowEmptyState => !HasDocument;
+
     public bool ShowTabBar => TabCount > 1;
 
     public byte[]? GetCurrentPagePngBytes() => _lastRenderedPng;
@@ -468,6 +470,7 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(HasDocument));
         OnPropertyChanged(nameof(DocumentTitle));
         OnPropertyChanged(nameof(PageLabel));
+        OnPropertyChanged(nameof(ShowEmptyState));
         OnPropertyChanged(nameof(ShowRecentFiles));
     }
 

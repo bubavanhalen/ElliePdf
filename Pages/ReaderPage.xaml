@@ -14,6 +14,9 @@
     <Grid Background="{ThemeResource LayerFillColorDefaultBrush}">
         <controls:PdfPageViewer
             x:Name="PageViewer"
+            Margin="56,48,56,0"
+            Canvas.ZIndex="0"
+            ContentBottomInset="112"
             IsChromeless="True"
             PageSource="{x:Bind ViewModel.PageImage, Mode=OneWay}"
             Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.HasDocument), Mode=OneWay}" />
@@ -23,10 +26,11 @@
             Source="{x:Bind ViewModel.PageImage, Mode=OneWay}"
             Visibility="Collapsed" />
 
-        <!-- Empty state: recent files only when nothing is open -->
+        <!-- Empty state -->
         <Grid
             Padding="48"
-            Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.ShowRecentFiles), Mode=OneWay}">
+            Canvas.ZIndex="5"
+            Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.ShowEmptyState), Mode=OneWay}">
             <StackPanel
                 MaxWidth="420"
                 HorizontalAlignment="Center"
@@ -37,11 +41,21 @@
                     Opacity="0.7"
                     Style="{StaticResource SubtitleTextBlockStyle}"
                     Text="Open a PDF to start reading" />
+                <Button
+                    HorizontalAlignment="Center"
+                    Click="OpenFileButton_Click"
+                    ToolTipService.ToolTip="Open (Ctrl+O)">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <SymbolIcon Symbol="OpenFile" />
+                        <TextBlock Text="Open PDF" />
+                    </StackPanel>
+                </Button>
                 <ListView
                     IsItemClickEnabled="True"
                     ItemClick="RecentFiles_ItemClick"
                     ItemsSource="{x:Bind ViewModel.RecentFiles, Mode=OneWay}"
-                    SelectionMode="None">
+                    SelectionMode="None"
+                    Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.ShowRecentFiles), Mode=OneWay}">
                     <ListView.ItemTemplate>
                         <DataTemplate x:DataType="vm:RecentFileItemViewModel">
                             <TextBlock Padding="8,6" Text="{x:Bind DisplayName, Mode=OneTime}" />
@@ -55,6 +69,8 @@
         <Border
             x:Name="LeftPanel"
             Width="220"
+            Margin="0,48,0,92"
+            Canvas.ZIndex="10"
             HorizontalAlignment="Left"
             Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
@@ -85,6 +101,8 @@
         <Border
             x:Name="RightPanel"
             Width="280"
+            Margin="0,48,0,92"
+            Canvas.ZIndex="10"
             HorizontalAlignment="Right"
             Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
@@ -115,6 +133,7 @@
         <TabView
             x:Name="DocumentTabs"
             Margin="56,4,56,0"
+            Canvas.ZIndex="20"
             VerticalAlignment="Top"
             AddTabButtonClick="DocumentTabs_AddTabButtonClick"
             Background="Transparent"
@@ -126,86 +145,122 @@
             SelectionChanged="DocumentTabs_SelectionChanged"
             Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.ShowTabBar), Mode=OneWay}" />
 
-        <!-- Left tool rail -->
-        <StackPanel
-            Margin="8,0,0,0"
-            HorizontalAlignment="Left"
-            Spacing="2"
-            VerticalAlignment="Center">
-            <AppBarButton
-                Click="OpenFileButton_Click"
-                Icon="OpenFile"
-                Label="Open"
-                LabelPosition="Collapsed"
-                ToolTipService.ToolTip="Open (Ctrl+O)" />
-            <AppBarButton
-                Click="CloseDocumentButton_Click"
-                Icon="Cancel"
-                Label="Close"
-                LabelPosition="Collapsed"
-                ToolTipService.ToolTip="Close document (Ctrl+W)"
-                Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.HasDocument), Mode=OneWay}" />
-            <AppBarButton
-                Command="{x:Bind ViewModel.ToggleThumbnailPanelCommand}"
-                Icon="ViewAll"
-                Label="Pages"
-                LabelPosition="Collapsed"
-                ToolTipService.ToolTip="Pages" />
-            <AppBarButton
-                Command="{x:Bind ViewModel.PreviousPageCommand}"
-                Icon="Back"
-                Label="Previous"
-                LabelPosition="Collapsed"
-                ToolTipService.ToolTip="Previous page" />
-            <AppBarButton
-                Command="{x:Bind ViewModel.NextPageCommand}"
-                Icon="Forward"
-                Label="Next"
-                LabelPosition="Collapsed"
-                ToolTipService.ToolTip="Next page" />
-        </StackPanel>
-
-        <!-- Right tool rail -->
-        <StackPanel
-            Margin="0,0,8,0"
-            HorizontalAlignment="Right"
-            Spacing="2"
-            VerticalAlignment="Center">
-            <AppBarButton
-                Command="{x:Bind ViewModel.ZoomFitWidthCommand}"
-                Icon="FullScreen"
-                Label="Fit width"
-                LabelPosition="Collapsed"
-                ToolTipService.ToolTip="Fit width" />
-            <AppBarButton
-                Command="{x:Bind ViewModel.ZoomOutCommand}"
-                Icon="Zoom"
-                Label="Zoom out"
-                LabelPosition="Collapsed"
-                ToolTipService.ToolTip="Zoom out (Ctrl+-)" />
-            <AppBarButton
-                Command="{x:Bind ViewModel.ZoomInCommand}"
-                Icon="Zoom"
-                Label="Zoom in"
-                LabelPosition="Collapsed"
-                ToolTipService.ToolTip="Zoom in (Ctrl++)" />
-            <AppBarButton
-                Command="{x:Bind ViewModel.ToggleSearchPanelCommand}"
-                Icon="Find"
-                Label="Search"
-                LabelPosition="Collapsed"
-                ToolTipService.ToolTip="Search (Ctrl+F)" />
-            <AppBarButton
-                Click="PrintButton_Click"
-                Icon="Print"
-                Label="Print"
-                LabelPosition="Collapsed"
-                ToolTipService.ToolTip="Print (Ctrl+P)" />
-        </StackPanel>
+        <!-- Floating reader tools -->
+        <Border
+            Margin="12"
+            Padding="8,6"
+            Canvas.ZIndex="30"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Bottom"
+            Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="22"
+            Opacity="0.96"
+            Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.HasDocument), Mode=OneWay}">
+            <StackPanel Orientation="Horizontal" Spacing="2">
+                <AppBarButton
+                    Click="OpenFileButton_Click"
+                    Icon="OpenFile"
+                    Label="Open"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Open (Ctrl+O)" />
+                <AppBarButton
+                    Click="CloseDocumentButton_Click"
+                    Icon="Cancel"
+                    Label="Close"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Close document (Ctrl+W)"
+                    Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.HasDocument), Mode=OneWay}" />
+                <Border
+                    Width="1"
+                    Height="28"
+                    Margin="6,0"
+                    Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                <AppBarButton
+                    Command="{x:Bind ViewModel.ToggleThumbnailPanelCommand}"
+                    Icon="ViewAll"
+                    Label="Pages"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Pages" />
+                <AppBarButton
+                    Command="{x:Bind ViewModel.PreviousPageCommand}"
+                    Icon="Back"
+                    Label="Previous"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Previous page" />
+                <Border
+                    MinWidth="112"
+                    Padding="10,0"
+                    VerticalAlignment="Center">
+                    <TextBlock
+                        HorizontalAlignment="Center"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="{x:Bind ViewModel.PageLabel, Mode=OneWay}"
+                        TextTrimming="CharacterEllipsis" />
+                </Border>
+                <AppBarButton
+                    Command="{x:Bind ViewModel.NextPageCommand}"
+                    Icon="Forward"
+                    Label="Next"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Next page" />
+                <Border
+                    Width="1"
+                    Height="28"
+                    Margin="6,0"
+                    Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                <AppBarButton
+                    Command="{x:Bind ViewModel.ZoomFitWidthCommand}"
+                    Icon="FullScreen"
+                    Label="Fit width"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Fit width" />
+                <AppBarButton
+                    Command="{x:Bind ViewModel.ZoomOutCommand}"
+                    Icon="ZoomOut"
+                    Label="Zoom out"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Zoom out (Ctrl+-)" />
+                <Border
+                    MinWidth="58"
+                    Padding="8,0"
+                    VerticalAlignment="Center">
+                    <TextBlock
+                        HorizontalAlignment="Center"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="{x:Bind ViewModel.ZoomLabel, Mode=OneWay}" />
+                </Border>
+                <AppBarButton
+                    Command="{x:Bind ViewModel.ZoomInCommand}"
+                    Icon="ZoomIn"
+                    Label="Zoom in"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Zoom in (Ctrl++)" />
+                <Border
+                    Width="1"
+                    Height="28"
+                    Margin="6,0"
+                    Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                <AppBarButton
+                    Command="{x:Bind ViewModel.ToggleSearchPanelCommand}"
+                    Icon="Find"
+                    Label="Search"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Search (Ctrl+F)" />
+                <AppBarButton
+                    Click="PrintButton_Click"
+                    Icon="Print"
+                    Label="Print"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Print (Ctrl+P)" />
+            </StackPanel>
+        </Border>
 
         <!-- Minimal status + page indicator -->
         <StackPanel
-            Margin="0,0,0,8"
+            Margin="0,0,0,64"
+            Canvas.ZIndex="30"
             HorizontalAlignment="Center"
             Spacing="4"
             VerticalAlignment="Bottom">
@@ -215,21 +270,11 @@
                 IsOpen="{x:Bind ViewModel.IsStatusOpen, Mode=OneWay}"
                 Message="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
                 Severity="{x:Bind ViewModel.StatusSeverity, Mode=OneWay}" />
-            <Border
-                Padding="10,4"
-                Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
-                CornerRadius="12"
-                Opacity="0.92"
-                Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.HasDocument), Mode=OneWay}">
-                <StackPanel Orientation="Horizontal" Spacing="10">
-                    <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="{x:Bind ViewModel.PageLabel, Mode=OneWay}" />
-                    <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="{x:Bind ViewModel.ZoomLabel, Mode=OneWay}" />
-                    <ProgressRing
-                        Width="14"
-                        Height="14"
-                        IsActive="{x:Bind ViewModel.IsBusy, Mode=OneWay}" />
-                </StackPanel>
-            </Border>
+            <ProgressRing
+                Width="18"
+                Height="18"
+                IsActive="{x:Bind ViewModel.IsBusy, Mode=OneWay}"
+                Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.IsBusy), Mode=OneWay}" />
         </StackPanel>
     </Grid>
 </Page>
