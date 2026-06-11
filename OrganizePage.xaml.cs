@@ -1,4 +1,5 @@
 using ElliePdf.ViewModels;
+using ElliePdf.Navigation;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -69,6 +70,9 @@ public sealed partial class OrganizePage : Page
 
         await ViewModel.MergeDocumentsAsync(file.Path);
     }
+
+    private void BackToDocumentButton_Click(object sender, RoutedEventArgs e) =>
+        AppNavigation.RequestWorkspace("read");
 
     private async void ThumbnailGrid_ItemClick(object sender, ItemClickEventArgs e)
     {

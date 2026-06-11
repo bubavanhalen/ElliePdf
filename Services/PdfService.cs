@@ -690,12 +690,12 @@ public sealed class PdfService : IPdfService, IDisposable
 
     private async Task ExecutePdfiumCallAsync(Action action, CancellationToken cancellationToken)
     {
-        await _pdfiumGate.WaitAsync(cancellationToken);
+        await _pdfiumGate.WaitAsync(cancellationToken).ConfigureAwait(false);
 
         try
         {
             EnsureInitialized();
-            await Task.Run(action, cancellationToken);
+            await Task.Run(action, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -705,12 +705,12 @@ public sealed class PdfService : IPdfService, IDisposable
 
     private async Task<T> ExecutePdfiumCallAsync<T>(Func<T> action, CancellationToken cancellationToken)
     {
-        await _pdfiumGate.WaitAsync(cancellationToken);
+        await _pdfiumGate.WaitAsync(cancellationToken).ConfigureAwait(false);
 
         try
         {
             EnsureInitialized();
-            return await Task.Run(action, cancellationToken);
+            return await Task.Run(action, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -720,12 +720,12 @@ public sealed class PdfService : IPdfService, IDisposable
 
     private async Task<T> ExecutePdfiumCallAsync<T>(Func<Task<T>> action, CancellationToken cancellationToken)
     {
-        await _pdfiumGate.WaitAsync(cancellationToken);
+        await _pdfiumGate.WaitAsync(cancellationToken).ConfigureAwait(false);
 
         try
         {
             EnsureInitialized();
-            return await Task.Run(action, cancellationToken);
+            return await Task.Run(action, cancellationToken).ConfigureAwait(false);
         }
         finally
         {

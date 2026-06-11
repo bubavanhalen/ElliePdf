@@ -2,7 +2,9 @@
 <UserControl
     x:Class="ElliePdf.Controls.PdfPageViewer"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+
+    xmlns:controls="using:ElliePdf.Controls"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
@@ -21,10 +23,22 @@
             HorizontalAlignment="Center"
             Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
             CornerRadius="4">
-            <Image
-                x:Name="PageImage"
-                AutomationProperties.AutomationId="ReaderPageImage"
-                Stretch="None" />
+            <Grid x:Name="PageHost">
+
+                <Image
+                    x:Name="PageImage"
+                    AutomationProperties.AutomationId="ReaderPageImage"
+                    Stretch="None" />
+
+                <controls:PdfEditSurface
+
+                    x:Name="PageEditSurface"
+
+                    IsHitTestVisible="False"
+
+                    Visibility="Collapsed" />
+
+            </Grid>
         </Border>
     </ScrollViewer>
 </UserControl>

@@ -63,6 +63,13 @@
                     Click="MergeButton_Click"
                     Icon="Copy"
                     Label="Export" />
+                <AppBarSeparator />
+                <AppBarButton
+                    x:Name="BackToDocumentButton"
+                    AutomationProperties.AutomationId="BtnBackToDocument"
+                    Click="BackToDocumentButton_Click"
+                    Icon="Document"
+                    Label="Back to document" />
             </CommandBar>
 
             <GridView

@@ -57,15 +57,22 @@ public sealed partial class MainWindow : Window
         Close();
     }
 
-    private void OnClosed(object sender, WindowEventArgs args)
+    private async void OnClosed(object sender, WindowEventArgs args)
     {
-        if (App.Services is IAsyncDisposable asyncDisposable)
+        try
         {
-            asyncDisposable.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            if (App.Services is IAsyncDisposable asyncDisposable)
+            {
+                await asyncDisposable.DisposeAsync();
+            }
+            else if (App.Services is IDisposable disposable)
+            {
+                disposable.Dispose();
+            }
         }
-        else if (App.Services is IDisposable disposable)
+        catch (Exception ex)
         {
-            disposable.Dispose();
+            System.Diagnostics.Debug.WriteLine($"Failed to dispose application services: {ex}");
         }
     }
 

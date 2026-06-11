@@ -34,7 +34,6 @@ public partial class App : Application
         services.AddSingleton<IDocumentTabService, DocumentTabService>();
         services.AddSingleton<DocumentCollectionViewModel>();
         services.AddSingleton<ReaderViewModel>();
-        services.AddSingleton<EditPageViewModel>();
         Services = services.BuildServiceProvider();
 
         InitializeComponent();

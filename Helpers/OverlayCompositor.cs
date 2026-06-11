@@ -33,7 +33,6 @@ internal static class OverlayCompositor
         graphics.SmoothingMode = SmoothingMode.AntiAlias;
         graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
 
-        using var pen = new Pen(Color.Black, Math.Max(1f, 2f * (float)scaleX));
         foreach (var stroke in overlay.InkStrokes)
         {
             if (stroke.Points.Count < 2)
@@ -41,6 +40,14 @@ internal static class OverlayCompositor
                 continue;
             }
 
+            using var pen = new Pen(
+                ParseColor(stroke.ColorHex),
+                Math.Max(1f, (float)(stroke.Thickness * scaleX)))
+            {
+                StartCap = LineCap.Round,
+                EndCap = LineCap.Round,
+                LineJoin = LineJoin.Round
+            };
             var points = stroke.Points
                 .Select(point => new PointF(
                     (float)(point.X * scaleX),
@@ -51,13 +58,29 @@ internal static class OverlayCompositor
 
         foreach (var text in overlay.TextItems)
         {
-            using var font = new Font("Segoe UI", (float)(text.FontSize * scaleY));
+            var style = FontStyle.Regular;
+            if (text.IsBold)
+            {
+                style |= FontStyle.Bold;
+            }
+
+            if (text.IsItalic)
+            {
+                style |= FontStyle.Italic;
+            }
+
+            using var font = new Font("Segoe UI", (float)(text.FontSize * scaleY), style);
+            using var brush = new SolidBrush(ParseColor(text.ColorHex));
+            var layout = new RectangleF(
+                (float)(text.X * scaleX),
+                (float)(text.Y * scaleY),
+                (float)(Math.Max(24, text.Width) * scaleX),
+                (float)(Math.Max(16, text.Height) * scaleY));
             graphics.DrawString(
                 text.Text,
                 font,
-                Brushes.Black,
-                (float)(text.X * scaleX),
-                (float)(text.Y * scaleY));
+                brush,
+                layout);
         }
 
         foreach (var signature in overlay.Signatures)
@@ -89,5 +112,26 @@ internal static class OverlayCompositor
         catch (Exception)
         {
         }
+    }
+
+    private static Color ParseColor(string colorHex)
+    {
+        if (string.IsNullOrWhiteSpace(colorHex))
+        {
+            return Color.Black;
+        }
+
+        var hex = colorHex.Trim().TrimStart('#');
+        if (hex.Length == 6 &&
+            int.TryParse(hex, System.Globalization.NumberStyles.HexNumber, null, out var value))
+        {
+            return Color.FromArgb(
+                255,
+                (value >> 16) & 0xff,
+                (value >> 8) & 0xff,
+                value & 0xff);
+        }
+
+        return Color.Black;
     }
 }

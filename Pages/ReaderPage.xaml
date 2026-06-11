@@ -11,6 +11,40 @@
     KeyDown="ReaderPage_KeyDown"
     mc:Ignorable="d">
 
+    <Page.Resources>
+        <ContentDialog
+            x:Name="SignatureDialog"
+            Title="Capture Signature"
+            PrimaryButtonText="OK"
+            SecondaryButtonText="Cancel"
+            AutomationProperties.AutomationId="SignatureDialog">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Border
+                    Grid.Row="0"
+                    Padding="8"
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    CornerRadius="4">
+                    <Canvas
+                        x:Name="SignatureCanvas"
+                        Width="400"
+                        Height="200"
+                        AutomationProperties.AutomationId="SignatureCanvas" />
+                </Border>
+                <Button
+                    x:Name="BtnClearSignature"
+                    Grid.Row="1"
+                    Margin="0,8,0,0"
+                    HorizontalAlignment="Left"
+                    AutomationProperties.AutomationId="BtnClearSignature"
+                    Content="Clear" />
+            </Grid>
+        </ContentDialog>
+    </Page.Resources>
+
     <Grid Background="{ThemeResource LayerFillColorDefaultBrush}">
         <controls:PdfPageViewer
             x:Name="PageViewer"
@@ -18,6 +52,7 @@
             Canvas.ZIndex="0"
             ContentBottomInset="112"
             IsChromeless="True"
+            IsOverlayEnabled="{x:Bind ViewModel.IsEditMode, Mode=OneWay}"
             PageSource="{x:Bind ViewModel.PageImage, Mode=OneWay}"
             Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.HasDocument), Mode=OneWay}" />
 
@@ -157,7 +192,7 @@
             BorderThickness="1"
             CornerRadius="22"
             Opacity="0.96"
-            Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.HasDocument), Mode=OneWay}">
+            Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.ShowReadToolbar), Mode=OneWay}">
             <StackPanel Orientation="Horizontal" Spacing="2">
                 <AppBarButton
                     Click="OpenFileButton_Click"
@@ -254,6 +289,199 @@
                     Label="Print"
                     LabelPosition="Collapsed"
                     ToolTipService.ToolTip="Print (Ctrl+P)" />
+                <Border
+                    Width="1"
+                    Height="28"
+                    Margin="6,0"
+                    Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                <AppBarButton
+                    Command="{x:Bind ViewModel.OpenOrganizeCommand}"
+                    Icon="Library"
+                    Label="Organize"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Organize pages" />
+                <AppBarButton
+                    Command="{x:Bind ViewModel.EnterEditModeCommand}"
+                    Icon="Edit"
+                    Label="Edit"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Edit PDF" />
+            </StackPanel>
+        </Border>
+
+        <!-- Floating edit tools -->
+        <Border
+            Margin="12"
+            Padding="8,6"
+            Canvas.ZIndex="30"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Bottom"
+            Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="22"
+            Opacity="0.96"
+            Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.ShowEditToolbar), Mode=OneWay}">
+            <StackPanel Orientation="Horizontal" Spacing="2">
+                <AppBarButton
+                    Command="{x:Bind ViewModel.ExitEditModeCommand}"
+                    Icon="Accept"
+                    Label="Done"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Done editing" />
+                <AppBarButton
+                    Click="SaveButton_Click"
+                    Icon="Save"
+                    Label="Save"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Save edits" />
+                <AppBarButton
+                    Click="SaveAsButton_Click"
+                    Icon="Copy"
+                    Label="Save as"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Save a copy" />
+                <Border
+                    Width="1"
+                    Height="28"
+                    Margin="6,0"
+                    Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                <AppBarToggleButton
+                    Command="{x:Bind ViewModel.UseSelectToolCommand}"
+                    Icon="TouchPointer"
+                    IsChecked="{x:Bind ViewModel.IsSelectToolActive, Mode=OneWay}"
+                    Label="Select"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Select and move" />
+                <AppBarToggleButton
+                    Command="{x:Bind ViewModel.UseInkToolCommand}"
+                    Icon="Edit"
+                    IsChecked="{x:Bind ViewModel.IsInkToolActive, Mode=OneWay}"
+                    Label="Ink"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Ink" />
+                <AppBarButton
+                    Icon="Setting"
+                    Label="Ink options"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Ink options">
+                    <AppBarButton.Flyout>
+                        <MenuFlyout>
+                            <MenuFlyoutItem
+                                Command="{x:Bind ViewModel.SetInkColorCommand}"
+                                CommandParameter="#000000"
+                                Text="Black" />
+                            <MenuFlyoutItem
+                                Command="{x:Bind ViewModel.SetInkColorCommand}"
+                                CommandParameter="#B3261E"
+                                Text="Red" />
+                            <MenuFlyoutItem
+                                Command="{x:Bind ViewModel.SetInkColorCommand}"
+                                CommandParameter="#1A73E8"
+                                Text="Blue" />
+                            <MenuFlyoutSeparator />
+                            <MenuFlyoutItem
+                                Command="{x:Bind ViewModel.UseThinInkCommand}"
+                                Text="Thin" />
+                            <MenuFlyoutItem
+                                Command="{x:Bind ViewModel.UseMediumInkCommand}"
+                                Text="Medium" />
+                            <MenuFlyoutItem
+                                Command="{x:Bind ViewModel.UseThickInkCommand}"
+                                Text="Thick" />
+                        </MenuFlyout>
+                    </AppBarButton.Flyout>
+                </AppBarButton>
+                <AppBarButton
+                    Click="AddTextButton_Click"
+                    Icon="Font"
+                    Label="Add text"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Add text" />
+                <AppBarButton
+                    Click="SignatureButton_Click"
+                    Icon="Contact"
+                    Label="Signature"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Signature" />
+                <AppBarToggleButton
+                    Command="{x:Bind ViewModel.UseEraserToolCommand}"
+                    Icon="Clear"
+                    IsChecked="{x:Bind ViewModel.IsEraserToolActive, Mode=OneWay}"
+                    Label="Eraser"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Erase selected object" />
+                <AppBarButton
+                    Click="UndoEditButton_Click"
+                    Icon="Undo"
+                    Label="Undo"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Undo edit" />
+                <AppBarButton
+                    Click="DeleteEditButton_Click"
+                    Icon="Delete"
+                    Label="Delete"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Delete selected edit" />
+                <Border
+                    Width="1"
+                    Height="28"
+                    Margin="6,0"
+                    Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                <AppBarButton
+                    Command="{x:Bind ViewModel.PreviousPageCommand}"
+                    Icon="Back"
+                    Label="Previous"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Previous page" />
+                <Border
+                    MinWidth="112"
+                    Padding="10,0"
+                    VerticalAlignment="Center">
+                    <TextBlock
+                        HorizontalAlignment="Center"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="{x:Bind ViewModel.PageLabel, Mode=OneWay}"
+                        TextTrimming="CharacterEllipsis" />
+                </Border>
+                <AppBarButton
+                    Command="{x:Bind ViewModel.NextPageCommand}"
+                    Icon="Forward"
+                    Label="Next"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Next page" />
+                <Border
+                    Width="1"
+                    Height="28"
+                    Margin="6,0"
+                    Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                <AppBarButton
+                    Command="{x:Bind ViewModel.ZoomFitWidthCommand}"
+                    Icon="FullScreen"
+                    Label="Fit width"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Fit width" />
+                <AppBarButton
+                    Command="{x:Bind ViewModel.ZoomOutCommand}"
+                    Icon="ZoomOut"
+                    Label="Zoom out"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Zoom out (Ctrl+-)" />
+                <Border
+                    MinWidth="58"
+                    Padding="8,0"
+                    VerticalAlignment="Center">
+                    <TextBlock
+                        HorizontalAlignment="Center"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="{x:Bind ViewModel.ZoomLabel, Mode=OneWay}" />
+                </Border>
+                <AppBarButton
+                    Command="{x:Bind ViewModel.ZoomInCommand}"
+                    Icon="ZoomIn"
+                    Label="Zoom in"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Zoom in (Ctrl++)" />
             </StackPanel>
         </Border>
 

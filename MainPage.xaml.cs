@@ -122,17 +122,5 @@ public sealed partial class MainPage : Page
                 ContentFrame.Navigate(typeof(OrganizePage));
             }
         }
-        else if (tag == "edit")
-        {
-            if (NavView.MenuItems[2] is NavigationViewItem editItem)
-            {
-                NavView.SelectedItem = editItem;
-            }
-
-            if (ContentFrame.CurrentSourcePageType != typeof(EditPage))
-            {
-                ContentFrame.Navigate(typeof(EditPage));
-            }
-        }
     }
 }

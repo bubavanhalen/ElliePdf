@@ -17,6 +17,10 @@ public sealed class PageOverlayState
 public sealed class InkStrokeOverlay
 {
     public List<PointOverlay> Points { get; set; } = [];
+
+    public string ColorHex { get; set; } = "#000000";
+
+    public double Thickness { get; set; } = 2;
 }
 
 public sealed class PointOverlay
@@ -37,6 +41,16 @@ public sealed class TextOverlay
     public string Text { get; set; } = string.Empty;
 
     public double FontSize { get; set; } = 14;
+
+    public double Width { get; set; } = 220;
+
+    public double Height { get; set; } = 44;
+
+    public string ColorHex { get; set; } = "#000000";
+
+    public bool IsBold { get; set; }
+
+    public bool IsItalic { get; set; }
 }
 
 public sealed class SignatureOverlay

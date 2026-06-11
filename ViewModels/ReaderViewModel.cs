@@ -2,9 +2,11 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ElliePdf.Helpers;
+using ElliePdf.Models;
 using ElliePdf.Services;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media.Imaging;
+using Microsoft.Windows.Storage.Pickers;
 
 namespace ElliePdf.ViewModels;
 
@@ -14,6 +16,9 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
     private readonly IPdfService _pdfService;
     private readonly IRecentFilesService _recentFilesService;
     private readonly ITabCloseService _tabCloseService;
+    private readonly IAnnotationStore _annotationStore;
+    private readonly IEditSaveService _editSaveService;
+    private readonly DocumentCollectionViewModel _documentCollectionViewModel;
     private CancellationTokenSource? _renderCts;
     private CancellationTokenSource? _searchCts;
     private double _viewportWidth = 800;
@@ -44,12 +49,18 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         IDocumentTabService tabService,
         IPdfService pdfService,
         IRecentFilesService recentFilesService,
-        ITabCloseService tabCloseService)
+        ITabCloseService tabCloseService,
+        IAnnotationStore annotationStore,
+        IEditSaveService editSaveService,
+        DocumentCollectionViewModel documentCollectionViewModel)
     {
         _tabService = tabService;
         _pdfService = pdfService;
         _recentFilesService = recentFilesService;
         _tabCloseService = tabCloseService;
+        _annotationStore = annotationStore;
+        _editSaveService = editSaveService;
+        _documentCollectionViewModel = documentCollectionViewModel;
         _tabService.StateChanged += OnSessionStateChanged;
         _tabService.TabsChanged += OnTabsChanged;
         SyncTabItems();
@@ -61,7 +72,22 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
 
     public bool ShowTabBar => TabCount > 1;
 
+    public bool IsReadMode => ToolMode == ReaderToolMode.Read;
+
+    public bool IsEditMode => ToolMode == ReaderToolMode.Edit;
+
+    public bool ShowReadToolbar => HasDocument && IsReadMode;
+
+    public bool ShowEditToolbar => HasDocument && IsEditMode;
+
     public byte[]? GetCurrentPagePngBytes() => _lastRenderedPng;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsReadMode))]
+    [NotifyPropertyChangedFor(nameof(IsEditMode))]
+    [NotifyPropertyChangedFor(nameof(ShowReadToolbar))]
+    [NotifyPropertyChangedFor(nameof(ShowEditToolbar))]
+    public partial ReaderToolMode ToolMode { get; private set; } = ReaderToolMode.Read;
 
     [ObservableProperty]
     public partial BitmapImage? PageImage { get; private set; }
@@ -87,6 +113,45 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial string SearchStatus { get; private set; } = string.Empty;
 
+    [ObservableProperty]
+    public partial bool IsInkModeEnabled { get; set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsSelectToolActive))]
+    [NotifyPropertyChangedFor(nameof(IsInkToolActive))]
+    [NotifyPropertyChangedFor(nameof(IsTextToolActive))]
+    [NotifyPropertyChangedFor(nameof(IsSignatureToolActive))]
+    [NotifyPropertyChangedFor(nameof(IsEraserToolActive))]
+    public partial ReaderEditTool ActiveEditTool { get; private set; } = ReaderEditTool.Select;
+
+    public bool IsSelectToolActive => ActiveEditTool == ReaderEditTool.Select;
+
+    public bool IsInkToolActive => ActiveEditTool == ReaderEditTool.Ink;
+
+    public bool IsTextToolActive => ActiveEditTool == ReaderEditTool.Text;
+
+    public bool IsSignatureToolActive => ActiveEditTool == ReaderEditTool.Signature;
+
+    public bool IsEraserToolActive => ActiveEditTool == ReaderEditTool.Eraser;
+
+    [ObservableProperty]
+    public partial string InkColorHex { get; private set; } = "#000000";
+
+    [ObservableProperty]
+    public partial double InkThickness { get; private set; } = 2;
+
+    [ObservableProperty]
+    public partial int PagePixelWidth { get; private set; }
+
+    [ObservableProperty]
+    public partial int PagePixelHeight { get; private set; }
+
+    [ObservableProperty]
+    public partial float PageWidthPoints { get; private set; }
+
+    [ObservableProperty]
+    public partial float PageHeightPoints { get; private set; }
+
     public bool HasDocument => _tabService.ActiveDocument is not null;
 
     public string DocumentTitle =>
@@ -109,6 +174,22 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
     public string ZoomLabel => $"{Math.Round(EffectiveZoomScale * 100)}%";
 
     public double EffectiveZoomScale => ResolveRenderScale();
+
+    public double DisplayScale => PageWidthPoints > 0 ? PagePixelWidth / PageWidthPoints : 1.0;
+
+    public PageOverlayState CurrentOverlay
+    {
+        get
+        {
+            var tab = _tabService.ActiveTab;
+            if (tab is null)
+            {
+                return new PageOverlayState();
+            }
+
+            return _annotationStore.GetPageOverlay(tab.Id, _tabService.CurrentPageIndex);
+        }
+    }
 
     public double ViewportWidth
     {
@@ -432,8 +513,166 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         SearchStatus = $"Match {_activeSearchMatchIndex + 1} of {_searchMatches.Count}";
     }
 
+    public void PersistCurrentOverlay(PageOverlayState overlay)
+    {
+        var tab = _tabService.ActiveTab;
+        if (tab is null)
+        {
+            return;
+        }
+
+        _annotationStore.SetPageOverlay(tab.Id, _tabService.CurrentPageIndex, overlay);
+        tab.IsDirty = true;
+    }
+
     [RelayCommand]
-    private void OpenOrganize() => Navigation.AppNavigation.RequestWorkspace("organize");
+    private async Task EnterEditModeAsync()
+    {
+        var tab = _tabService.ActiveTab;
+        if (tab is null)
+        {
+            SetStatus("Open a document before editing.", InfoBarSeverity.Informational);
+            return;
+        }
+
+        await _annotationStore.LoadCompanionAsync(tab.Id, tab.FilePath);
+        ClosePanels();
+        ActiveEditTool = ReaderEditTool.Select;
+        IsInkModeEnabled = false;
+        ToolMode = ReaderToolMode.Edit;
+        OnPropertyChanged(nameof(CurrentOverlay));
+    }
+
+    [RelayCommand]
+    private void ExitEditMode()
+    {
+        IsInkModeEnabled = false;
+        ActiveEditTool = ReaderEditTool.Select;
+        ToolMode = ReaderToolMode.Read;
+    }
+
+    [RelayCommand]
+    private void UseSelectTool()
+    {
+        IsInkModeEnabled = false;
+        ActiveEditTool = ReaderEditTool.Select;
+    }
+
+    [RelayCommand]
+    private void UseInkTool()
+    {
+        IsInkModeEnabled = true;
+        ActiveEditTool = ReaderEditTool.Ink;
+    }
+
+    [RelayCommand]
+    private void UseTextTool()
+    {
+        IsInkModeEnabled = false;
+        ActiveEditTool = ReaderEditTool.Text;
+    }
+
+    [RelayCommand]
+    private void UseSignatureTool()
+    {
+        IsInkModeEnabled = false;
+        ActiveEditTool = ReaderEditTool.Signature;
+    }
+
+    [RelayCommand]
+    private void UseEraserTool()
+    {
+        IsInkModeEnabled = false;
+        ActiveEditTool = ReaderEditTool.Eraser;
+    }
+
+    [RelayCommand]
+    private void SetInkColor(string? colorHex)
+    {
+        if (!string.IsNullOrWhiteSpace(colorHex))
+        {
+            InkColorHex = colorHex;
+        }
+    }
+
+    [RelayCommand]
+    private void SetInkThickness(double thickness) =>
+        InkThickness = Math.Clamp(thickness, 1, 12);
+
+    [RelayCommand]
+    private void UseThinInk() => InkThickness = 2;
+
+    [RelayCommand]
+    private void UseMediumInk() => InkThickness = 5;
+
+    [RelayCommand]
+    private void UseThickInk() => InkThickness = 9;
+
+    [RelayCommand]
+    private async Task SaveAsync()
+    {
+        var tab = _tabService.ActiveTab;
+        if (tab is null)
+        {
+            SetStatus("Open a document before saving.", InfoBarSeverity.Informational);
+            return;
+        }
+
+        var confirmed = await ConfirmOverwriteAsync(tab.FilePath);
+        if (!confirmed)
+        {
+            return;
+        }
+
+        await SaveToPathAsync(tab, tab.FilePath);
+    }
+
+    [RelayCommand]
+    private async Task SaveAsAsync()
+    {
+        var tab = _tabService.ActiveTab;
+        if (tab is null)
+        {
+            SetStatus("Open a document before saving.", InfoBarSeverity.Informational);
+            return;
+        }
+
+        var picker = new FileSavePicker(GetWindowId())
+        {
+            SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
+            SuggestedFileName = Path.GetFileNameWithoutExtension(tab.FilePath) + "-edited"
+        };
+        picker.FileTypeChoices.Add("PDF Document", [".pdf"]);
+
+        var file = await picker.PickSaveFileAsync();
+        if (file is null)
+        {
+            return;
+        }
+
+        await SaveToPathAsync(tab, file.Path);
+        await _tabService.OpenOrActivateTabAsync(file.Path);
+        SelectedTabId = _tabService.ActiveTabId;
+        SyncTabItems();
+        NotifyDocumentChanged();
+        await RenderCurrentPageAsync();
+        SetStatus($"Saved a copy to '{Path.GetFileName(file.Path)}'.", InfoBarSeverity.Success);
+    }
+
+    [RelayCommand]
+    private async Task OpenOrganizeAsync()
+    {
+        var tab = _tabService.ActiveTab;
+        if (tab is null)
+        {
+            SetStatus("Open a document before organizing pages.", InfoBarSeverity.Informational);
+            return;
+        }
+
+        await _documentCollectionViewModel.ImportDocumentsAsync([tab.FilePath], append: false);
+        ToolMode = ReaderToolMode.Read;
+        Navigation.AppNavigation.RequestWorkspace("organize");
+    }
 
     [RelayCommand]
     private async Task OpenRecentAsync(RecentFileItemViewModel? item)
@@ -472,6 +711,9 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(PageLabel));
         OnPropertyChanged(nameof(ShowEmptyState));
         OnPropertyChanged(nameof(ShowRecentFiles));
+        OnPropertyChanged(nameof(ShowReadToolbar));
+        OnPropertyChanged(nameof(ShowEditToolbar));
+        OnPropertyChanged(nameof(CurrentOverlay));
     }
 
     public async Task RefreshRecentFilesAsync(CancellationToken cancellationToken = default)
@@ -530,6 +772,12 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         if (document is null || document.PageCount == 0)
         {
             PageImage = null;
+            PagePixelWidth = 0;
+            PagePixelHeight = 0;
+            PageWidthPoints = 0;
+            PageHeightPoints = 0;
+            OnPropertyChanged(nameof(DisplayScale));
+            ToolMode = ReaderToolMode.Read;
             return;
         }
 
@@ -547,6 +795,11 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
             var rendered = await _pdfService.RenderPageAsync(document, pageIndex, scale, token);
             _lastRenderedPng = rendered.PngBytes;
             PageImage = await BitmapHelper.CreateBitmapAsync(rendered.PngBytes);
+            PagePixelWidth = rendered.Width;
+            PagePixelHeight = rendered.Height;
+            PageWidthPoints = rendered.PageWidthPoints;
+            PageHeightPoints = rendered.PageHeightPoints;
+            OnPropertyChanged(nameof(DisplayScale));
             UpdateSelectedThumbnail(pageIndex);
             NotifyDocumentChanged();
             NotifyZoomChanged();
@@ -567,6 +820,59 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
             IsBusy = false;
         }
     }
+
+    private async Task SaveToPathAsync(DocumentTab tab, string outputPath)
+    {
+        IsBusy = true;
+
+        try
+        {
+            await _editSaveService.SaveTabAsync(tab, outputPath, CancellationToken.None);
+            SetStatus($"Saved '{Path.GetFileName(outputPath)}' with annotations embedded.", InfoBarSeverity.Success);
+        }
+        catch (PdfiumDependencyException ex)
+        {
+            SetStatus(ex.Message, InfoBarSeverity.Error);
+        }
+        catch (InvalidOperationException ex)
+        {
+            SetStatus(ex.Message, InfoBarSeverity.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private static async Task<bool> ConfirmOverwriteAsync(string path)
+    {
+        var xamlRoot = GetXamlRoot();
+        if (xamlRoot is null)
+        {
+            return false;
+        }
+
+        var dialog = new ContentDialog
+        {
+            Title = "Save changes?",
+            Content = $"Overwrite '{Path.GetFileName(path)}' with your edits?",
+            PrimaryButtonText = "Save",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = xamlRoot
+        };
+
+        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+    }
+
+    private static Microsoft.UI.WindowId GetWindowId()
+    {
+        var hwnd = App.WindowHandle;
+        return Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd);
+    }
+
+    private static Microsoft.UI.Xaml.XamlRoot? GetXamlRoot() =>
+        App.Window.Content is Microsoft.UI.Xaml.FrameworkElement root ? root.XamlRoot : null;
 
     private void OnTabsChanged(object? sender, EventArgs e) => SyncTabItems();
 

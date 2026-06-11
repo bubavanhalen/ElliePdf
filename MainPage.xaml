@@ -18,7 +18,6 @@
         <NavigationView.MenuItems>
             <NavigationViewItem AutomationProperties.AutomationId="NavItemRead" Content="Read" Icon="Document" Tag="read" />
             <NavigationViewItem AutomationProperties.AutomationId="NavItemOrganize" Content="Organize" Icon="Library" Tag="organize" />
-            <NavigationViewItem AutomationProperties.AutomationId="NavItemEdit" Content="Edit" Icon="Edit" Tag="edit" />
         </NavigationView.MenuItems>
         <Frame x:Name="ContentFrame" AutomationProperties.AutomationId="ContentFrame" />
     </NavigationView>

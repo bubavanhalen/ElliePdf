@@ -179,6 +179,7 @@ public sealed class DocumentTabService : IDocumentTabService, IAsyncDisposable
         }
 
         var tab = new DocumentTab(session);
+        await _annotationStore.LoadCompanionAsync(tab.Id, tab.FilePath, cancellationToken);
         _tabs.Add(tab);
         _activeTabId = tab.Id;
         TabsChanged?.Invoke(this, EventArgs.Empty);

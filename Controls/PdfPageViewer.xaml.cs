@@ -28,6 +28,13 @@ public sealed partial class PdfPageViewer : UserControl
             typeof(PdfPageViewer),
             new PropertyMetadata(0.0, OnContentBottomInsetChanged));
 
+    public static readonly DependencyProperty IsOverlayEnabledProperty =
+        DependencyProperty.Register(
+            nameof(IsOverlayEnabled),
+            typeof(bool),
+            typeof(PdfPageViewer),
+            new PropertyMetadata(false, OnOverlayEnabledChanged));
+
     public PdfPageViewer()
     {
         InitializeComponent();
@@ -54,6 +61,14 @@ public sealed partial class PdfPageViewer : UserControl
         get => (double)GetValue(ContentBottomInsetProperty);
         set => SetValue(ContentBottomInsetProperty, value);
     }
+
+    public bool IsOverlayEnabled
+    {
+        get => (bool)GetValue(IsOverlayEnabledProperty);
+        set => SetValue(IsOverlayEnabledProperty, value);
+    }
+
+    public PdfEditSurface EditSurface => PageEditSurface;
 
     public event EventHandler<double>? ViewportWidthChanged;
 
@@ -88,6 +103,14 @@ public sealed partial class PdfPageViewer : UserControl
         }
     }
 
+    private static void OnOverlayEnabledChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is PdfPageViewer viewer)
+        {
+            viewer.ApplyOverlayEnabled();
+        }
+    }
+
     private void ApplyChromeless()
     {
         if (IsChromeless)
@@ -109,6 +132,12 @@ public sealed partial class PdfPageViewer : UserControl
 
     private void ApplyContentInset() =>
         PageChrome.Margin = new Thickness(0, 0, 0, Math.Max(0, ContentBottomInset));
+
+    private void ApplyOverlayEnabled()
+    {
+        PageEditSurface.IsHitTestVisible = IsOverlayEnabled;
+        PageEditSurface.Visibility = IsOverlayEnabled ? Visibility.Visible : Visibility.Collapsed;
+    }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {

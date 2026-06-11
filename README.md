@@ -4,7 +4,7 @@ A Windows native PDF reader and organizer built with **WinUI 3** and **PDFium**.
 
 ## Features
 
-- **Read** — Multi-tab PDF viewing with zoom, page navigation, and text search
+- **Read** — Multi-tab PDF viewing with zoom, page navigation, text search, and in-place editing
 - **Organize** — Reorder, rotate, and delete pages; export merged PDFs in grid order
 - **Edit** — Ink, text, and signatures on the active page; **Save** (with overwrite confirmation) and **Save As**
 - **Password-protected PDFs** — Prompts for a password when opening encrypted files
@@ -33,7 +33,7 @@ App icons use a playful folded-page monogram mark in `#dcae96` (named for Ellie)
 ```
 ElliePdf/
 ├── ElliePdf.Core/   Shared non-UI logic (zoom calculations)
-├── Pages/           ReaderPage; OrganizePage and EditPage (project root)
+├── Pages/           ReaderPage and OrganizePage
 ├── ViewModels/      MVVM view models
 ├── Services/        PDFium wrapper and document session
 ├── Controls/        Reusable UI controls (PdfPageViewer)
@@ -45,7 +45,7 @@ ElliePdf/
 
 - `IPdfService` / `PdfService` — PDFium P/Invoke for open, render, search, merge, save
 - `IDocumentSessionService` — Shared active document for Reader and Organize
-- `ReaderViewModel` — Page rendering, zoom, and search
+- `ReaderViewModel` — Page rendering, zoom, search, and edit mode
 - `DocumentCollectionViewModel` — Multi-document organize workspace
 
 ## Icons
