@@ -1,23 +1,20 @@
-using Microsoft.UI.Xaml;
+using ElliePdf.Services;
+using ElliePdf.ViewModels;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Windowing;
-using WinRT.Interop;
+using Microsoft.UI.Xaml;
 using System.Runtime.InteropServices;
+using WinRT.Interop;
 using Windows.Graphics;
-
-// To learn more about WinUI, the WinUI project structure,
-// and more about our project templates, see: http://aka.ms/winui-project-info.
 
 namespace ElliePdf;
 
-/// <summary>
-/// The application window. This hosts a Frame that displays pages. Add your
-/// UI and logic to MainPage.xaml / MainPage.xaml.cs instead of here so you
-/// can use Page features such as navigation events and the Loaded lifecycle.
-/// </summary>
 public sealed partial class MainWindow : Window
 {
     [DllImport("user32.dll")]
     private static extern uint GetDpiForWindow(System.IntPtr hWnd);
+
+    private bool _forceClose;
 
     public MainWindow()
     {
@@ -28,16 +25,48 @@ public sealed partial class MainWindow : Window
 
         AppWindow.SetIcon("Assets/AppIcon.ico");
 
-        // Size the window according to the design rubric using the monitor DPI scale.
         var hwnd = WindowNative.GetWindowHandle(this);
         var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd);
         var appWindow = AppWindow.GetFromWindowId(windowId);
         uint dpi = GetDpiForWindow(hwnd);
         var scale = dpi / 96.0;
         appWindow.Resize(new SizeInt32((int)(1100 * scale), (int)(760 * scale)));
+        appWindow.Closing += AppWindow_Closing;
 
-        // Navigate the root frame to the main page on startup.
         RootFrame.Navigate(typeof(MainPage));
+        Closed += OnClosed;
+    }
+
+    private async void AppWindow_Closing(AppWindow sender, AppWindowClosingEventArgs args)
+    {
+        if (_forceClose)
+        {
+            return;
+        }
+
+        args.Cancel = true;
+
+        var tabCloseService = App.Services.GetRequiredService<ITabCloseService>();
+        var canClose = await tabCloseService.TryCloseAllDirtyTabsAsync();
+        if (!canClose)
+        {
+            return;
+        }
+
+        _forceClose = true;
+        Close();
+    }
+
+    private void OnClosed(object sender, WindowEventArgs args)
+    {
+        if (App.Services is IAsyncDisposable asyncDisposable)
+        {
+            asyncDisposable.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+        else if (App.Services is IDisposable disposable)
+        {
+            disposable.Dispose();
+        }
     }
 
     public async Task OpenFilesAsync(IReadOnlyList<string> filePaths)

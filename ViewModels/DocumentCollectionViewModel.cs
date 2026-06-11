@@ -1,16 +1,16 @@
 using System.Collections.ObjectModel;
-using System.Runtime.InteropServices.WindowsRuntime;
 using CommunityToolkit.Mvvm.ComponentModel;
+using ElliePdf.Helpers;
 using ElliePdf.Services;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media.Imaging;
-using Windows.Storage.Streams;
 
 namespace ElliePdf.ViewModels;
 
 public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDisposable
 {
     private readonly IPdfService _pdfService;
+    private readonly IDocumentOpenService _documentOpenService;
+    private readonly IDocumentTabService _tabService;
     private readonly List<PdfDocumentSession> _sourceDocuments = [];
     private ObservableCollection<DocumentItemViewModel> _pages = [];
     private bool _isBusy;
@@ -18,9 +18,14 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
     private string _statusMessage = string.Empty;
     private InfoBarSeverity _statusSeverity = InfoBarSeverity.Informational;
 
-    public DocumentCollectionViewModel(IPdfService pdfService)
+    public DocumentCollectionViewModel(
+        IPdfService pdfService,
+        IDocumentOpenService documentOpenService,
+        IDocumentTabService tabService)
     {
         _pdfService = pdfService;
+        _documentOpenService = documentOpenService;
+        _tabService = tabService;
     }
 
     public ObservableCollection<DocumentItemViewModel> Pages
@@ -55,14 +60,23 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
 
     public int SourceDocumentCount => _sourceDocuments.Count;
 
-    public async Task ImportDocumentsAsync(IReadOnlyList<string> filePaths, CancellationToken cancellationToken = default)
+    public event EventHandler<string>? MergeCompleted;
+
+    public async Task ImportDocumentsAsync(
+        IReadOnlyList<string> filePaths,
+        bool append = false,
+        CancellationToken cancellationToken = default)
     {
         if (filePaths.Count == 0)
         {
             return;
         }
 
-        await ClearDocumentsAsync(cancellationToken);
+        if (!append)
+        {
+            await ClearDocumentsAsync(cancellationToken);
+        }
+
         IsBusy = true;
         DismissStatus();
 
@@ -70,23 +84,13 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
         {
             foreach (var filePath in filePaths)
             {
-                var document = await _pdfService.OpenDocumentAsync(filePath, cancellationToken);
-                _sourceDocuments.Add(document);
-
-                for (var pageIndex = 0; pageIndex < document.PageCount; pageIndex++)
-                {
-                    var thumbnailBytes = await _pdfService.RenderPageThumbnailAsync(document, pageIndex, 240, 320, cancellationToken);
-                    var item = new DocumentItemViewModel(document, filePath, pageIndex)
-                    {
-                        Thumbnail = await CreateBitmapAsync(thumbnailBytes)
-                    };
-
-                    Pages.Add(item);
-                }
+                await AddDocumentAsync(filePath, cancellationToken);
             }
 
             SetStatus(
-                $"Loaded {Pages.Count} page(s) from {SourceDocumentCount} document(s).",
+                append
+                    ? $"Added {filePaths.Count} document(s). Total pages: {Pages.Count}."
+                    : $"Loaded {Pages.Count} page(s) from {SourceDocumentCount} document(s).",
                 InfoBarSeverity.Success);
         }
         catch (PdfiumDependencyException ex)
@@ -97,10 +101,23 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
         {
             SetStatus(ex.Message, InfoBarSeverity.Error);
         }
+        catch (OperationCanceledException)
+        {
+            SetStatus("Import cancelled.", InfoBarSeverity.Informational);
+        }
         finally
         {
             IsBusy = false;
         }
+    }
+
+    public async Task OpenInReaderAsync(DocumentItemViewModel item, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        await _tabService.LoadDocumentSessionAsync(item.Document, cancellationToken);
+        _tabService.CurrentPageIndex = item.PageIndex;
+        Navigation.AppNavigation.RequestWorkspace("read");
+        Navigation.AppNavigation.RequestReaderAtPage(item.PageIndex);
     }
 
     public async Task RotatePageAsync(DocumentItemViewModel? item, CancellationToken cancellationToken = default)
@@ -116,7 +133,7 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
         {
             await _pdfService.RotatePageAsync(item.Document, item.PageIndex, 1, cancellationToken);
             var thumbnailBytes = await _pdfService.RenderPageThumbnailAsync(item.Document, item.PageIndex, 240, 320, cancellationToken);
-            item.Thumbnail = await CreateBitmapAsync(thumbnailBytes);
+            item.Thumbnail = await BitmapHelper.CreateBitmapAsync(thumbnailBytes);
             SetStatus($"Rotated {item.DisplayName}.", InfoBarSeverity.Success);
         }
         catch (PdfiumDependencyException ex)
@@ -182,11 +199,11 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
         }
     }
 
-    public async Task MergeDocumentsAsync(string outputPath, CancellationToken cancellationToken = default)
+    public async Task SaveDocumentsAsync(CancellationToken cancellationToken = default)
     {
-        if (_sourceDocuments.Count < 2)
+        if (_sourceDocuments.Count == 0)
         {
-            SetStatus("Import at least two PDFs before merging.", InfoBarSeverity.Informational);
+            SetStatus("Import a PDF before saving.", InfoBarSeverity.Informational);
             return;
         }
 
@@ -194,8 +211,13 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
 
         try
         {
-            await _pdfService.MergeDocumentsAsync(_sourceDocuments, outputPath, cancellationToken);
-            SetStatus($"Merged {_sourceDocuments.Count} documents into '{Path.GetFileName(outputPath)}'.", InfoBarSeverity.Success);
+            foreach (var document in _sourceDocuments.ToArray())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await _pdfService.SaveDocumentAsync(document, document.SourcePath, cancellationToken);
+            }
+
+            SetStatus($"Saved {_sourceDocuments.Count} document(s).", InfoBarSeverity.Success);
         }
         catch (PdfiumDependencyException ex)
         {
@@ -211,16 +233,82 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
         }
     }
 
+    public async Task<string?> MergeDocumentsAsync(string outputPath, CancellationToken cancellationToken = default)
+    {
+        if (Pages.Count < 1)
+        {
+            SetStatus("Import at least one page before merging.", InfoBarSeverity.Informational);
+            return null;
+        }
+
+        IsBusy = true;
+
+        try
+        {
+            var orderedPages = Pages
+                .Select(page => (page.Document, page.PageIndex))
+                .ToList();
+
+            if (orderedPages.Count == 1 && _sourceDocuments.Count == 1)
+            {
+                await _pdfService.SaveDocumentAsync(_sourceDocuments[0], outputPath, cancellationToken);
+            }
+            else
+            {
+                await _pdfService.MergeOrderedPagesAsync(orderedPages, outputPath, cancellationToken);
+            }
+
+            SetStatus($"Exported {orderedPages.Count} page(s) to '{Path.GetFileName(outputPath)}'.", InfoBarSeverity.Success);
+            MergeCompleted?.Invoke(this, outputPath);
+            return outputPath;
+        }
+        catch (PdfiumDependencyException ex)
+        {
+            SetStatus(ex.Message, InfoBarSeverity.Error);
+            return null;
+        }
+        catch (InvalidOperationException ex)
+        {
+            SetStatus(ex.Message, InfoBarSeverity.Error);
+            return null;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
     public void DismissStatus() => IsStatusOpen = false;
 
     public async ValueTask DisposeAsync() => await ClearDocumentsAsync();
 
+    private async Task AddDocumentAsync(string filePath, CancellationToken cancellationToken)
+    {
+        var document = await _documentOpenService.OpenAsync(filePath, cancellationToken);
+        _sourceDocuments.Add(document);
+
+        for (var pageIndex = 0; pageIndex < document.PageCount; pageIndex++)
+        {
+            var thumbnailBytes = await _pdfService.RenderPageThumbnailAsync(document, pageIndex, 240, 320, cancellationToken);
+            var item = new DocumentItemViewModel(document, filePath, pageIndex)
+            {
+                Thumbnail = await BitmapHelper.CreateBitmapAsync(thumbnailBytes)
+            };
+
+            Pages.Add(item);
+        }
+    }
+
     private async Task ClearDocumentsAsync(CancellationToken cancellationToken = default)
     {
+        var tabSessions = _tabService.Tabs.Select(tab => tab.Session).ToHashSet();
         foreach (var sourceDocument in _sourceDocuments.ToArray())
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await sourceDocument.DisposeAsync();
+            if (!tabSessions.Contains(sourceDocument))
+            {
+                await sourceDocument.DisposeAsync();
+            }
         }
 
         _sourceDocuments.Clear();
@@ -233,15 +321,5 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
         StatusMessage = message;
         StatusSeverity = severity;
         IsStatusOpen = true;
-    }
-
-    private static async Task<BitmapImage> CreateBitmapAsync(byte[] imageBytes)
-    {
-        var bitmap = new BitmapImage();
-        using var stream = new InMemoryRandomAccessStream();
-        await stream.WriteAsync(imageBytes.AsBuffer());
-        stream.Seek(0);
-        await bitmap.SetSourceAsync(stream);
-        return bitmap;
     }
 }

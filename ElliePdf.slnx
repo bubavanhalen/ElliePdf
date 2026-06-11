@@ -6,5 +6,8 @@
   <Project Path="ElliePdf.csproj">
     <Platform Solution="*|x64" Project="x64" />
     <Platform Solution="*|ARM64" Project="ARM64" />
+    <Deploy Solution="*|x64" />
   </Project>
+  <Project Path="ElliePdf.Core\ElliePdf.Core.csproj" />
+  <Project Path="ElliePdf.Tests\ElliePdf.Tests.csproj" />
 </Solution>

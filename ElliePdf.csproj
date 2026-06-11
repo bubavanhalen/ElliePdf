@@ -17,6 +17,24 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="ElliePdf.Tests\**" />
+    <Compile Remove="ElliePdf.Core\**" />
+    <Compile Remove="tools\**" />
+    <Content Remove="ElliePdf.Tests\**" />
+    <Content Remove="ElliePdf.Core\**" />
+    <EmbeddedResource Remove="ElliePdf.Tests\**" />
+    <EmbeddedResource Remove="ElliePdf.Core\**" />
+    <None Remove="ElliePdf.Tests\**" />
+    <None Remove="ElliePdf.Core\**" />
+    <Page Remove="ElliePdf.Tests\**" />
+    <Page Remove="ElliePdf.Core\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="ElliePdf.Core\ElliePdf.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Content Include="Assets\SplashScreen.scale-200.png" />
     <Content Include="Assets\LockScreenLogo.scale-200.png" />
     <Content Include="Assets\Square150x150Logo.scale-200.png" />
@@ -32,66 +50,44 @@
     <Manifest Include="$(ApplicationManifest)" />
   </ItemGroup>
 
-  <!--
-    Defining the "Msix" ProjectCapability here allows the Single-project MSIX Packaging
-    Tools extension to be activated for this project even if the Windows App SDK Nuget
-    package has not yet been restored.
-  -->
   <ItemGroup Condition="'$(DisableMsixProjectCapabilityAddedByProject)'!='true' and '$(EnableMsixTooling)'=='true'">
     <ProjectCapability Include="Msix" />
   </ItemGroup>
 
-  <!--
-    Microsoft.Windows.SDK.BuildTools.WinApp adds first-class support for
-    `dotnet run` on packaged WinUI apps: it hooks the .NET CLI Run target to
-    register a debug identity via the winapp CLI and launch the app with
-    package identity (AUMID).
-    Set <EnableWinAppRunSupport>false</EnableWinAppRunSupport> in a
-    <PropertyGroup> above to opt out.
-  -->
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="11.0.0-preview.5.26302.115" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="11.0.0-preview.5.26302.115" />
-    <PackageReference Include="Microsoft.Extensions.Logging" Version="11.0.0-preview.5.26302.115" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.8" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.1839" />
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.2.2-experimental9" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.1.3" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools.WinApp" Version="0.3.2" />
     <PackageReference Include="PDFium.WindowsV2" Version="1.1.4" GeneratePathProperty="true" />
+    <PackageReference Include="System.Drawing.Common" Version="9.0.8" />
   </ItemGroup>
 
-  <!--
-    Defining the "HasPackageAndPublishMenuAddedByProject" property here allows the Solution
-    Explorer "Package and Publish" context menu entry to be enabled for this project even if
-    the Windows App SDK Nuget package has not yet been restored.
-  -->
   <PropertyGroup Condition="'$(DisableHasPackageAndPublishMenuAddedByProject)'!='true' and '$(EnableMsixTooling)'=='true'">
     <HasPackageAndPublishMenu>true</HasPackageAndPublishMenu>
   </PropertyGroup>
 
-  <!-- Publish Properties -->
   <PropertyGroup>
-    <!-- Default: Debug disables publish optimizations -->
     <PublishReadyToRun Condition="'$(Configuration)' == 'Debug'">False</PublishReadyToRun>
     <PublishReadyToRun Condition="'$(Configuration)' == 'Release'">True</PublishReadyToRun>
     <PublishTrimmed Condition="'$(Configuration)' == 'Debug'">False</PublishTrimmed>
     <PublishTrimmed Condition="'$(Configuration)' == 'Release'">True</PublishTrimmed>
   </PropertyGroup>
   <PropertyGroup>
-    <!-- Native AOT / publish settings: enabled for Release -->
-    <PublishAot Condition="'$(Configuration)' == 'Release'">true</PublishAot>
+    <PublishAot>false</PublishAot>
     <SelfContained Condition="'$(Configuration)' == 'Release'">true</SelfContained>
-    <!-- Default target RID; can be overridden by CI or local publish parameters -->
-    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)'==''">win-x64</RuntimeIdentifier>
-    <!-- Keep trimming on for Release; ensure Native AOT explicitly enabled -->
   </PropertyGroup>
   
   <Target Name="SyncPdfiumBinary" BeforeTargets="PrepareForBuild">
-    <Copy SourceFiles="$(PkgPDFium_WindowsV2)\build\pdfium_x64.dll" DestinationFiles="runtimes\win-x64\native\pdfium.dll" SkipUnchangedFiles="true" Condition="Exists('$(PkgPDFium_WindowsV2)\build\pdfium_x64.dll')" />
+    <Copy
+      SourceFiles="$(PkgPDFium_WindowsV2)\build\pdfium_x64.dll"
+      DestinationFiles="runtimes\win-x64\native\pdfium.dll"
+      SkipUnchangedFiles="true"
+      Condition="Exists('$(PkgPDFium_WindowsV2)\build\pdfium_x64.dll')" />
   </Target>
 
   <ItemGroup>
-    <!-- Keep the package-sourced PDFium binary in a stable publish path that matches the P/Invoke name. -->
     <Content Include="runtimes\win-x64\native\pdfium.dll">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
       <IncludeInPublish>true</IncludeInPublish>

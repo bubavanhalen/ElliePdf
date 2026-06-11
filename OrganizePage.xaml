@@ -46,11 +46,23 @@
                     Icon="OpenFile"
                     Label="Import" />
                 <AppBarButton
+                    x:Name="AddButton"
+                    AutomationProperties.AutomationId="BtnAdd"
+                    Click="AddButton_Click"
+                    Icon="Add"
+                    Label="Add files" />
+                <AppBarButton
+                    x:Name="SaveButton"
+                    AutomationProperties.AutomationId="BtnSave"
+                    Click="SaveButton_Click"
+                    Icon="Save"
+                    Label="Save" />
+                <AppBarButton
                     x:Name="MergeButton"
                     AutomationProperties.AutomationId="BtnMerge"
                     Click="MergeButton_Click"
                     Icon="Copy"
-                    Label="Merge" />
+                    Label="Export" />
             </CommandBar>
 
             <GridView
@@ -60,7 +72,8 @@
                 AllowDrop="True"
                 CanDragItems="True"
                 CanReorderItems="True"
-                IsItemClickEnabled="False"
+                IsItemClickEnabled="True"
+                ItemClick="ThumbnailGrid_ItemClick"
                 ItemsSource="{x:Bind ViewModel.Pages, Mode=OneWay}"
                 SelectionMode="None">
                 <GridView.ItemTemplate>

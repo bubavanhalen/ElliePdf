@@ -1,27 +1,28 @@
-using Microsoft.UI.Xaml.Controls;
-using ElliePdf.ViewModels;
+using ElliePdf.Navigation;
 using ElliePdf.Pages;
+using ElliePdf.Services;
+using ElliePdf.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
-
-// To learn more about WinUI, the WinUI project structure,
-// and more about our project templates, see: http://aka.ms/winui-project-info.
+using Microsoft.UI.Xaml.Controls;
 
 namespace ElliePdf;
 
-/// <summary>
-/// The main content page displayed inside the application window./// </summary>
 public sealed partial class MainPage : Page
 {
-    public MainPageViewModel ViewModel { get; }
+    private ReaderPage? _readerPage;
 
     public MainPage()
     {
         InitializeComponent();
-        // Resolve ViewModel from the application host's service provider so DI can be used.
-        ViewModel = App.AppHost.Services.GetRequiredService<MainPageViewModel>();
-        DataContext = ViewModel;
-        // Navigate to the default workspace on load.
-        ContentFrame.Navigate(typeof(OrganizePage));
+        AppNavigation.WorkspaceRequested += OnWorkspaceRequested;
+        AppNavigation.ReaderPageRequested += OnReaderPageRequested;
+        Unloaded += OnUnloaded;
+
+        ContentFrame.Navigate(typeof(ReaderPage));
+        if (NavView.MenuItems[0] is NavigationViewItem readItem)
+        {
+            NavView.SelectedItem = readItem;
+        }
     }
 
     public async Task OpenFilesAsync(IReadOnlyList<string> filePaths)
@@ -31,25 +32,87 @@ public sealed partial class MainPage : Page
             return;
         }
 
-        SelectWorkspace("organize");
-        await App.AppHost.Services
-            .GetRequiredService<DocumentCollectionViewModel>()
-            .ImportDocumentsAsync(filePaths);
+        SelectWorkspace("read");
+
+        var readerPage = EnsureReaderPage();
+        await readerPage.LoadFilesAsync(filePaths);
+
+        if (filePaths.Count > 1)
+        {
+            await App.Services
+                .GetRequiredService<DocumentCollectionViewModel>()
+                .ImportDocumentsAsync(filePaths);
+            SelectWorkspace("organize");
+        }
+    }
+
+    private void OnUnloaded(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
+    {
+        AppNavigation.WorkspaceRequested -= OnWorkspaceRequested;
+        AppNavigation.ReaderPageRequested -= OnReaderPageRequested;
+    }
+
+    private void OnWorkspaceRequested(string tag) => SelectWorkspace(tag);
+
+    private void OnReaderPageRequested(int pageIndex)
+    {
+        if (EnsureReaderPage() is { } readerPage)
+        {
+            readerPage.GoToPage(pageIndex);
+        }
+    }
+
+    private ReaderPage EnsureReaderPage()
+    {
+        if (_readerPage is not null)
+        {
+            return _readerPage;
+        }
+
+        if (ContentFrame.Content is ReaderPage currentReader)
+        {
+            _readerPage = currentReader;
+            return _readerPage;
+        }
+
+        ContentFrame.Navigate(typeof(ReaderPage));
+        _readerPage = (ReaderPage)ContentFrame.Content;
+        return _readerPage;
     }
 
     private void NavView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
         if (args.SelectedItemContainer is NavigationViewItem item && item.Tag is string tag)
         {
+            if (tag == "read")
+            {
+                sender.IsPaneOpen = false;
+            }
+
             SelectWorkspace(tag);
         }
     }
 
     private void SelectWorkspace(string tag)
     {
-        if (tag == "organize")
+        if (tag == "read")
         {
-            if (NavView.MenuItems[0] is NavigationViewItem organizeItem)
+            NavView.IsPaneOpen = false;
+
+            if (NavView.MenuItems[0] is NavigationViewItem readItem)
+            {
+                NavView.SelectedItem = readItem;
+            }
+
+            if (ContentFrame.CurrentSourcePageType != typeof(ReaderPage))
+            {
+                ContentFrame.Navigate(typeof(ReaderPage));
+                _readerPage = (ReaderPage)ContentFrame.Content;
+            }
+        }
+        else if (tag == "organize")
+        {
+            if (NavView.MenuItems[1] is NavigationViewItem organizeItem)
             {
                 NavView.SelectedItem = organizeItem;
             }
@@ -61,7 +124,7 @@ public sealed partial class MainPage : Page
         }
         else if (tag == "edit")
         {
-            if (NavView.MenuItems[1] is NavigationViewItem editItem)
+            if (NavView.MenuItems[2] is NavigationViewItem editItem)
             {
                 NavView.SelectedItem = editItem;
             }

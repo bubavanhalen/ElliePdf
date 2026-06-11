@@ -1,1 +1,67 @@
 # ElliePdf
+
+A Windows native PDF reader and organizer built with **WinUI 3** and **PDFium**.
+
+## Features
+
+- **Read** — Multi-tab PDF viewing with zoom, page navigation, and text search
+- **Organize** — Reorder, rotate, and delete pages; export merged PDFs in grid order
+- **Edit** — Ink, text, and signatures on the active page; **Save** (with overwrite confirmation) and **Save As**
+- **Password-protected PDFs** — Prompts for a password when opening encrypted files
+- **File association** — Double-click a `.pdf` to open in ElliePdf
+
+## Requirements
+
+- Windows 10 1809 or later
+- Visual Studio 2022 with the Windows App SDK workload, or .NET SDK 11+
+- Native `pdfium.dll` (copied automatically from the `PDFium.WindowsV2` NuGet package on build)
+
+## Build and run
+
+```powershell
+dotnet build -p:Platform=x64
+```
+
+Launch from Visual Studio using **ElliePdf (Package)** or **ElliePdf (Unpackaged)**.
+
+## Branding
+
+App icons use a playful folded-page monogram mark in `#dcae96` (named for Ellie) on a transparent background. Source artwork lives in `Assets/Brand/elliepdf-logo-master.png`.
+
+## Project layout
+
+```
+ElliePdf/
+├── ElliePdf.Core/   Shared non-UI logic (zoom calculations)
+├── Pages/           ReaderPage; OrganizePage and EditPage (project root)
+├── ViewModels/      MVVM view models
+├── Services/        PDFium wrapper and document session
+├── Controls/        Reusable UI controls (PdfPageViewer)
+├── Navigation/      Cross-page navigation helpers
+└── Assets/          App icons and tiles
+```
+
+## Architecture
+
+- `IPdfService` / `PdfService` — PDFium P/Invoke for open, render, search, merge, save
+- `IDocumentSessionService` — Shared active document for Reader and Organize
+- `ReaderViewModel` — Page rendering, zoom, and search
+- `DocumentCollectionViewModel` — Multi-document organize workspace
+
+## Icons
+
+Regenerate transparent PNG tiles and multi-size `AppIcon.ico` from the brand master artwork (`pip install pillow` once):
+
+```powershell
+.\tools\Generate-AppIcons.ps1
+```
+
+## Tests
+
+```powershell
+dotnet test ElliePdf.Tests\ElliePdf.Tests.csproj
+```
+
+## Publish
+
+Release builds are self-contained (Native AOT disabled for PDFium compatibility). Use the publish profiles under `Properties/PublishProfiles/`.
