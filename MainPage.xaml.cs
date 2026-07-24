@@ -3,6 +3,7 @@ using ElliePdf.Pages;
 using ElliePdf.Services;
 using ElliePdf.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
 namespace ElliePdf;
@@ -14,6 +15,8 @@ public sealed partial class MainPage : Page
     public MainPage()
     {
         InitializeComponent();
+        Loaded += MainPage_Loaded;
+        ContentFrame.Navigated += ContentFrame_Navigated;
         AppNavigation.WorkspaceRequested += OnWorkspaceRequested;
         AppNavigation.ReaderPageRequested += OnReaderPageRequested;
         Unloaded += OnUnloaded;
@@ -46,11 +49,35 @@ public sealed partial class MainPage : Page
         }
     }
 
-    private void OnUnloaded(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
+    private void MainPage_Loaded(object sender, RoutedEventArgs e)
     {
+        App.Window.SetTitleBar(WindowDragSurface);
+        SyncShellButtons();
+    }
+
+    private void OnUnloaded(object sender, RoutedEventArgs e)
+    {
+        ContentFrame.Navigated -= ContentFrame_Navigated;
         AppNavigation.WorkspaceRequested -= OnWorkspaceRequested;
         AppNavigation.ReaderPageRequested -= OnReaderPageRequested;
     }
+
+    private void PaneToggleButton_Click(object sender, RoutedEventArgs e) =>
+        NavView.IsPaneOpen = !NavView.IsPaneOpen;
+
+    private void BackButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (ContentFrame.CanGoBack)
+        {
+            ContentFrame.GoBack();
+        }
+    }
+
+    private void ContentFrame_Navigated(object sender, Microsoft.UI.Xaml.Navigation.NavigationEventArgs e) =>
+        SyncShellButtons();
+
+    private void SyncShellButtons() =>
+        BackButton.Visibility = ContentFrame.CanGoBack ? Visibility.Visible : Visibility.Collapsed;
 
     private void OnWorkspaceRequested(string tag) => SelectWorkspace(tag);
 
@@ -120,6 +147,18 @@ public sealed partial class MainPage : Page
             if (ContentFrame.CurrentSourcePageType != typeof(OrganizePage))
             {
                 ContentFrame.Navigate(typeof(OrganizePage));
+            }
+        }
+        else if (tag == "settings")
+        {
+            if (NavView.MenuItems[2] is NavigationViewItem settingsItem)
+            {
+                NavView.SelectedItem = settingsItem;
+            }
+
+            if (ContentFrame.CurrentSourcePageType != typeof(SettingsPage))
+            {
+                ContentFrame.Navigate(typeof(SettingsPage));
             }
         }
     }

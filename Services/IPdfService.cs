@@ -30,6 +30,15 @@ public interface IPdfService
         bool matchCase,
         CancellationToken cancellationToken = default);
 
+    Task<(float Width, float Height)> GetPageSizeAsync(
+        PdfDocumentSession document,
+        int pageIndex,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<PdfOutlineItem>> GetOutlineAsync(
+        PdfDocumentSession document,
+        CancellationToken cancellationToken = default);
+
     Task RotatePageAsync(
         PdfDocumentSession document,
         int pageIndex,

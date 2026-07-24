@@ -45,15 +45,18 @@
         </ContentDialog>
     </Page.Resources>
 
-    <Grid Background="{ThemeResource LayerFillColorDefaultBrush}">
+    <Grid x:Name="RootGrid" Background="Transparent">
         <controls:PdfPageViewer
             x:Name="PageViewer"
-            Margin="56,48,56,0"
+            Margin="56,0,56,0"
             Canvas.ZIndex="0"
             ContentBottomInset="112"
+            DisplayScale="{x:Bind ViewModel.DisplayScale, Mode=OneWay}"
             IsChromeless="True"
             IsOverlayEnabled="{x:Bind ViewModel.IsEditMode, Mode=OneWay}"
+            PageHeightPoints="{x:Bind ViewModel.PageHeightPoints, Mode=OneWay}"
             PageSource="{x:Bind ViewModel.PageImage, Mode=OneWay}"
+            SearchHighlights="{x:Bind ViewModel.SearchHighlights, Mode=OneWay}"
             Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.HasDocument), Mode=OneWay}" />
 
         <Image
@@ -104,7 +107,7 @@
         <Border
             x:Name="LeftPanel"
             Width="220"
-            Margin="0,48,0,92"
+            Margin="0,0,0,92"
             Canvas.ZIndex="10"
             HorizontalAlignment="Left"
             Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
@@ -120,7 +123,14 @@
                 <GridView.ItemTemplate>
                     <DataTemplate x:DataType="vm:PageThumbnailViewModel">
                         <StackPanel Spacing="4" Width="88">
-                            <Image Height="112" Source="{x:Bind Thumbnail, Mode=OneWay}" Stretch="Uniform" />
+                            <Grid Height="112">
+                                <ProgressRing
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    IsActive="{x:Bind IsLoading, Mode=OneWay}"
+                                    Visibility="{x:Bind IsLoading, Mode=OneWay}" />
+                                <Image Source="{x:Bind Thumbnail, Mode=OneWay}" Stretch="Uniform" />
+                            </Grid>
                             <TextBlock
                                 HorizontalAlignment="Center"
                                 Opacity="0.8"
@@ -132,11 +142,50 @@
             </GridView>
         </Border>
 
+        <!-- Left flyout: document outline -->
+        <Border
+            x:Name="OutlinePanel"
+            Width="260"
+            Margin="0,0,0,92"
+            Canvas.ZIndex="10"
+            HorizontalAlignment="Left"
+            Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="0,0,1,0"
+            Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.IsOutlinePanelOpen), Mode=OneWay}">
+            <Grid Padding="12,8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <TextBlock
+                    Margin="0,0,0,8"
+                    Style="{StaticResource SubtitleTextBlockStyle}"
+                    Text="Outline" />
+                <ListView
+                    Grid.Row="1"
+                    IsItemClickEnabled="True"
+                    ItemClick="OutlineItems_ItemClick"
+                    ItemsSource="{x:Bind ViewModel.OutlineItems, Mode=OneWay}"
+                    SelectionMode="None">
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="vm:OutlineItemViewModel">
+                            <TextBlock
+                                Margin="{x:Bind IndentMargin, Mode=OneWay}"
+                                Padding="4,6"
+                                Text="{x:Bind Title, Mode=OneWay}"
+                                TextTrimming="CharacterEllipsis" />
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </Grid>
+        </Border>
+
         <!-- Right flyout: search -->
         <Border
             x:Name="RightPanel"
             Width="280"
-            Margin="0,48,0,92"
+            Margin="0,0,0,92"
             Canvas.ZIndex="10"
             HorizontalAlignment="Right"
             Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
@@ -167,7 +216,7 @@
         <!-- Slim tab strip: only when multiple documents are open -->
         <TabView
             x:Name="DocumentTabs"
-            Margin="56,4,56,0"
+            Margin="104,4,152,0"
             Canvas.ZIndex="20"
             VerticalAlignment="Top"
             AddTabButtonClick="DocumentTabs_AddTabButtonClick"
@@ -183,15 +232,10 @@
         <!-- Floating reader tools -->
         <Border
             Margin="12"
-            Padding="8,6"
             Canvas.ZIndex="30"
             HorizontalAlignment="Center"
+            Style="{StaticResource EllieToolbarBorderStyle}"
             VerticalAlignment="Bottom"
-            Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="1"
-            CornerRadius="22"
-            Opacity="0.96"
             Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.ShowReadToolbar), Mode=OneWay}">
             <StackPanel Orientation="Horizontal" Spacing="2">
                 <AppBarButton
@@ -218,6 +262,12 @@
                     Label="Pages"
                     LabelPosition="Collapsed"
                     ToolTipService.ToolTip="Pages" />
+                <AppBarButton
+                    Command="{x:Bind ViewModel.ToggleOutlinePanelCommand}"
+                    Icon="Library"
+                    Label="Outline"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Document outline" />
                 <AppBarButton
                     Command="{x:Bind ViewModel.PreviousPageCommand}"
                     Icon="Back"
@@ -251,6 +301,18 @@
                     Label="Fit width"
                     LabelPosition="Collapsed"
                     ToolTipService.ToolTip="Fit width" />
+                <AppBarButton
+                    Command="{x:Bind ViewModel.ZoomFitPageCommand}"
+                    Icon="View"
+                    Label="Fit page"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Fit page" />
+                <AppBarButton
+                    Command="{x:Bind ViewModel.ZoomActualSizeCommand}"
+                    Icon="Zoom"
+                    Label="Actual size"
+                    LabelPosition="Collapsed"
+                    ToolTipService.ToolTip="Actual size" />
                 <AppBarButton
                     Command="{x:Bind ViewModel.ZoomOutCommand}"
                     Icon="ZoomOut"
@@ -312,15 +374,10 @@
         <!-- Floating edit tools -->
         <Border
             Margin="12"
-            Padding="8,6"
             Canvas.ZIndex="30"
             HorizontalAlignment="Center"
+            Style="{StaticResource EllieEditToolbarBorderStyle}"
             VerticalAlignment="Bottom"
-            Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="1"
-            CornerRadius="22"
-            Opacity="0.96"
             Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.ShowEditToolbar), Mode=OneWay}">
             <StackPanel Orientation="Horizontal" Spacing="2">
                 <AppBarButton
@@ -354,44 +411,14 @@
                     LabelPosition="Collapsed"
                     ToolTipService.ToolTip="Select and move" />
                 <AppBarToggleButton
+                    x:Name="InkToolButton"
                     Command="{x:Bind ViewModel.UseInkToolCommand}"
+                    Click="InkToolButton_Click"
                     Icon="Edit"
                     IsChecked="{x:Bind ViewModel.IsInkToolActive, Mode=OneWay}"
                     Label="Ink"
                     LabelPosition="Collapsed"
                     ToolTipService.ToolTip="Ink" />
-                <AppBarButton
-                    Icon="Setting"
-                    Label="Ink options"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Ink options">
-                    <AppBarButton.Flyout>
-                        <MenuFlyout>
-                            <MenuFlyoutItem
-                                Command="{x:Bind ViewModel.SetInkColorCommand}"
-                                CommandParameter="#000000"
-                                Text="Black" />
-                            <MenuFlyoutItem
-                                Command="{x:Bind ViewModel.SetInkColorCommand}"
-                                CommandParameter="#B3261E"
-                                Text="Red" />
-                            <MenuFlyoutItem
-                                Command="{x:Bind ViewModel.SetInkColorCommand}"
-                                CommandParameter="#1A73E8"
-                                Text="Blue" />
-                            <MenuFlyoutSeparator />
-                            <MenuFlyoutItem
-                                Command="{x:Bind ViewModel.UseThinInkCommand}"
-                                Text="Thin" />
-                            <MenuFlyoutItem
-                                Command="{x:Bind ViewModel.UseMediumInkCommand}"
-                                Text="Medium" />
-                            <MenuFlyoutItem
-                                Command="{x:Bind ViewModel.UseThickInkCommand}"
-                                Text="Thick" />
-                        </MenuFlyout>
-                    </AppBarButton.Flyout>
-                </AppBarButton>
                 <AppBarButton
                     Click="AddTextButton_Click"
                     Icon="Font"
@@ -484,6 +511,130 @@
                     ToolTipService.ToolTip="Zoom in (Ctrl++)" />
             </StackPanel>
         </Border>
+
+        <Popup
+            x:Name="InkPalettePopup"
+            Canvas.ZIndex="40"
+            IsLightDismissEnabled="True">
+            <Border
+                x:Name="InkPalette"
+                Padding="10,8"
+                Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="20"
+                Opacity="0.98">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock
+                        Margin="2,0,4,0"
+                        VerticalAlignment="Center"
+                        Opacity="0.75"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="Ink" />
+                    <Button
+                        x:Name="InkBlackButton"
+                        Width="30"
+                        Height="30"
+                        Padding="0"
+                        Background="Transparent"
+                        BorderThickness="2"
+                        Click="InkColorSwatch_Click"
+                        Tag="#000000"
+                        ToolTipService.ToolTip="Black">
+                        <Ellipse
+                            Width="16"
+                            Height="16"
+                            Fill="Black" />
+                    </Button>
+                    <Button
+                        x:Name="InkRedButton"
+                        Width="30"
+                        Height="30"
+                        Padding="0"
+                        Background="Transparent"
+                        BorderThickness="2"
+                        Click="InkColorSwatch_Click"
+                        Tag="#B3261E"
+                        ToolTipService.ToolTip="Red">
+                        <Ellipse
+                            Width="16"
+                            Height="16"
+                            Fill="#B3261E" />
+                    </Button>
+                    <Button
+                        x:Name="InkBlueButton"
+                        Width="30"
+                        Height="30"
+                        Padding="0"
+                        Background="Transparent"
+                        BorderThickness="2"
+                        Click="InkColorSwatch_Click"
+                        Tag="#1A73E8"
+                        ToolTipService.ToolTip="Blue">
+                        <Ellipse
+                            Width="16"
+                            Height="16"
+                            Fill="#1A73E8" />
+                    </Button>
+                    <Border
+                        Width="1"
+                        Height="24"
+                        Margin="4,0"
+                        Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                    <Button
+                        x:Name="InkThinButton"
+                        Width="34"
+                        Height="30"
+                        Padding="0"
+                        Background="Transparent"
+                        BorderThickness="2"
+                        Click="InkThicknessButton_Click"
+                        Tag="2"
+                        ToolTipService.ToolTip="Thin">
+                        <Rectangle
+                            Width="20"
+                            Height="2"
+                            Fill="{ThemeResource TextFillColorPrimaryBrush}"
+                            RadiusX="1"
+                            RadiusY="1" />
+                    </Button>
+                    <Button
+                        x:Name="InkMediumButton"
+                        Width="34"
+                        Height="30"
+                        Padding="0"
+                        Background="Transparent"
+                        BorderThickness="2"
+                        Click="InkThicknessButton_Click"
+                        Tag="5"
+                        ToolTipService.ToolTip="Medium">
+                        <Rectangle
+                            Width="20"
+                            Height="5"
+                            Fill="{ThemeResource TextFillColorPrimaryBrush}"
+                            RadiusX="2"
+                            RadiusY="2" />
+                    </Button>
+                    <Button
+                        x:Name="InkThickButton"
+                        Width="34"
+                        Height="30"
+                        Padding="0"
+                        Background="Transparent"
+                        BorderThickness="2"
+                        Click="InkThicknessButton_Click"
+                        Tag="9"
+                        ToolTipService.ToolTip="Thick">
+                        <Rectangle
+                            Width="20"
+                            Height="9"
+                            Fill="{ThemeResource TextFillColorPrimaryBrush}"
+                            RadiusX="4"
+                            RadiusY="4" />
+                    </Button>
+                </StackPanel>
+            </Border>
+        </Popup>
 
         <!-- Minimal status + page indicator -->
         <StackPanel

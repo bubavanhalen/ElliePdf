@@ -4,15 +4,16 @@ namespace ElliePdf.Services;
 
 public sealed class RecentFilesService : IRecentFilesService
 {
-    private const int MaxEntries = 12;
+    private readonly IUserSettingsService _settingsService;
     private readonly SemaphoreSlim _loadGate = new(1, 1);
     private readonly string _storeFolder;
     private readonly string _storePath;
     private List<string> _entries = [];
     private bool _loaded;
 
-    public RecentFilesService()
+    public RecentFilesService(IUserSettingsService settingsService)
     {
+        _settingsService = settingsService;
         _storeFolder = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "ElliePdf");
@@ -42,9 +43,11 @@ public sealed class RecentFilesService : IRecentFilesService
         await EnsureLoadedAsync(cancellationToken);
         _entries.RemoveAll(entry => string.Equals(entry, path, StringComparison.OrdinalIgnoreCase));
         _entries.Insert(0, path);
-        if (_entries.Count > MaxEntries)
+
+        var maxEntries = Math.Clamp(_settingsService.Settings.RecentFilesMaxCount, 1, 50);
+        if (_entries.Count > maxEntries)
         {
-            _entries = _entries.Take(MaxEntries).ToList();
+            _entries = _entries.Take(maxEntries).ToList();
         }
 
         await SaveToDiskAsync(cancellationToken);
@@ -153,9 +156,12 @@ public sealed class RecentFilesService : IRecentFilesService
             cancellationToken);
     }
 
-    private static List<string> FilterEntries(List<string>? entries) =>
-        entries?
+    private List<string> FilterEntries(List<string>? entries)
+    {
+        var maxEntries = Math.Clamp(_settingsService.Settings.RecentFilesMaxCount, 1, 50);
+        return entries?
             .Where(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path))
-            .Take(MaxEntries)
+            .Take(maxEntries)
             .ToList() ?? [];
+    }
 }

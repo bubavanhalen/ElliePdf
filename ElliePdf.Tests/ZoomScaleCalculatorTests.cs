@@ -19,9 +19,15 @@ public class ZoomScaleCalculatorTests
     }
 
     [Fact]
-    public void Custom_uses_zoom_scale()
+    public void FitPage_uses_page_and_viewport_dimensions()
     {
-        var scale = ZoomScaleCalculator.ResolveScale(PdfZoomMode.Custom, 1.5, 800);
-        Assert.Equal(1.5, scale);
+        var scale = ZoomScaleCalculator.ResolveScale(
+            PdfZoomMode.FitPage,
+            1.0,
+            viewportWidth: 612,
+            pageWidthPoints: 612,
+            pageHeightPoints: 792,
+            viewportHeight: 792);
+        Assert.Equal(1.0, scale, precision: 3);
     }
 }

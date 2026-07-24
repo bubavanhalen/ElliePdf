@@ -19,9 +19,13 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
     private readonly IAnnotationStore _annotationStore;
     private readonly IEditSaveService _editSaveService;
     private readonly DocumentCollectionViewModel _documentCollectionViewModel;
+    private readonly IUserSettingsService _settingsService;
     private CancellationTokenSource? _renderCts;
     private CancellationTokenSource? _searchCts;
     private double _viewportWidth = 800;
+    private double _viewportHeight = 900;
+    private float _pageWidthPoints = 612f;
+    private float _pageHeightPoints = 792f;
     private IReadOnlyList<TextMatch> _searchMatches = [];
     private int _activeSearchMatchIndex = -1;
     private byte[]? _lastRenderedPng;
@@ -31,6 +35,14 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
     public ObservableCollection<PageThumbnailViewModel> PageThumbnails { get; } = [];
 
     public ObservableCollection<RecentFileItemViewModel> RecentFiles { get; } = [];
+
+    public ObservableCollection<OutlineItemViewModel> OutlineItems { get; } = [];
+
+    [ObservableProperty]
+    public partial bool IsOutlinePanelOpen { get; set; }
+
+    [ObservableProperty]
+    public partial IReadOnlyList<PdfRect> SearchHighlights { get; private set; } = [];
 
     [ObservableProperty]
     public partial Guid? SelectedTabId { get; private set; }
@@ -52,7 +64,8 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         ITabCloseService tabCloseService,
         IAnnotationStore annotationStore,
         IEditSaveService editSaveService,
-        DocumentCollectionViewModel documentCollectionViewModel)
+        DocumentCollectionViewModel documentCollectionViewModel,
+        IUserSettingsService settingsService)
     {
         _tabService = tabService;
         _pdfService = pdfService;
@@ -61,6 +74,7 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         _annotationStore = annotationStore;
         _editSaveService = editSaveService;
         _documentCollectionViewModel = documentCollectionViewModel;
+        _settingsService = settingsService;
         _tabService.StateChanged += OnSessionStateChanged;
         _tabService.TabsChanged += OnTabsChanged;
         SyncTabItems();
@@ -211,6 +225,26 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         }
     }
 
+    public double ViewportHeight
+    {
+        get => _viewportHeight;
+        set
+        {
+            if (Math.Abs(_viewportHeight - value) < 1)
+            {
+                return;
+            }
+
+            _viewportHeight = Math.Max(200, value);
+            if (_tabService.ZoomMode is PdfZoomMode.FitPage)
+            {
+                _ = RenderCurrentPageAsync();
+            }
+
+            OnPropertyChanged(nameof(ZoomLabel));
+        }
+    }
+
     public async Task LoadDocumentAsync(string path, CancellationToken cancellationToken = default)
     {
         IsBusy = true;
@@ -219,6 +253,7 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         try
         {
             await _tabService.OpenOrActivateTabAsync(path, cancellationToken);
+            ApplyDefaultZoomMode();
             SelectedTabId = _tabService.ActiveTabId;
             SyncTabItems();
             NotifyDocumentChanged();
@@ -253,6 +288,7 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
 
         SelectedTabId = _tabService.ActiveTabId;
         SyncTabItems();
+        ApplyDefaultZoomMode();
         NotifyDocumentChanged();
         await RenderCurrentPageAsync();
         await RefreshRecentFilesAsync(cancellationToken);
@@ -299,6 +335,7 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
     {
         IsThumbnailPanelOpen = false;
         IsSearchPanelOpen = false;
+        IsOutlinePanelOpen = false;
     }
 
     public async Task EnsureThumbnailsLoadedAsync()
@@ -316,7 +353,19 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
     {
         if (value)
         {
+            IsOutlinePanelOpen = false;
+            IsSearchPanelOpen = false;
             _ = EnsureThumbnailsLoadedAsync();
+        }
+    }
+
+    partial void OnIsOutlinePanelOpenChanged(bool value)
+    {
+        if (value)
+        {
+            IsThumbnailPanelOpen = false;
+            IsSearchPanelOpen = false;
+            _ = EnsureOutlineLoadedAsync();
         }
     }
 
@@ -343,7 +392,34 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         }
 
         IsThumbnailPanelOpen = false;
+        IsOutlinePanelOpen = false;
         IsSearchPanelOpen = true;
+    }
+
+    [RelayCommand]
+    private void ToggleOutlinePanel()
+    {
+        if (IsOutlinePanelOpen)
+        {
+            IsOutlinePanelOpen = false;
+            return;
+        }
+
+        IsThumbnailPanelOpen = false;
+        IsSearchPanelOpen = false;
+        IsOutlinePanelOpen = true;
+    }
+
+    [RelayCommand]
+    private void GoToOutlineItem(OutlineItemViewModel? item)
+    {
+        if (item is null)
+        {
+            return;
+        }
+
+        GoToPage(item.PageIndex);
+        ClosePanels();
     }
 
     [RelayCommand]
@@ -460,12 +536,14 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
             {
                 _activeSearchMatchIndex = -1;
                 SearchStatus = "No matches found.";
+                UpdateSearchHighlights();
                 return;
             }
 
             _activeSearchMatchIndex = 0;
             var match = _searchMatches[0];
             _tabService.CurrentPageIndex = match.PageIndex;
+            UpdateSearchHighlights();
             await RenderCurrentPageAsync();
             SearchStatus = $"Match 1 of {_searchMatches.Count}";
         }
@@ -494,6 +572,7 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         _activeSearchMatchIndex = (_activeSearchMatchIndex + 1) % _searchMatches.Count;
         var match = _searchMatches[_activeSearchMatchIndex];
         _tabService.CurrentPageIndex = match.PageIndex;
+        UpdateSearchHighlights();
         await RenderCurrentPageAsync();
         SearchStatus = $"Match {_activeSearchMatchIndex + 1} of {_searchMatches.Count}";
     }
@@ -509,6 +588,7 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         _activeSearchMatchIndex = (_activeSearchMatchIndex - 1 + _searchMatches.Count) % _searchMatches.Count;
         var match = _searchMatches[_activeSearchMatchIndex];
         _tabService.CurrentPageIndex = match.PageIndex;
+        UpdateSearchHighlights();
         await RenderCurrentPageAsync();
         SearchStatus = $"Match {_activeSearchMatchIndex + 1} of {_searchMatches.Count}";
     }
@@ -523,6 +603,7 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
 
         _annotationStore.SetPageOverlay(tab.Id, _tabService.CurrentPageIndex, overlay);
         tab.IsDirty = true;
+        _annotationStore.ScheduleCompanionSave(tab.Id, tab.FilePath);
     }
 
     [RelayCommand]
@@ -738,11 +819,38 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
 
         for (var pageIndex = 0; pageIndex < document.PageCount; pageIndex++)
         {
-            var bytes = await _pdfService.RenderPageThumbnailAsync(document, pageIndex, 120, 160);
             PageThumbnails.Add(new PageThumbnailViewModel(
                 pageIndex,
-                await BitmapHelper.CreateBitmapAsync(bytes),
                 pageIndex == _tabService.CurrentPageIndex));
+        }
+
+        const int batchSize = 6;
+        for (var start = 0; start < PageThumbnails.Count; start += batchSize)
+        {
+            var end = Math.Min(start + batchSize, PageThumbnails.Count);
+            var tasks = new List<Task>();
+
+            for (var index = start; index < end; index++)
+            {
+                var thumbnail = PageThumbnails[index];
+                thumbnail.IsLoading = true;
+                tasks.Add(LoadThumbnailAsync(document, thumbnail));
+            }
+
+            await Task.WhenAll(tasks);
+        }
+    }
+
+    private async Task LoadThumbnailAsync(PdfDocumentSession document, PageThumbnailViewModel thumbnail)
+    {
+        try
+        {
+            var bytes = await _pdfService.RenderPageThumbnailAsync(document, thumbnail.PageIndex, 120, 160);
+            thumbnail.Thumbnail = await BitmapHelper.CreateBitmapAsync(bytes);
+        }
+        finally
+        {
+            thumbnail.IsLoading = false;
         }
     }
 
@@ -763,8 +871,95 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         return ZoomScaleCalculator.ResolveScale(
             _tabService.ZoomMode,
             _tabService.ZoomScale,
-            _viewportWidth);
+            _viewportWidth,
+            _pageWidthPoints,
+            _pageHeightPoints,
+            _viewportHeight);
     }
+
+    private async Task RefreshPageDimensionsAsync(CancellationToken cancellationToken)
+    {
+        var document = _tabService.ActiveDocument;
+        if (document is null || document.PageCount == 0)
+        {
+            _pageWidthPoints = 612f;
+            _pageHeightPoints = 792f;
+            return;
+        }
+
+        var (width, height) = await _pdfService.GetPageSizeAsync(
+            document,
+            _tabService.CurrentPageIndex,
+            cancellationToken);
+        _pageWidthPoints = width;
+        _pageHeightPoints = height;
+    }
+
+    private void ApplyDefaultZoomMode()
+    {
+        _tabService.ZoomMode = _settingsService.Settings.DefaultZoomMode;
+        if (_tabService.ZoomMode == PdfZoomMode.ActualSize)
+        {
+            _tabService.ZoomScale = 96.0 / 72.0;
+        }
+
+        NotifyZoomChanged();
+    }
+
+    private void UpdateSearchHighlights()
+    {
+        if (_activeSearchMatchIndex < 0 || _activeSearchMatchIndex >= _searchMatches.Count)
+        {
+            SearchHighlights = [];
+            return;
+        }
+
+        var match = _searchMatches[_activeSearchMatchIndex];
+        SearchHighlights = match.PageIndex == _tabService.CurrentPageIndex
+            ? match.HighlightRects
+            : [];
+    }
+
+    public async Task EnsureOutlineLoadedAsync()
+    {
+        OutlineItems.Clear();
+        var document = _tabService.ActiveDocument;
+        if (document is null)
+        {
+            return;
+        }
+
+        var outline = await _pdfService.GetOutlineAsync(document);
+        AddOutlineItems(outline, 0);
+    }
+
+    private void AddOutlineItems(IReadOnlyList<PdfOutlineItem> items, int depth)
+    {
+        foreach (var item in items)
+        {
+            OutlineItems.Add(new OutlineItemViewModel(item, depth));
+            AddOutlineItems(item.Children, depth + 1);
+        }
+    }
+
+    public async Task<BitmapImage?> RenderPageImageAsync(
+        int pageIndex,
+        double scale,
+        CancellationToken cancellationToken = default)
+    {
+        var document = _tabService.ActiveDocument;
+        if (document is null || pageIndex < 0 || pageIndex >= document.PageCount)
+        {
+            return null;
+        }
+
+        var rendered = await _pdfService.RenderPageAsync(document, pageIndex, scale, cancellationToken);
+        return await BitmapHelper.CreateBitmapAsync(rendered.PngBytes);
+    }
+
+    public int DocumentPageCount => _tabService.ActiveDocument?.PageCount ?? 0;
+
+    public int CurrentPageIndex => _tabService.CurrentPageIndex;
 
     private async Task RenderCurrentPageAsync()
     {
@@ -786,12 +981,13 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         _renderCts = new CancellationTokenSource();
         var token = _renderCts.Token;
         var pageIndex = _tabService.CurrentPageIndex;
-        var scale = ResolveRenderScale();
 
         try
         {
             IsBusy = true;
+            await RefreshPageDimensionsAsync(token);
             await Task.Delay(120, token);
+            var scale = ResolveRenderScale();
             var rendered = await _pdfService.RenderPageAsync(document, pageIndex, scale, token);
             _lastRenderedPng = rendered.PngBytes;
             PageImage = await BitmapHelper.CreateBitmapAsync(rendered.PngBytes);
@@ -799,6 +995,9 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
             PagePixelHeight = rendered.Height;
             PageWidthPoints = rendered.PageWidthPoints;
             PageHeightPoints = rendered.PageHeightPoints;
+            _pageWidthPoints = rendered.PageWidthPoints;
+            _pageHeightPoints = rendered.PageHeightPoints;
+            UpdateSearchHighlights();
             OnPropertyChanged(nameof(DisplayScale));
             UpdateSelectedThumbnail(pageIndex);
             NotifyDocumentChanged();
@@ -844,8 +1043,13 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         }
     }
 
-    private static async Task<bool> ConfirmOverwriteAsync(string path)
+    private async Task<bool> ConfirmOverwriteAsync(string path)
     {
+        if (!_settingsService.Settings.ConfirmOverwriteSave)
+        {
+            return true;
+        }
+
         var xamlRoot = GetXamlRoot();
         if (xamlRoot is null)
         {

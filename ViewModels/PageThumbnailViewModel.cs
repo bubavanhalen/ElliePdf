@@ -5,19 +5,22 @@ namespace ElliePdf.ViewModels;
 
 public sealed partial class PageThumbnailViewModel : ObservableObject
 {
-    public PageThumbnailViewModel(int pageIndex, BitmapImage thumbnail, bool isSelected)
+    public PageThumbnailViewModel(int pageIndex, bool isSelected)
     {
         PageIndex = pageIndex;
-        Thumbnail = thumbnail;
         Label = $"Page {pageIndex + 1}";
         IsSelected = isSelected;
     }
 
     public int PageIndex { get; }
 
-    public BitmapImage Thumbnail { get; }
-
     public string Label { get; }
+
+    [ObservableProperty]
+    public partial BitmapImage? Thumbnail { get; set; }
+
+    [ObservableProperty]
+    public partial bool IsLoading { get; set; }
 
     [ObservableProperty]
     public partial bool IsSelected { get; set; }

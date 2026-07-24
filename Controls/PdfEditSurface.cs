@@ -297,7 +297,7 @@ public sealed class PdfEditSurface : Canvas
                     AcceptsReturn = true,
                     Tag = ("text", text.Id)
                 };
-                ApplyTextBoxChrome(box);
+                ApplyTextBoxChrome(box, text.ColorHex);
                 box.TextChanged += TextBox_TextChanged;
                 box.PointerPressed += Selectable_PointerPressed;
                 box.PointerEntered += TextBox_PointerEntered;
@@ -416,6 +416,13 @@ public sealed class PdfEditSurface : Canvas
             ReleasePointerCapture(e.Pointer);
             _dragMode = DragMode.None;
             PersistSelectedElement();
+            if (_isPlacingText)
+            {
+                _isPlacingText = false;
+                ActiveTool = ReaderEditTool.Select;
+                ActiveToolChangeRequested?.Invoke(this, ReaderEditTool.Select);
+            }
+
             NotifyOverlayChanged(pushUndo: false);
             e.Handled = true;
             return;
@@ -518,9 +525,25 @@ public sealed class PdfEditSurface : Canvas
         _resizeHandle.ReleasePointerCapture(e.Pointer);
         _dragMode = DragMode.None;
         PersistSelectedElement();
+        _isPlacingText = false;
         NotifyOverlayChanged(pushUndo: false);
         e.Handled = true;
     }
+
+    private void TextBox_PointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        if (ActiveTool == ReaderEditTool.Select && sender is TextBox)
+        {
+            ProtectedCursor = MoveCursor;
+        }
+        else if (ActiveTool == ReaderEditTool.Text)
+        {
+            ProtectedCursor = TextCursor;
+        }
+    }
+
+    private void TextBox_PointerExited(object sender, PointerRoutedEventArgs e) =>
+        ProtectedCursor = ArrowCursor;
 
     private void TextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
@@ -539,6 +562,25 @@ public sealed class PdfEditSurface : Canvas
         text.Width = Math.Max(40, box.Width / DisplayScale);
         text.Height = Math.Max(24, box.Height / DisplayScale);
         NotifyOverlayChanged();
+    }
+
+    private static void ApplyTextBoxChrome(TextBox box, string colorHex)
+    {
+        var transparent = new SolidColorBrush(Colors.Transparent);
+        var foreground = ColorBrushFromHex(colorHex);
+        box.Resources["TextControlBackground"] = transparent;
+        box.Resources["TextControlBackgroundPointerOver"] = transparent;
+        box.Resources["TextControlBackgroundFocused"] = transparent;
+        box.Resources["TextControlBackgroundDisabled"] = transparent;
+        box.Resources["TextControlForeground"] = foreground;
+        box.Resources["TextControlForegroundPointerOver"] = foreground;
+        box.Resources["TextControlForegroundFocused"] = foreground;
+        box.Resources["TextControlForegroundDisabled"] = foreground;
+        box.Resources["TextControlBorderBrush"] = transparent;
+        box.Resources["TextControlBorderBrushPointerOver"] = transparent;
+        box.Resources["TextControlBorderBrushFocused"] = transparent;
+        box.Resources["TextControlBorderBrushDisabled"] = transparent;
+        box.Resources["TextControlPlaceholderForeground"] = new SolidColorBrush(Windows.UI.Color.FromArgb(160, 0, 0, 0));
     }
 
     private void Surface_KeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
@@ -798,6 +840,7 @@ public sealed class PdfEditSurface : Canvas
         if (TryGetSelectedElement() is TextBox box)
         {
             box.Foreground = new SolidColorBrush(color);
+            ApplyTextBoxChrome(box, text.ColorHex);
         }
 
         if (_textColorButton.Content is Border dot)

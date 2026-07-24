@@ -23,6 +23,7 @@ public partial class App : Application
     public App()
     {
         var services = new ServiceCollection();
+        services.AddSingleton<IUserSettingsService, UserSettingsService>();
         services.AddSingleton<IPdfService, PdfService>();
         services.AddSingleton<IPdfPasswordPrompt, WinUiPdfPasswordPrompt>();
         services.AddSingleton<IUnsavedChangesPrompt, WinUiUnsavedChangesPrompt>();
@@ -32,6 +33,7 @@ public partial class App : Application
         services.AddSingleton<IEditSaveService, EditSaveService>();
         services.AddSingleton<ITabCloseService, TabCloseService>();
         services.AddSingleton<IDocumentTabService, DocumentTabService>();
+        services.AddSingleton<SettingsViewModel>();
         services.AddSingleton<DocumentCollectionViewModel>();
         services.AddSingleton<ReaderViewModel>();
         Services = services.BuildServiceProvider();
@@ -39,8 +41,9 @@ public partial class App : Application
         InitializeComponent();
     }
 
-    protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
+    protected override async void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
     {
+        await Services.GetRequiredService<IUserSettingsService>().InitializeAsync();
         Window = new MainWindow();
         DispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
         Window.Activate();

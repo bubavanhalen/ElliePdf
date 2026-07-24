@@ -4,12 +4,18 @@ public sealed class PdfDocumentSession : IAsyncDisposable
 {
     private readonly IPdfService _pdfService;
 
-    internal PdfDocumentSession(IPdfService pdfService, IntPtr handle, string sourcePath, int pageCount)
+    internal PdfDocumentSession(
+        IPdfService pdfService,
+        IntPtr handle,
+        string sourcePath,
+        int pageCount,
+        PdfFormFillContext? formFill)
     {
         _pdfService = pdfService;
         Handle = handle;
         SourcePath = sourcePath;
         PageCount = pageCount;
+        FormFill = formFill;
     }
 
     public string SourcePath { get; }
@@ -17,6 +23,8 @@ public sealed class PdfDocumentSession : IAsyncDisposable
     public int PageCount { get; internal set; }
 
     internal IntPtr Handle { get; private set; }
+
+    internal PdfFormFillContext? FormFill { get; private set; }
 
     public bool IsClosed => Handle == IntPtr.Zero;
 
@@ -30,7 +38,12 @@ public sealed class PdfDocumentSession : IAsyncDisposable
         return new ValueTask(_pdfService.CloseDocumentAsync(this));
     }
 
-    internal void MarkClosed() => Handle = IntPtr.Zero;
+    internal void MarkClosed()
+    {
+        Handle = IntPtr.Zero;
+        FormFill?.Dispose();
+        FormFill = null;
+    }
 }
 
 public sealed class PdfiumDependencyException : InvalidOperationException

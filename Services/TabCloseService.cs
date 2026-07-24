@@ -81,6 +81,12 @@ public sealed class TabCloseService : ITabCloseService
 
     private async Task<bool> CloseTabCoreAsync(Guid tabId, CancellationToken cancellationToken)
     {
+        var tab = _tabService.Tabs.FirstOrDefault(item => item.Id == tabId);
+        if (tab is not null && _annotationStore.IsTabDirty(tabId))
+        {
+            await _annotationStore.SaveCompanionAsync(tabId, tab.FilePath, cancellationToken);
+        }
+
         _annotationStore.RemoveTab(tabId);
         await _tabService.CloseTabAsync(tabId, cancellationToken);
         return true;

@@ -11,6 +11,7 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
     private readonly IPdfService _pdfService;
     private readonly IDocumentOpenService _documentOpenService;
     private readonly IDocumentTabService _tabService;
+    private readonly IUserSettingsService _settingsService;
     private readonly List<PdfDocumentSession> _sourceDocuments = [];
     private ObservableCollection<DocumentItemViewModel> _pages = [];
     private bool _isBusy;
@@ -21,11 +22,13 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
     public DocumentCollectionViewModel(
         IPdfService pdfService,
         IDocumentOpenService documentOpenService,
-        IDocumentTabService tabService)
+        IDocumentTabService tabService,
+        IUserSettingsService settingsService)
     {
         _pdfService = pdfService;
         _documentOpenService = documentOpenService;
         _tabService = tabService;
+        _settingsService = settingsService;
     }
 
     public ObservableCollection<DocumentItemViewModel> Pages
@@ -207,6 +210,15 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
             return;
         }
 
+        if (_settingsService.Settings.ConfirmOrganizeSave)
+        {
+            var confirmed = await ConfirmOrganizeSaveAsync(cancellationToken);
+            if (!confirmed)
+            {
+                return;
+            }
+        }
+
         IsBusy = true;
 
         try
@@ -322,4 +334,29 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
         StatusSeverity = severity;
         IsStatusOpen = true;
     }
+
+    private static async Task<bool> ConfirmOrganizeSaveAsync(CancellationToken cancellationToken)
+    {
+        var xamlRoot = GetXamlRoot();
+        if (xamlRoot is null)
+        {
+            return false;
+        }
+
+        var dialog = new ContentDialog
+        {
+            Title = "Save changes to original files?",
+            Content = "This will overwrite the original PDF files with your organize changes. This cannot be undone.",
+            PrimaryButtonText = "Save",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = xamlRoot
+        };
+
+        cancellationToken.ThrowIfCancellationRequested();
+        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+    }
+
+    private static Microsoft.UI.Xaml.XamlRoot? GetXamlRoot() =>
+        App.Window.Content is Microsoft.UI.Xaml.FrameworkElement root ? root.XamlRoot : null;
 }

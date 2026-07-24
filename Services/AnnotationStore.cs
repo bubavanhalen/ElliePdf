@@ -5,8 +5,15 @@ namespace ElliePdf.Services;
 
 public sealed class AnnotationStore : IAnnotationStore
 {
+    private readonly IUserSettingsService _settingsService;
     private readonly Dictionary<Guid, PageOverlayDocument> _documents = [];
     private readonly HashSet<Guid> _dirtyTabs = [];
+    private readonly Dictionary<Guid, CancellationTokenSource> _saveTimers = [];
+
+    public AnnotationStore(IUserSettingsService settingsService)
+    {
+        _settingsService = settingsService;
+    }
 
     private static string GetCompanionPath(string pdfPath) => pdfPath + ".ellie.json";
 
@@ -45,6 +52,12 @@ public sealed class AnnotationStore : IAnnotationStore
 
     public void RemoveTab(Guid tabId)
     {
+        if (_saveTimers.Remove(tabId, out var timer))
+        {
+            timer.Cancel();
+            timer.Dispose();
+        }
+
         _documents.Remove(tabId);
         _dirtyTabs.Remove(tabId);
     }
@@ -95,5 +108,58 @@ public sealed class AnnotationStore : IAnnotationStore
             ElliePdfJsonContext.Default.PageOverlayDocument,
             cancellationToken);
         MarkTabClean(tabId);
+    }
+
+    public void ScheduleCompanionSave(Guid tabId, string pdfPath)
+    {
+        if (!_settingsService.Settings.AutoSaveCompanion)
+        {
+            return;
+        }
+
+        if (_saveTimers.Remove(tabId, out var existing))
+        {
+            existing.Cancel();
+            existing.Dispose();
+        }
+
+        var cts = new CancellationTokenSource();
+        _saveTimers[tabId] = cts;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(800, cts.Token);
+                await SaveCompanionAsync(tabId, pdfPath, cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            finally
+            {
+                if (_saveTimers.TryGetValue(tabId, out var current) && ReferenceEquals(current, cts))
+                {
+                    _saveTimers.Remove(tabId);
+                }
+
+                cts.Dispose();
+            }
+        });
+    }
+
+    public async Task FlushPendingSavesAsync(CancellationToken cancellationToken = default)
+    {
+        foreach (var (tabId, timer) in _saveTimers.ToArray())
+        {
+            timer.Cancel();
+            timer.Dispose();
+            _saveTimers.Remove(tabId);
+        }
+
+        foreach (var tabId in _dirtyTabs.ToArray())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+        }
     }
 }

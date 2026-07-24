@@ -75,7 +75,7 @@
     <PublishTrimmed Condition="'$(Configuration)' == 'Release'">True</PublishTrimmed>
   </PropertyGroup>
   <PropertyGroup>
-    <PublishAot>false</PublishAot>
+    <PublishAot>true</PublishAot>
     <SelfContained Condition="'$(Configuration)' == 'Release'">true</SelfContained>
   </PropertyGroup>
   

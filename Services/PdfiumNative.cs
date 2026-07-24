@@ -65,6 +65,30 @@ internal static partial class PdfiumNative
         int flags);
 
     [LibraryImport("pdfium.dll")]
+    public static partial IntPtr FPDFDOC_InitFormFillEnvironment(IntPtr document, IntPtr formInfo);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial void FPDFDOC_ExitFormFillEnvironment(IntPtr formHandle);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial void FORM_OnAfterLoadPage(IntPtr page, IntPtr formHandle);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial void FORM_OnBeforeClosePage(IntPtr page, IntPtr formHandle);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial void FPDF_FFLDraw(
+        IntPtr formHandle,
+        IntPtr bitmap,
+        IntPtr page,
+        int start_x,
+        int start_y,
+        int size_x,
+        int size_y,
+        int rotate,
+        int flags);
+
+    [LibraryImport("pdfium.dll")]
     public static partial int FPDFPage_GetRotation(IntPtr page);
 
     [LibraryImport("pdfium.dll")]
@@ -166,6 +190,21 @@ internal static partial class PdfiumNative
         out double top,
         out double right,
         out double bottom);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial IntPtr FPDFBookmark_GetFirstChild(IntPtr document, IntPtr bookmark);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial IntPtr FPDFBookmark_GetNextSibling(IntPtr bookmark);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial uint FPDFBookmark_GetTitle(IntPtr bookmark, byte[]? buffer, uint buflen);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial IntPtr FPDFBookmark_GetDest(IntPtr document, IntPtr bookmark);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial int FPDFDest_GetDestPageIndex(IntPtr document, IntPtr dest);
 }
 
 [StructLayout(LayoutKind.Sequential)]

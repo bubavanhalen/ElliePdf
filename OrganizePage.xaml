@@ -7,9 +7,10 @@
     xmlns:local="using:ElliePdf.Pages"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:vm="using:ElliePdf.ViewModels"
+    Background="Transparent"
     mc:Ignorable="d">
 
-    <Grid Padding="24" RowSpacing="16">
+    <Grid Padding="24,64,24,24" RowSpacing="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -128,14 +129,20 @@
                                     Spacing="8">
                                     <Button
                                         AutomationProperties.AutomationId="BtnDeletePage"
+                                        AutomationProperties.Name="Delete page"
                                         Click="DeleteButton_Click"
-                                        Content="Delete"
-                                        ToolTipService.ToolTip="Delete page from the working document" />
+                                        Style="{StaticResource SubtleButtonStyle}"
+                                        ToolTipService.ToolTip="Delete page from the working document">
+                                        <SymbolIcon Symbol="Delete" />
+                                    </Button>
                                     <Button
                                         AutomationProperties.AutomationId="BtnRotatePage"
+                                        AutomationProperties.Name="Rotate page"
                                         Click="RotateButton_Click"
-                                        Content="Rotate"
-                                        ToolTipService.ToolTip="Rotate page clockwise" />
+                                        Style="{StaticResource SubtleButtonStyle}"
+                                        ToolTipService.ToolTip="Rotate page clockwise">
+                                        <SymbolIcon Symbol="Rotate" />
+                                    </Button>
                                 </StackPanel>
                             </Grid>
                         </Border>

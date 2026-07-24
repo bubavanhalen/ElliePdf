@@ -1,7 +1,10 @@
+using ElliePdf.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
+using Microsoft.UI.Xaml.Shapes;
 
 namespace ElliePdf.Controls;
 
@@ -35,12 +38,34 @@ public sealed partial class PdfPageViewer : UserControl
             typeof(PdfPageViewer),
             new PropertyMetadata(false, OnOverlayEnabledChanged));
 
+    public static readonly DependencyProperty SearchHighlightsProperty =
+        DependencyProperty.Register(
+            nameof(SearchHighlights),
+            typeof(IReadOnlyList<PdfRect>),
+            typeof(PdfPageViewer),
+            new PropertyMetadata(null, OnSearchHighlightsChanged));
+
+    public static readonly DependencyProperty PageHeightPointsProperty =
+        DependencyProperty.Register(
+            nameof(PageHeightPoints),
+            typeof(float),
+            typeof(PdfPageViewer),
+            new PropertyMetadata(0f, OnSearchHighlightsChanged));
+
+    public static readonly DependencyProperty DisplayScaleProperty =
+        DependencyProperty.Register(
+            nameof(DisplayScale),
+            typeof(double),
+            typeof(PdfPageViewer),
+            new PropertyMetadata(1.0, OnSearchHighlightsChanged));
+
     public PdfPageViewer()
     {
         InitializeComponent();
         Loaded += OnLoaded;
         SizeChanged += OnSizeChanged;
         PageScrollViewer.PointerWheelChanged += OnPointerWheelChanged;
+        PageImage.SizeChanged += (_, _) => UpdateSearchHighlights();
         ApplyChromeless();
     }
 
@@ -68,9 +93,29 @@ public sealed partial class PdfPageViewer : UserControl
         set => SetValue(IsOverlayEnabledProperty, value);
     }
 
+    public IReadOnlyList<PdfRect>? SearchHighlights
+    {
+        get => (IReadOnlyList<PdfRect>?)GetValue(SearchHighlightsProperty);
+        set => SetValue(SearchHighlightsProperty, value);
+    }
+
+    public float PageHeightPoints
+    {
+        get => (float)GetValue(PageHeightPointsProperty);
+        set => SetValue(PageHeightPointsProperty, value);
+    }
+
+    public double DisplayScale
+    {
+        get => (double)GetValue(DisplayScaleProperty);
+        set => SetValue(DisplayScaleProperty, value);
+    }
+
     public PdfEditSurface EditSurface => PageEditSurface;
 
     public event EventHandler<double>? ViewportWidthChanged;
+
+    public event EventHandler<double>? ViewportHeightChanged;
 
     public event EventHandler? ZoomInRequested;
 
@@ -91,7 +136,7 @@ public sealed partial class PdfPageViewer : UserControl
         if (d is PdfPageViewer viewer)
         {
             viewer.ApplyChromeless();
-            viewer.ReportViewportWidth();
+            viewer.ReportViewportSize();
         }
     }
 
@@ -111,6 +156,14 @@ public sealed partial class PdfPageViewer : UserControl
         }
     }
 
+    private static void OnSearchHighlightsChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is PdfPageViewer viewer)
+        {
+            viewer.UpdateSearchHighlights();
+        }
+    }
+
     private void ApplyChromeless()
     {
         if (IsChromeless)
@@ -124,9 +177,9 @@ public sealed partial class PdfPageViewer : UserControl
         }
 
         PageChrome.Padding = new Thickness(24);
-        PageChrome.Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"];
+        PageChrome.Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"];
         PageChrome.CornerRadius = new CornerRadius(4);
-        PageScrollViewer.Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["LayerFillColorDefaultBrush"];
+        PageScrollViewer.Background = (Brush)Application.Current.Resources["LayerFillColorDefaultBrush"];
         ApplyContentInset();
     }
 
@@ -142,19 +195,21 @@ public sealed partial class PdfPageViewer : UserControl
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         PageScrollViewer.PointerPressed += OnPagePointerPressed;
-        ReportViewportWidth();
+        ReportViewportSize();
     }
 
     private void OnPagePointerPressed(object sender, PointerRoutedEventArgs e) =>
         PagePointerPressed?.Invoke(this, EventArgs.Empty);
 
-    private void OnSizeChanged(object sender, SizeChangedEventArgs e) => ReportViewportWidth();
+    private void OnSizeChanged(object sender, SizeChangedEventArgs e) => ReportViewportSize();
 
-    private void ReportViewportWidth()
+    private void ReportViewportSize()
     {
         var chromePadding = IsChromeless ? 0 : 48;
         var width = Math.Max(0, PageScrollViewer.ActualWidth - chromePadding);
+        var height = Math.Max(0, PageScrollViewer.ActualHeight - chromePadding);
         ViewportWidthChanged?.Invoke(this, width);
+        ViewportHeightChanged?.Invoke(this, height);
     }
 
     private void OnPointerWheelChanged(object sender, PointerRoutedEventArgs e)
@@ -176,6 +231,38 @@ public sealed partial class PdfPageViewer : UserControl
 
                 e.Handled = true;
             }
+        }
+    }
+
+    private void UpdateSearchHighlights()
+    {
+        SearchHighlightCanvas.Children.Clear();
+
+        if (SearchHighlights is null || SearchHighlights.Count == 0 || PageHeightPoints <= 0 || DisplayScale <= 0)
+        {
+            return;
+        }
+
+        var highlightBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(120, 255, 214, 102));
+
+        foreach (var rect in SearchHighlights)
+        {
+            var left = rect.Left * DisplayScale;
+            var top = (PageHeightPoints - rect.Top) * DisplayScale;
+            var width = Math.Max(1, (rect.Right - rect.Left) * DisplayScale);
+            var height = Math.Max(1, (rect.Top - rect.Bottom) * DisplayScale);
+
+            SearchHighlightCanvas.Children.Add(new Rectangle
+            {
+                Fill = highlightBrush,
+                Width = width,
+                Height = height,
+                RadiusX = 2,
+                RadiusY = 2
+            });
+
+            Canvas.SetLeft(SearchHighlightCanvas.Children[^1], left);
+            Canvas.SetTop(SearchHighlightCanvas.Children[^1], top);
         }
     }
 }

@@ -10,6 +10,7 @@ using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Printing;
 using Microsoft.UI.Xaml.Shapes;
 using Microsoft.Windows.Storage.Pickers;
+using System.Globalization;
 using System.Runtime.InteropServices.WindowsRuntime;
 using Windows.Foundation;
 using Windows.Graphics.Printing;
@@ -25,6 +26,8 @@ public sealed partial class ReaderPage : Page
     private List<Point>? _currentSignatureStroke;
 
     private PrintDocument? _printDocument;
+    private IReadOnlyList<int> _printPageIndices = [];
+    private int _printPageCursor;
 
     public ReaderPage()
     {
@@ -33,6 +36,7 @@ public sealed partial class ReaderPage : Page
         DataContext = ViewModel;
 
         PageViewer.ViewportWidthChanged += OnViewportWidthChanged;
+        PageViewer.ViewportHeightChanged += OnViewportHeightChanged;
         PageViewer.ZoomInRequested += (_, _) => ViewModel.ZoomInCommand.Execute(null);
         PageViewer.ZoomOutRequested += (_, _) => ViewModel.ZoomOutCommand.Execute(null);
         PageViewer.PagePointerPressed += (_, _) =>
@@ -43,6 +47,7 @@ public sealed partial class ReaderPage : Page
             }
         };
         PageViewer.EditSurface.OverlayChanged += EditSurface_OverlayChanged;
+        PageViewer.EditSurface.ActiveToolChangeRequested += EditSurface_ActiveToolChangeRequested;
         ViewModel.TabItems.CollectionChanged += OnTabItemsChanged;
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
         BtnClearSignature.Click += BtnClearSignature_Click;
@@ -85,9 +90,12 @@ public sealed partial class ReaderPage : Page
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         ViewModel.TabItems.CollectionChanged -= OnTabItemsChanged;
         PageViewer.EditSurface.OverlayChanged -= EditSurface_OverlayChanged;
+        PageViewer.EditSurface.ActiveToolChangeRequested -= EditSurface_ActiveToolChangeRequested;
     }
 
     private void OnViewportWidthChanged(object? sender, double width) => ViewModel.ViewportWidth = width;
+
+    private void OnViewportHeightChanged(object? sender, double height) => ViewModel.ViewportHeight = height;
 
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
@@ -102,6 +110,11 @@ public sealed partial class ReaderPage : Page
             or nameof(ReaderViewModel.InkThickness))
         {
             ApplyEditSurfaceState();
+            UpdateInkPaletteSelection();
+            if (!ViewModel.IsInkToolActive)
+            {
+                InkPalettePopup.IsOpen = false;
+            }
         }
     }
 
@@ -225,6 +238,14 @@ public sealed partial class ReaderPage : Page
         }
     }
 
+    private void OutlineItems_ItemClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is OutlineItemViewModel item)
+        {
+            ViewModel.GoToOutlineItemCommand.Execute(item);
+        }
+    }
+
     private async void RecentFiles_ItemClick(object sender, ItemClickEventArgs e)
     {
         if (e.ClickedItem is RecentFileItemViewModel item)
@@ -255,6 +276,15 @@ public sealed partial class ReaderPage : Page
     private void EditSurface_OverlayChanged(object? sender, PageOverlayState overlay) =>
         ViewModel.PersistCurrentOverlay(overlay);
 
+    private void EditSurface_ActiveToolChangeRequested(object? sender, ReaderEditTool tool)
+    {
+        if (tool == ReaderEditTool.Select)
+        {
+            ViewModel.UseSelectToolCommand.Execute(null);
+            ApplyEditSurfaceState();
+        }
+    }
+
     private async void SaveButton_Click(object sender, RoutedEventArgs e)
     {
         PageViewer.EditSurface.CommitActiveEdits();
@@ -272,6 +302,67 @@ public sealed partial class ReaderPage : Page
     {
         ViewModel.UseTextToolCommand.Execute(null);
         ApplyEditSurfaceState();
+    }
+
+    private void InkToolButton_Click(object sender, RoutedEventArgs e)
+    {
+        ApplyEditSurfaceState();
+        UpdateInkPaletteSelection();
+        OpenInkPalette();
+    }
+
+    private void OpenInkPalette()
+    {
+        InkPalette.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        var desired = InkPalette.DesiredSize;
+        var anchor = InkToolButton.TransformToVisual(RootGrid).TransformPoint(new Point(0, 0));
+        var left = anchor.X + InkToolButton.ActualWidth / 2 - desired.Width / 2;
+        var top = anchor.Y - desired.Height - 10;
+
+        InkPalettePopup.HorizontalOffset = Math.Clamp(left, 8, Math.Max(8, RootGrid.ActualWidth - desired.Width - 8));
+        InkPalettePopup.VerticalOffset = Math.Max(8, top);
+        InkPalettePopup.IsOpen = true;
+    }
+
+    private void InkColorSwatch_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string colorHex })
+        {
+            ViewModel.SetInkColorCommand.Execute(colorHex);
+            ApplyEditSurfaceState();
+            UpdateInkPaletteSelection();
+        }
+    }
+
+    private void InkThicknessButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string value } &&
+            double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var thickness))
+        {
+            ViewModel.SetInkThicknessCommand.Execute(thickness);
+            ApplyEditSurfaceState();
+            UpdateInkPaletteSelection();
+        }
+    }
+
+    private void UpdateInkPaletteSelection()
+    {
+        UpdatePaletteButton(InkBlackButton, ViewModel.InkColorHex == "#000000");
+        UpdatePaletteButton(InkRedButton, ViewModel.InkColorHex == "#B3261E");
+        UpdatePaletteButton(InkBlueButton, ViewModel.InkColorHex == "#1A73E8");
+        UpdatePaletteButton(InkThinButton, Math.Abs(ViewModel.InkThickness - 2) < 0.1);
+        UpdatePaletteButton(InkMediumButton, Math.Abs(ViewModel.InkThickness - 5) < 0.1);
+        UpdatePaletteButton(InkThickButton, Math.Abs(ViewModel.InkThickness - 9) < 0.1);
+    }
+
+    private static void UpdatePaletteButton(Button button, bool isSelected)
+    {
+        button.BorderBrush = isSelected
+            ? new SolidColorBrush(Microsoft.UI.Colors.DodgerBlue)
+            : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        button.Background = isSelected
+            ? new SolidColorBrush(Windows.UI.Color.FromArgb(30, 30, 144, 255))
+            : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
     }
 
     private void UndoEditButton_Click(object sender, RoutedEventArgs e) =>
@@ -396,7 +487,7 @@ public sealed partial class ReaderPage : Page
 
     private async void PrintButton_Click(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
     {
-        if (ViewModel.GetCurrentPagePngBytes() is null || PrintTarget.Source is not BitmapImage)
+        if (!ViewModel.HasDocument)
         {
             return;
         }
@@ -405,6 +496,15 @@ public sealed partial class ReaderPage : Page
         {
             return;
         }
+
+        var range = await PromptPrintRangeAsync();
+        if (range is null)
+        {
+            return;
+        }
+
+        _printPageIndices = range;
+        _printPageCursor = 0;
 
         _printDocument = new PrintDocument();
         _printDocument.Paginate += OnPrintPaginate;
@@ -428,7 +528,103 @@ public sealed partial class ReaderPage : Page
                 _printDocument.AddPages -= OnPrintAddPages;
                 _printDocument = null;
             }
+
+            _printPageIndices = [];
+            _printPageCursor = 0;
         }
+    }
+
+    private async Task<IReadOnlyList<int>?> PromptPrintRangeAsync()
+    {
+        var allPagesRadio = new RadioButton
+        {
+            Content = "All pages",
+            IsChecked = true,
+            Tag = "all"
+        };
+        var currentPageRadio = new RadioButton
+        {
+            Content = "Current page",
+            Tag = "current"
+        };
+        var customRangeRadio = new RadioButton
+        {
+            Content = "Page range",
+            Tag = "range"
+        };
+        var fromBox = new NumberBox
+        {
+            Header = "From",
+            Minimum = 1,
+            Maximum = ViewModel.DocumentPageCount,
+            Value = ViewModel.DocumentPageCount > 0 ? 1 : 1,
+            SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline,
+            IsEnabled = false
+        };
+        var toBox = new NumberBox
+        {
+            Header = "To",
+            Minimum = 1,
+            Maximum = ViewModel.DocumentPageCount,
+            Value = ViewModel.DocumentPageCount,
+            SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline,
+            IsEnabled = false
+        };
+
+        void UpdateRangeInputs(RadioButton selected)
+        {
+            var isCustom = ReferenceEquals(selected, customRangeRadio);
+            fromBox.IsEnabled = isCustom;
+            toBox.IsEnabled = isCustom;
+        }
+
+        allPagesRadio.Checked += (_, _) => UpdateRangeInputs(allPagesRadio);
+        currentPageRadio.Checked += (_, _) => UpdateRangeInputs(currentPageRadio);
+        customRangeRadio.Checked += (_, _) => UpdateRangeInputs(customRangeRadio);
+
+        var dialog = new ContentDialog
+        {
+            Title = "Print",
+            PrimaryButtonText = "Print",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = XamlRoot,
+            Content = new StackPanel
+            {
+                Spacing = 12,
+                Children =
+                {
+                    allPagesRadio,
+                    currentPageRadio,
+                    customRangeRadio,
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        Spacing = 12,
+                        Children = { fromBox, toBox }
+                    }
+                }
+            }
+        };
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return null;
+        }
+
+        if (currentPageRadio.IsChecked == true)
+        {
+            return [Math.Clamp(ViewModel.CurrentPageIndex, 0, Math.Max(0, ViewModel.DocumentPageCount - 1))];
+        }
+
+        if (customRangeRadio.IsChecked == true)
+        {
+            var from = (int)Math.Clamp(fromBox.Value, 1, ViewModel.DocumentPageCount) - 1;
+            var to = (int)Math.Clamp(toBox.Value, from + 1, ViewModel.DocumentPageCount) - 1;
+            return Enumerable.Range(from, to - from + 1).ToArray();
+        }
+
+        return Enumerable.Range(0, ViewModel.DocumentPageCount).ToArray();
     }
 
     private void OnPrintTaskRequested(PrintManager sender, PrintTaskRequestedEventArgs args)
@@ -451,29 +647,53 @@ public sealed partial class ReaderPage : Page
             return;
         }
 
-        _printDocument.SetPreviewPageCount(1, PreviewPageCountType.Final);
+        _printDocument.SetPreviewPageCount(_printPageIndices.Count, PreviewPageCountType.Final);
     }
 
-    private void OnPrintGetPreviewPage(object? sender, GetPreviewPageEventArgs e)
+    private async void OnPrintGetPreviewPage(object? sender, GetPreviewPageEventArgs e)
     {
-        if (_printDocument is null || PrintTarget.Source is not BitmapImage image)
+        if (_printDocument is null || e.PageNumber < 1 || e.PageNumber > _printPageIndices.Count)
         {
             return;
         }
 
-        var page = CreatePrintPage(image);
-        _printDocument.SetPreviewPage(e.PageNumber, page);
+        var page = await CreatePrintPageAsync(_printPageIndices[e.PageNumber - 1]);
+        if (page is not null)
+        {
+            _printDocument.SetPreviewPage(e.PageNumber, page);
+        }
     }
 
-    private void OnPrintAddPages(object? sender, AddPagesEventArgs e)
+    private async void OnPrintAddPages(object? sender, AddPagesEventArgs e)
     {
-        if (_printDocument is null || PrintTarget.Source is not BitmapImage image)
+        if (_printDocument is null)
         {
             return;
         }
 
-        _printDocument.AddPage(CreatePrintPage(image));
+        while (_printPageCursor < _printPageIndices.Count)
+        {
+            var page = await CreatePrintPageAsync(_printPageIndices[_printPageCursor]);
+            if (page is not null)
+            {
+                _printDocument.AddPage(page);
+            }
+
+            _printPageCursor++;
+        }
+
         _printDocument.AddPagesComplete();
+    }
+
+    private async Task<Grid?> CreatePrintPageAsync(int pageIndex)
+    {
+        var image = await ViewModel.RenderPageImageAsync(pageIndex, 96.0 / 72.0);
+        if (image is null)
+        {
+            return null;
+        }
+
+        return CreatePrintPage(image);
     }
 
     private static Grid CreatePrintPage(BitmapImage image)

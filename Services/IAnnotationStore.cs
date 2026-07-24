@@ -18,6 +18,10 @@ public interface IAnnotationStore
 
     Task SaveCompanionAsync(Guid tabId, string pdfPath, CancellationToken cancellationToken = default);
 
+    void ScheduleCompanionSave(Guid tabId, string pdfPath);
+
+    Task FlushPendingSavesAsync(CancellationToken cancellationToken = default);
+
     PageOverlayDocument? GetOverlayDocument(Guid tabId);
 
     void DeleteCompanion(string pdfPath);

@@ -10,6 +10,7 @@ namespace ElliePdf.Services;
 public sealed class PdfService : IPdfService, IDisposable
 {
     private readonly SemaphoreSlim _pdfiumGate = new(1, 1);
+    private readonly PageRenderCache _renderCache = new();
     private readonly Lock _nativeStateLock = new();
     private bool _initialized;
     private IntPtr _nativeLibraryHandle;
@@ -43,7 +44,8 @@ public sealed class PdfService : IPdfService, IDisposable
                 throw CreatePdfiumException($"Unable to read page count from '{Path.GetFileName(path)}'.");
             }
 
-            return new PdfDocumentSession(this, document, path, pageCount);
+            var formFill = PdfFormFillContext.TryCreate(document);
+            return new PdfDocumentSession(this, document, path, pageCount, formFill);
         }, cancellationToken);
     }
 
@@ -57,6 +59,11 @@ public sealed class PdfService : IPdfService, IDisposable
         ObjectDisposedException.ThrowIf(document.IsClosed, document);
         ArgumentOutOfRangeException.ThrowIfNegative(pageIndex);
         ArgumentOutOfRangeException.ThrowIfLessThan(scale, 0.1);
+
+        if (_renderCache.TryGet(document, pageIndex, scale, out var cached) && cached is not null)
+        {
+            return Task.FromResult(cached);
+        }
 
         return ExecutePdfiumCallAsync(async () =>
         {
@@ -82,18 +89,12 @@ public sealed class PdfService : IPdfService, IDisposable
                 }
 
                 PdfiumNative.FPDFBitmap_FillRect(bitmap, 0, 0, renderWidth, renderHeight, PdfiumNative.WhiteArgb);
-                PdfiumNative.FPDF_RenderPageBitmap(
-                    bitmap,
-                    page,
-                    0,
-                    0,
-                    renderWidth,
-                    renderHeight,
-                    0,
-                    PdfiumNative.RenderAnnotations);
+                RenderPageBitmap(document.FormFill?.FormHandle ?? IntPtr.Zero, page, bitmap, renderWidth, renderHeight);
 
                 var pngBytes = await EncodeBitmapToPngAsync(bitmap, renderWidth, renderHeight, cancellationToken);
-                return new RenderedPage(pngBytes, renderWidth, renderHeight, pageWidth, pageHeight);
+                var rendered = new RenderedPage(pngBytes, renderWidth, renderHeight, pageWidth, pageHeight);
+                _renderCache.Set(document, pageIndex, scale, rendered);
+                return rendered;
             }
             finally
             {
@@ -144,15 +145,7 @@ public sealed class PdfService : IPdfService, IDisposable
                 }
 
                 PdfiumNative.FPDFBitmap_FillRect(bitmap, 0, 0, renderWidth, renderHeight, PdfiumNative.WhiteArgb);
-                PdfiumNative.FPDF_RenderPageBitmap(
-                    bitmap,
-                    page,
-                    0,
-                    0,
-                    renderWidth,
-                    renderHeight,
-                    0,
-                    PdfiumNative.RenderAnnotations);
+                RenderPageBitmap(document.FormFill?.FormHandle ?? IntPtr.Zero, page, bitmap, renderWidth, renderHeight);
 
                 return await EncodeBitmapToPngAsync(bitmap, renderWidth, renderHeight, cancellationToken);
             }
@@ -216,7 +209,8 @@ public sealed class PdfService : IPdfService, IDisposable
                         var charIndex = PdfiumNative.FPDFText_GetSchResultIndex(findHandle);
                         var matchLength = PdfiumNative.FPDFText_GetSchCount(findHandle);
                         var context = ExtractTextContext(textPage, charIndex, matchLength);
-                        matches.Add(new TextMatch(pageIndex, charIndex, matchLength, context));
+                        var highlightRects = ExtractMatchHighlightRects(textPage, charIndex, matchLength);
+                        matches.Add(new TextMatch(pageIndex, charIndex, matchLength, context, highlightRects));
                     }
                     while (PdfiumNative.FPDFText_FindNext(findHandle) != 0);
                 }
@@ -237,6 +231,51 @@ public sealed class PdfService : IPdfService, IDisposable
             }
 
             return (IReadOnlyList<TextMatch>)matches;
+        }, cancellationToken);
+    }
+
+    public Task<(float Width, float Height)> GetPageSizeAsync(
+        PdfDocumentSession document,
+        int pageIndex,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ObjectDisposedException.ThrowIf(document.IsClosed, document);
+        ArgumentOutOfRangeException.ThrowIfNegative(pageIndex);
+
+        return ExecutePdfiumCallAsync(() =>
+        {
+            var page = PdfiumNative.FPDF_LoadPage(document.Handle, pageIndex);
+            if (page == IntPtr.Zero)
+            {
+                throw CreatePdfiumException($"Unable to load page {pageIndex + 1}.");
+            }
+
+            try
+            {
+                return (
+                    Math.Max(1f, PdfiumNative.FPDF_GetPageWidthF(page)),
+                    Math.Max(1f, PdfiumNative.FPDF_GetPageHeightF(page)));
+            }
+            finally
+            {
+                PdfiumNative.FPDF_ClosePage(page);
+            }
+        }, cancellationToken);
+    }
+
+    public Task<IReadOnlyList<PdfOutlineItem>> GetOutlineAsync(
+        PdfDocumentSession document,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ObjectDisposedException.ThrowIf(document.IsClosed, document);
+
+        return ExecutePdfiumCallAsync(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var root = PdfiumNative.FPDFBookmark_GetFirstChild(document.Handle, IntPtr.Zero);
+            return (IReadOnlyList<PdfOutlineItem>)ReadOutlineChildren(document.Handle, root, cancellationToken);
         }, cancellationToken);
     }
 
@@ -466,7 +505,7 @@ public sealed class PdfService : IPdfService, IDisposable
                     }
                     else
                     {
-                        var rendered = RenderPageToPackedBgra(document.Handle, pageIndex, renderScale);
+                        var rendered = RenderPageToPackedBgra(document.Handle, document.FormFill?.FormHandle ?? IntPtr.Zero, pageIndex, renderScale);
                         var composited = OverlayCompositor.Composite(
                             rendered.Pixels,
                             rendered.Width,
@@ -530,6 +569,79 @@ public sealed class PdfService : IPdfService, IDisposable
 
         _pdfiumGate.Dispose();
         _activeWriteStream?.Dispose();
+    }
+
+    private static List<PdfOutlineItem> ReadOutlineChildren(
+        IntPtr documentHandle,
+        IntPtr bookmark,
+        CancellationToken cancellationToken)
+    {
+        var items = new List<PdfOutlineItem>();
+        var current = bookmark;
+
+        while (current != IntPtr.Zero)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var title = ReadBookmarkTitle(current);
+            var pageIndex = ResolveBookmarkPageIndex(documentHandle, current);
+            var childBookmark = PdfiumNative.FPDFBookmark_GetFirstChild(documentHandle, current);
+            var children = ReadOutlineChildren(documentHandle, childBookmark, cancellationToken);
+            items.Add(new PdfOutlineItem(title, pageIndex, children));
+            current = PdfiumNative.FPDFBookmark_GetNextSibling(current);
+        }
+
+        return items;
+    }
+
+    private static string ReadBookmarkTitle(IntPtr bookmark)
+    {
+        var length = PdfiumNative.FPDFBookmark_GetTitle(bookmark, null, 0);
+        if (length == 0)
+        {
+            return "Untitled";
+        }
+
+        var buffer = new byte[length];
+        PdfiumNative.FPDFBookmark_GetTitle(bookmark, buffer, length);
+        return System.Text.Encoding.Unicode.GetString(buffer, 0, (int)length - 2);
+    }
+
+    private static int ResolveBookmarkPageIndex(IntPtr documentHandle, IntPtr bookmark)
+    {
+        var dest = PdfiumNative.FPDFBookmark_GetDest(documentHandle, bookmark);
+        if (dest == IntPtr.Zero)
+        {
+            return 0;
+        }
+
+        var pageIndex = PdfiumNative.FPDFDest_GetDestPageIndex(documentHandle, dest);
+        return pageIndex >= 0 ? pageIndex : 0;
+    }
+
+    private static IReadOnlyList<PdfRect> ExtractMatchHighlightRects(IntPtr textPage, int charIndex, int matchLength)
+    {
+        if (matchLength <= 0)
+        {
+            return [];
+        }
+
+        var rects = new List<PdfRect>(matchLength);
+        for (var offset = 0; offset < matchLength; offset++)
+        {
+            if (PdfiumNative.FPDFText_GetRect(
+                    textPage,
+                    charIndex + offset,
+                    out var left,
+                    out var top,
+                    out var right,
+                    out var bottom))
+            {
+                rects.Add(new PdfRect((float)left, (float)top, (float)right, (float)bottom));
+            }
+        }
+
+        return rects;
     }
 
     private static string ExtractTextContext(IntPtr textPage, int charIndex, int matchLength)
@@ -793,7 +905,57 @@ public sealed class PdfService : IPdfService, IDisposable
         float PageWidthPoints,
         float PageHeightPoints);
 
-    private static PackedPageRender RenderPageToPackedBgra(IntPtr documentHandle, int pageIndex, double scale)
+    private static void RenderPageBitmap(
+        IntPtr formHandle,
+        IntPtr page,
+        IntPtr bitmap,
+        int renderWidth,
+        int renderHeight,
+        int rotate = 0)
+    {
+        var hasFormFill = formHandle != IntPtr.Zero;
+        if (hasFormFill)
+        {
+            PdfiumNative.FORM_OnAfterLoadPage(page, formHandle);
+        }
+
+        try
+        {
+            var baseRenderFlags = hasFormFill ? 0 : PdfiumNative.RenderAnnotations;
+            PdfiumNative.FPDF_RenderPageBitmap(
+                bitmap,
+                page,
+                0,
+                0,
+                renderWidth,
+                renderHeight,
+                rotate,
+                baseRenderFlags);
+
+            if (hasFormFill)
+            {
+                PdfiumNative.FPDF_FFLDraw(
+                    formHandle,
+                    bitmap,
+                    page,
+                    0,
+                    0,
+                    renderWidth,
+                    renderHeight,
+                    rotate,
+                    PdfiumNative.RenderAnnotations);
+            }
+        }
+        finally
+        {
+            if (hasFormFill)
+            {
+                PdfiumNative.FORM_OnBeforeClosePage(page, formHandle);
+            }
+        }
+    }
+
+    private static PackedPageRender RenderPageToPackedBgra(IntPtr documentHandle, IntPtr formHandle, int pageIndex, double scale)
     {
         var page = PdfiumNative.FPDF_LoadPage(documentHandle, pageIndex);
         if (page == IntPtr.Zero)
@@ -817,15 +979,7 @@ public sealed class PdfService : IPdfService, IDisposable
             }
 
             PdfiumNative.FPDFBitmap_FillRect(bitmap, 0, 0, renderWidth, renderHeight, PdfiumNative.WhiteArgb);
-            PdfiumNative.FPDF_RenderPageBitmap(
-                bitmap,
-                page,
-                0,
-                0,
-                renderWidth,
-                renderHeight,
-                0,
-                PdfiumNative.RenderAnnotations);
+            RenderPageBitmap(formHandle, page, bitmap, renderWidth, renderHeight);
 
             var stride = PdfiumNative.FPDFBitmap_GetStride(bitmap);
             var sourceLength = stride * renderHeight;
