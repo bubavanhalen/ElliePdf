@@ -12,17 +12,9 @@ public interface IAnnotationStore
 
     void MarkTabClean(Guid tabId);
 
+    void ClearDocument(Guid tabId);
+
     void RemoveTab(Guid tabId);
 
-    Task LoadCompanionAsync(Guid tabId, string pdfPath, CancellationToken cancellationToken = default);
-
-    Task SaveCompanionAsync(Guid tabId, string pdfPath, CancellationToken cancellationToken = default);
-
-    void ScheduleCompanionSave(Guid tabId, string pdfPath);
-
-    Task FlushPendingSavesAsync(CancellationToken cancellationToken = default);
-
     PageOverlayDocument? GetOverlayDocument(Guid tabId);
-
-    void DeleteCompanion(string pdfPath);
 }

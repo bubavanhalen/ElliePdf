@@ -29,6 +29,7 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
     private IReadOnlyList<TextMatch> _searchMatches = [];
     private int _activeSearchMatchIndex = -1;
     private byte[]? _lastRenderedPng;
+    private bool _suppressSessionRender;
 
     public ObservableCollection<DocumentTabItemViewModel> TabItems { get; } = [];
 
@@ -43,6 +44,9 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     public partial IReadOnlyList<PdfRect> SearchHighlights { get; private set; } = [];
+
+    [ObservableProperty]
+    public partial IReadOnlyList<PdfFormField> SignableFields { get; private set; } = [];
 
     [ObservableProperty]
     public partial Guid? SelectedTabId { get; private set; }
@@ -252,11 +256,20 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
 
         try
         {
-            await _tabService.OpenOrActivateTabAsync(path, cancellationToken);
-            ApplyDefaultZoomMode();
-            SelectedTabId = _tabService.ActiveTabId;
-            SyncTabItems();
-            NotifyDocumentChanged();
+            _suppressSessionRender = true;
+            try
+            {
+                await _tabService.OpenOrActivateTabAsync(path, cancellationToken);
+                ApplyDefaultZoomMode();
+                SelectedTabId = _tabService.ActiveTabId;
+                SyncTabItems();
+                NotifyDocumentChanged();
+            }
+            finally
+            {
+                _suppressSessionRender = false;
+            }
+
             await RenderCurrentPageAsync();
             await RefreshRecentFilesAsync(cancellationToken);
             SetStatus($"Opened {Path.GetFileName(path)}.", InfoBarSeverity.Success);
@@ -281,24 +294,42 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
 
     public async Task LoadFilesAsync(IReadOnlyList<string> filePaths, CancellationToken cancellationToken = default)
     {
-        foreach (var filePath in filePaths)
+        _suppressSessionRender = true;
+        try
         {
-            await _tabService.OpenOrActivateTabAsync(filePath, cancellationToken);
+            foreach (var filePath in filePaths)
+            {
+                await _tabService.OpenOrActivateTabAsync(filePath, cancellationToken);
+            }
+
+            SelectedTabId = _tabService.ActiveTabId;
+            SyncTabItems();
+            ApplyDefaultZoomMode();
+            NotifyDocumentChanged();
+        }
+        finally
+        {
+            _suppressSessionRender = false;
         }
 
-        SelectedTabId = _tabService.ActiveTabId;
-        SyncTabItems();
-        ApplyDefaultZoomMode();
-        NotifyDocumentChanged();
         await RenderCurrentPageAsync();
         await RefreshRecentFilesAsync(cancellationToken);
     }
 
     public async Task ActivateTabAsync(Guid tabId)
     {
-        await _tabService.ActivateTabAsync(tabId);
-        SelectedTabId = tabId;
-        NotifyDocumentChanged();
+        _suppressSessionRender = true;
+        try
+        {
+            await _tabService.ActivateTabAsync(tabId);
+            SelectedTabId = tabId;
+            NotifyDocumentChanged();
+        }
+        finally
+        {
+            _suppressSessionRender = false;
+        }
+
         await RenderCurrentPageAsync();
         if (IsThumbnailPanelOpen)
         {
@@ -443,7 +474,6 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
     public void GoToPage(int pageIndex)
     {
         _tabService.CurrentPageIndex = pageIndex;
-        _ = RenderCurrentPageAsync();
     }
 
     [RelayCommand]
@@ -455,7 +485,6 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         }
 
         _tabService.CurrentPageIndex -= 1;
-        _ = RenderCurrentPageAsync();
     }
 
     [RelayCommand]
@@ -467,32 +496,36 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         }
 
         _tabService.CurrentPageIndex += 1;
-        _ = RenderCurrentPageAsync();
     }
 
     [RelayCommand]
     private void ZoomIn()
     {
-        _tabService.ZoomMode = PdfZoomMode.Custom;
         _tabService.ZoomScale *= 1.25;
         NotifyZoomChanged();
-        _ = RenderCurrentPageAsync();
     }
 
     [RelayCommand]
     private void ZoomOut()
     {
-        _tabService.ZoomMode = PdfZoomMode.Custom;
         _tabService.ZoomScale /= 1.25;
         NotifyZoomChanged();
-        _ = RenderCurrentPageAsync();
     }
 
     [RelayCommand]
     private void ZoomActualSize()
     {
-        _tabService.ZoomMode = PdfZoomMode.ActualSize;
-        _tabService.ZoomScale = 96.0 / 72.0;
+        _suppressSessionRender = true;
+        try
+        {
+            _tabService.ZoomScale = 96.0 / 72.0;
+            _tabService.ZoomMode = PdfZoomMode.ActualSize;
+        }
+        finally
+        {
+            _suppressSessionRender = false;
+        }
+
         NotifyZoomChanged();
         _ = RenderCurrentPageAsync();
     }
@@ -502,7 +535,6 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
     {
         _tabService.ZoomMode = PdfZoomMode.FitWidth;
         NotifyZoomChanged();
-        _ = RenderCurrentPageAsync();
     }
 
     [RelayCommand]
@@ -510,7 +542,6 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
     {
         _tabService.ZoomMode = PdfZoomMode.FitPage;
         NotifyZoomChanged();
-        _ = RenderCurrentPageAsync();
     }
 
     [RelayCommand]
@@ -603,7 +634,6 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
 
         _annotationStore.SetPageOverlay(tab.Id, _tabService.CurrentPageIndex, overlay);
         tab.IsDirty = true;
-        _annotationStore.ScheduleCompanionSave(tab.Id, tab.FilePath);
     }
 
     [RelayCommand]
@@ -616,12 +646,23 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
             return;
         }
 
-        await _annotationStore.LoadCompanionAsync(tab.Id, tab.FilePath);
+        if (IsEditMode)
+        {
+            return;
+        }
+
         ClosePanels();
         ActiveEditTool = ReaderEditTool.Select;
         IsInkModeEnabled = false;
         ToolMode = ReaderToolMode.Edit;
         OnPropertyChanged(nameof(CurrentOverlay));
+    }
+
+    [RelayCommand]
+    private async Task EnterTextEditModeAsync()
+    {
+        await EnterEditModeAsync();
+        UseTextTool();
     }
 
     [RelayCommand]
@@ -768,6 +809,52 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
 
     public void DismissStatus() => IsStatusOpen = false;
 
+    public async Task DigitallySignCurrentAsync(
+        PdfFormField field,
+        SigningCertificateInfo certificate,
+        string reason = "Document approval")
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        ArgumentNullException.ThrowIfNull(certificate);
+
+        var tab = _tabService.ActiveTab;
+        if (tab is null)
+        {
+            SetStatus("Open a document before signing.", InfoBarSeverity.Informational);
+            return;
+        }
+
+        IsBusy = true;
+        try
+        {
+            var request = new DigitalSignatureRequest(
+                certificate.Thumbprint,
+                field.PageIndex,
+                field.Bounds,
+                reason);
+            await _editSaveService.DigitallySignTabAsync(
+                tab,
+                tab.FilePath,
+                request,
+                CancellationToken.None);
+            OnPropertyChanged(nameof(CurrentOverlay));
+            await RenderCurrentPageAsync();
+            SetStatus(
+                $"Digitally signed '{Path.GetFileName(tab.FilePath)}' with {certificate.DisplayName}.",
+                InfoBarSeverity.Success);
+        }
+        catch (Exception ex) when (
+            ex is InvalidOperationException or IOException or UnauthorizedAccessException or
+            System.Security.Cryptography.CryptographicException)
+        {
+            SetStatus($"Digital signing failed: {ex.Message}", InfoBarSeverity.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
     public void Dispose()
     {
         _tabService.StateChanged -= OnSessionStateChanged;
@@ -782,7 +869,10 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
     {
         NotifyDocumentChanged();
         NotifyZoomChanged();
-        _ = RenderCurrentPageAsync();
+        if (!_suppressSessionRender)
+        {
+            _ = RenderCurrentPageAsync();
+        }
     }
 
     private void NotifyDocumentChanged()
@@ -971,6 +1061,7 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
             PagePixelHeight = 0;
             PageWidthPoints = 0;
             PageHeightPoints = 0;
+            SignableFields = [];
             OnPropertyChanged(nameof(DisplayScale));
             ToolMode = ReaderToolMode.Read;
             return;
@@ -986,9 +1077,11 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         {
             IsBusy = true;
             await RefreshPageDimensionsAsync(token);
-            await Task.Delay(120, token);
             var scale = ResolveRenderScale();
             var rendered = await _pdfService.RenderPageAsync(document, pageIndex, scale, token);
+            SignableFields = (await _pdfService.GetFormFieldsAsync(document, pageIndex, token))
+                .Where(field => field.IsSignAction)
+                .ToArray();
             _lastRenderedPng = rendered.PngBytes;
             PageImage = await BitmapHelper.CreateBitmapAsync(rendered.PngBytes);
             PagePixelWidth = rendered.Width;
@@ -1027,6 +1120,15 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         try
         {
             await _editSaveService.SaveTabAsync(tab, outputPath, CancellationToken.None);
+            if (string.Equals(
+                    Path.GetFullPath(tab.FilePath),
+                    Path.GetFullPath(outputPath),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                OnPropertyChanged(nameof(CurrentOverlay));
+                await RenderCurrentPageAsync();
+            }
+
             SetStatus($"Saved '{Path.GetFileName(outputPath)}' with annotations embedded.", InfoBarSeverity.Success);
         }
         catch (PdfiumDependencyException ex)

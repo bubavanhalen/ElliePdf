@@ -60,6 +60,7 @@ Regenerate transparent PNG tiles and multi-size `AppIcon.ico` from the brand mas
 
 ```powershell
 dotnet test ElliePdf.Tests\ElliePdf.Tests.csproj
+dotnet test ElliePdf.FunctionalTests\ElliePdf.FunctionalTests.csproj -p:Platform=x64
 ```
 
 ## Publish

@@ -6,74 +6,93 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:local="using:ElliePdf"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    Background="Transparent"
+    Background="{ThemeResource EllieShellBrush}"
     mc:Ignorable="d">
 
-    <Grid Background="Transparent">
-        <NavigationView
-            x:Name="NavView"
-            AutomationProperties.AutomationId="NavView"
-            AlwaysShowHeader="False"
-            Background="Transparent"
-            IsBackButtonVisible="Collapsed"
-            IsPaneOpen="False"
-            IsPaneToggleButtonVisible="False"
-            IsTitleBarAutoPaddingEnabled="False"
-            PaneDisplayMode="LeftMinimal"
-            SelectionChanged="NavView_SelectionChanged">
-            <NavigationView.Resources>
-                <SolidColorBrush x:Key="NavigationViewDefaultPaneBackground" Color="Transparent" />
-                <Thickness x:Key="NavigationViewContentGridBorderThickness">0</Thickness>
-            </NavigationView.Resources>
-            <NavigationView.PaneHeader>
-                <Border Height="48" />
-            </NavigationView.PaneHeader>
-            <NavigationView.MenuItems>
-                <NavigationViewItem AutomationProperties.AutomationId="NavItemRead" Content="Read" Icon="Document" Tag="read" />
-                <NavigationViewItem AutomationProperties.AutomationId="NavItemOrganize" Content="Organize" Icon="Library" Tag="organize" />
-                <NavigationViewItem AutomationProperties.AutomationId="NavItemSettings" Content="Settings" Icon="Setting" Tag="settings" />
-            </NavigationView.MenuItems>
-            <Frame x:Name="ContentFrame" AutomationProperties.AutomationId="ContentFrame" Background="Transparent" />
-        </NavigationView>
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="48" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
 
         <Border
-            x:Name="WindowDragSurface"
-            Height="44"
-            Margin="320,0,152,0"
-            Canvas.ZIndex="40"
-            Background="Transparent"
-            VerticalAlignment="Top" />
+            Grid.Row="0"
+            Background="{ThemeResource EllieShellBrush}"
+            BorderBrush="{ThemeResource EllieBorderBrush}"
+            BorderThickness="0,0,0,1">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="148" />
+                </Grid.ColumnDefinitions>
 
-        <StackPanel
-            Margin="8,6,0,0"
-            Canvas.ZIndex="50"
-            HorizontalAlignment="Left"
-            Orientation="Horizontal"
-            Spacing="4"
-            VerticalAlignment="Top">
-            <Button
-                x:Name="PaneToggleButton"
-                Width="36"
-                Height="32"
-                Padding="0"
-                AutomationProperties.Name="Menu"
-                Click="PaneToggleButton_Click"
-                Style="{StaticResource SubtleButtonStyle}"
-                ToolTipService.ToolTip="Menu">
-                <SymbolIcon Symbol="GlobalNavigationButton" />
-            </Button>
-            <Button
-                x:Name="BackButton"
-                Width="36"
-                Height="32"
-                Padding="0"
-                AutomationProperties.Name="Back"
-                Click="BackButton_Click"
-                Style="{StaticResource SubtleButtonStyle}"
-                ToolTipService.ToolTip="Back"
-                Visibility="Collapsed">
-                <SymbolIcon Symbol="Back" />
-            </Button>
-        </StackPanel>
+                <StackPanel
+                    Grid.Column="0"
+                    Margin="12,0,18,0"
+                    Orientation="Horizontal"
+                    Spacing="9"
+                    VerticalAlignment="Center">
+                    <Button
+                        x:Name="BackButton"
+                        AutomationProperties.Name="Back to document"
+                        Click="BackButton_Click"
+                        Style="{StaticResource EllieIconButtonStyle}"
+                        ToolTipService.ToolTip="Back to document"
+                        Visibility="Collapsed">
+                        <SymbolIcon Symbol="Back" />
+                    </Button>
+                    <Border
+                        Width="28"
+                        Height="28"
+                        Background="{ThemeResource EllieAccentSubtleBrush}"
+                        CornerRadius="8">
+                        <FontIcon
+                            FontSize="14"
+                            Foreground="{ThemeResource EllieAccentBrush}"
+                            Glyph="&#xE8A5;" />
+                    </Border>
+                    <TextBlock
+                        VerticalAlignment="Center"
+                        FontSize="15"
+                        FontWeight="SemiBold"
+                        Text="Ellie PDF" />
+                </StackPanel>
+
+                <Border
+                    x:Name="WindowDragSurface"
+                    Grid.Column="1"
+                    Background="Transparent" />
+
+                <StackPanel
+                    Grid.Column="2"
+                    Margin="0,0,8,0"
+                    Orientation="Horizontal"
+                    Spacing="2"
+                    VerticalAlignment="Center">
+                    <Button
+                        AutomationProperties.Name="Organize pages"
+                        Click="OrganizeButton_Click"
+                        Style="{StaticResource EllieIconButtonStyle}"
+                        ToolTipService.ToolTip="Organize pages">
+                        <SymbolIcon Symbol="Library" />
+                    </Button>
+                    <Button
+                        AutomationProperties.Name="Settings"
+                        Click="SettingsButton_Click"
+                        Style="{StaticResource EllieIconButtonStyle}"
+                        ToolTipService.ToolTip="Settings">
+                        <SymbolIcon Symbol="Setting" />
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Frame
+            x:Name="ContentFrame"
+            Grid.Row="1"
+            AutomationProperties.AutomationId="ContentFrame"
+            Background="Transparent" />
     </Grid>
 </Page>

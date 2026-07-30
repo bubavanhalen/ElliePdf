@@ -1,4 +1,5 @@
 using ElliePdf.Models;
+using ElliePdf.Services;
 using ElliePdf.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Input;
@@ -14,6 +15,8 @@ using System.Globalization;
 using System.Runtime.InteropServices.WindowsRuntime;
 using Windows.Foundation;
 using Windows.Graphics.Printing;
+using Windows.ApplicationModel.DataTransfer;
+using Windows.Storage;
 using Windows.Storage.Streams;
 using Windows.System;
 
@@ -24,6 +27,7 @@ public sealed partial class ReaderPage : Page
     private bool _isSyncingTabs;
     private readonly List<List<Point>> _signatureStrokes = [];
     private List<Point>? _currentSignatureStroke;
+    private PdfFormField? _pendingSignatureField;
 
     private PrintDocument? _printDocument;
     private IReadOnlyList<int> _printPageIndices = [];
@@ -48,6 +52,7 @@ public sealed partial class ReaderPage : Page
         };
         PageViewer.EditSurface.OverlayChanged += EditSurface_OverlayChanged;
         PageViewer.EditSurface.ActiveToolChangeRequested += EditSurface_ActiveToolChangeRequested;
+        PageViewer.SignActionRequested += PageViewer_SignActionRequested;
         ViewModel.TabItems.CollectionChanged += OnTabItemsChanged;
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
         BtnClearSignature.Click += BtnClearSignature_Click;
@@ -91,6 +96,7 @@ public sealed partial class ReaderPage : Page
         ViewModel.TabItems.CollectionChanged -= OnTabItemsChanged;
         PageViewer.EditSurface.OverlayChanged -= EditSurface_OverlayChanged;
         PageViewer.EditSurface.ActiveToolChangeRequested -= EditSurface_ActiveToolChangeRequested;
+        PageViewer.SignActionRequested -= PageViewer_SignActionRequested;
     }
 
     private void OnViewportWidthChanged(object? sender, double width) => ViewModel.ViewportWidth = width;
@@ -101,7 +107,8 @@ public sealed partial class ReaderPage : Page
     {
         if (e.PropertyName is nameof(ReaderViewModel.PageImage)
             or nameof(ReaderViewModel.CurrentOverlay)
-            or nameof(ReaderViewModel.IsEditMode))
+            or nameof(ReaderViewModel.IsEditMode)
+            or nameof(ReaderViewModel.SignableFields))
         {
             LoadEditSurface();
         }
@@ -151,6 +158,44 @@ public sealed partial class ReaderPage : Page
 
         ViewModel.ClosePanels();
         await ViewModel.LoadDocumentAsync(file.Path);
+        SyncTabViewItems();
+    }
+
+    private void ReaderPage_DragOver(object sender, DragEventArgs e)
+    {
+        if (!e.DataView.Contains(StandardDataFormats.StorageItems))
+        {
+            return;
+        }
+
+        e.AcceptedOperation = DataPackageOperation.Copy;
+        e.DragUIOverride.Caption = "Open PDF";
+        e.DragUIOverride.IsCaptionVisible = true;
+        e.DragUIOverride.IsContentVisible = true;
+    }
+
+    private async void ReaderPage_Drop(object sender, DragEventArgs e)
+    {
+        if (!e.DataView.Contains(StandardDataFormats.StorageItems))
+        {
+            return;
+        }
+
+        var items = await e.DataView.GetStorageItemsAsync();
+        var filePaths = items
+            .OfType<StorageFile>()
+            .Where(file => string.Equals(file.FileType, ".pdf", StringComparison.OrdinalIgnoreCase))
+            .Select(file => file.Path)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .ToArray();
+
+        if (filePaths.Length == 0)
+        {
+            return;
+        }
+
+        ViewModel.ClosePanels();
+        await ViewModel.LoadFilesAsync(filePaths);
         SyncTabViewItems();
     }
 
@@ -263,6 +308,10 @@ public sealed partial class ReaderPage : Page
             ViewModel.DisplayScale,
             ViewModel.PagePixelWidth,
             ViewModel.PagePixelHeight);
+        PageViewer.ShowSignActions(
+            ViewModel.SignableFields,
+            ViewModel.PageHeightPoints,
+            ViewModel.DisplayScale);
         ApplyEditSurfaceState();
     }
 
@@ -278,11 +327,26 @@ public sealed partial class ReaderPage : Page
 
     private void EditSurface_ActiveToolChangeRequested(object? sender, ReaderEditTool tool)
     {
-        if (tool == ReaderEditTool.Select)
+        switch (tool)
         {
-            ViewModel.UseSelectToolCommand.Execute(null);
-            ApplyEditSurfaceState();
+            case ReaderEditTool.Select:
+                ViewModel.UseSelectToolCommand.Execute(null);
+                break;
+            case ReaderEditTool.Text:
+                ViewModel.UseTextToolCommand.Execute(null);
+                break;
+            case ReaderEditTool.Ink:
+                ViewModel.UseInkToolCommand.Execute(null);
+                break;
+            case ReaderEditTool.Signature:
+                ViewModel.UseSignatureToolCommand.Execute(null);
+                break;
+            case ReaderEditTool.Eraser:
+                ViewModel.UseEraserToolCommand.Execute(null);
+                break;
         }
+
+        ApplyEditSurfaceState();
     }
 
     private async void SaveButton_Click(object sender, RoutedEventArgs e)
@@ -373,11 +437,21 @@ public sealed partial class ReaderPage : Page
 
     private async void SignatureButton_Click(object sender, RoutedEventArgs e)
     {
+        await ShowSignatureCaptureAsync(null);
+    }
+
+    private async Task ShowSignatureCaptureAsync(PdfFormField? field)
+    {
+        _pendingSignatureField = field;
         _signatureStrokes.Clear();
         _currentSignatureStroke = null;
         SignatureCanvas.Children.Clear();
         SignatureDialog.XamlRoot = XamlRoot;
-        await SignatureDialog.ShowAsync();
+        var result = await SignatureDialog.ShowAsync();
+        if (result != ContentDialogResult.Primary)
+        {
+            _pendingSignatureField = null;
+        }
     }
 
     private void BtnClearSignature_Click(object sender, RoutedEventArgs e)
@@ -448,7 +522,9 @@ public sealed partial class ReaderPage : Page
         }
     }
 
-    private void SignatureDialog_PrimaryButtonClick(ContentDialog sender, ContentDialogButtonClickEventArgs args)
+    private async void SignatureDialog_PrimaryButtonClick(
+        ContentDialog sender,
+        ContentDialogButtonClickEventArgs args)
     {
         if (_signatureStrokes.All(stroke => stroke.Count < 2))
         {
@@ -456,7 +532,20 @@ public sealed partial class ReaderPage : Page
             return;
         }
 
-        _ = PlaceSignatureAsync();
+        var deferral = args.GetDeferral();
+        try
+        {
+            await PlaceSignatureAsync();
+        }
+        catch (Exception ex)
+        {
+            args.Cancel = true;
+            System.Diagnostics.Debug.WriteLine($"Could not capture signature: {ex.Message}");
+        }
+        finally
+        {
+            deferral.Complete();
+        }
     }
 
     private async Task PlaceSignatureAsync()
@@ -467,6 +556,8 @@ public sealed partial class ReaderPage : Page
         var encoder = await Windows.Graphics.Imaging.BitmapEncoder.CreateAsync(
             Windows.Graphics.Imaging.BitmapEncoder.PngEncoderId,
             stream);
+        var pixels = (await renderTarget.GetPixelsAsync()).ToArray();
+        MakeWhiteBackgroundTransparent(pixels);
         encoder.SetPixelData(
             Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8,
             Windows.Graphics.Imaging.BitmapAlphaMode.Premultiplied,
@@ -474,7 +565,7 @@ public sealed partial class ReaderPage : Page
             (uint)renderTarget.PixelHeight,
             96,
             96,
-            (await renderTarget.GetPixelsAsync()).ToArray());
+            pixels);
         await encoder.FlushAsync();
         stream.Seek(0);
         using var memory = new MemoryStream();
@@ -482,7 +573,155 @@ public sealed partial class ReaderPage : Page
 
         ViewModel.UseSignatureToolCommand.Execute(null);
         ApplyEditSurfaceState();
-        PageViewer.EditSurface.PlaceSignature(Convert.ToBase64String(memory.ToArray()));
+        PageViewer.EditSurface.PlaceSignature(
+            Convert.ToBase64String(memory.ToArray()),
+            _pendingSignatureField?.Bounds);
+        _pendingSignatureField = null;
+    }
+
+    private static void MakeWhiteBackgroundTransparent(byte[] bgraPixels)
+    {
+        for (var index = 0; index + 3 < bgraPixels.Length; index += 4)
+        {
+            var darkestChannel = Math.Min(bgraPixels[index], Math.Min(bgraPixels[index + 1], bgraPixels[index + 2]));
+            var alpha = (byte)(255 - darkestChannel);
+            bgraPixels[index] = 0;
+            bgraPixels[index + 1] = 0;
+            bgraPixels[index + 2] = 0;
+            bgraPixels[index + 3] = alpha;
+        }
+    }
+
+    private async void PageViewer_SignActionRequested(object? sender, PdfFormField field)
+    {
+        PageViewer.EditSurface.CommitActiveEdits();
+        var choiceDialog = new ContentDialog
+        {
+            Title = "Sign here",
+            Content = "Choose a handwritten signature or a certificate-backed digital signature.",
+            PrimaryButtonText = "Handwritten",
+            SecondaryButtonText = "Digital certificate",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = XamlRoot
+        };
+
+        var choice = await choiceDialog.ShowAsync();
+        if (choice == ContentDialogResult.Primary)
+        {
+            await ViewModel.EnterEditModeCommand.ExecuteAsync(null);
+            await ShowSignatureCaptureAsync(field);
+        }
+        else if (choice == ContentDialogResult.Secondary)
+        {
+            await PromptForDigitalSignatureAsync(field);
+        }
+    }
+
+    private async Task PromptForDigitalSignatureAsync(PdfFormField field)
+    {
+        var certificateService = App.Services.GetRequiredService<ICertificateService>();
+        var certificates = certificateService.GetSigningCertificates();
+        var certificatePicker = new ComboBox
+        {
+            Header = "Existing signing certificate",
+            DisplayMemberPath = nameof(SigningCertificateInfo.DisplayName),
+            ItemsSource = certificates,
+            SelectedIndex = certificates.Count > 0 ? 0 : -1,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            PlaceholderText = certificates.Count == 0 ? "No signing certificates found" : "Select a certificate"
+        };
+        var nameBox = new TextBox
+        {
+            Header = "Create a new certificate instead",
+            PlaceholderText = "Your full name"
+        };
+        var emailBox = new TextBox
+        {
+            Header = "Email (optional)",
+            PlaceholderText = "name@example.com"
+        };
+        var reasonBox = new TextBox
+        {
+            Header = "Reason",
+            Text = "Document approval"
+        };
+        var validationMessage = new TextBlock
+        {
+            Foreground = new SolidColorBrush(Microsoft.UI.Colors.IndianRed),
+            TextWrapping = TextWrapping.Wrap,
+            Visibility = Visibility.Collapsed
+        };
+        var dialog = new ContentDialog
+        {
+            Title = "Digital signature",
+            Content = new StackPanel
+            {
+                Width = 420,
+                Spacing = 10,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = "Select an existing certificate, or enter your name to create a new five-year certificate in your Windows certificate store.",
+                        TextWrapping = TextWrapping.Wrap
+                    },
+                    certificatePicker,
+                    nameBox,
+                    emailBox,
+                    reasonBox,
+                    validationMessage
+                }
+            },
+            PrimaryButtonText = "Sign PDF",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = XamlRoot
+        };
+        dialog.PrimaryButtonClick += (_, args) =>
+        {
+            if (string.IsNullOrWhiteSpace(nameBox.Text) &&
+                certificatePicker.SelectedItem is not SigningCertificateInfo)
+            {
+                validationMessage.Text = "Select a certificate or enter a name to create one.";
+                validationMessage.Visibility = Visibility.Visible;
+                args.Cancel = true;
+            }
+        };
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        SigningCertificateInfo certificate;
+        try
+        {
+            certificate = string.IsNullOrWhiteSpace(nameBox.Text)
+                ? (SigningCertificateInfo)certificatePicker.SelectedItem
+                : certificateService.CreateSelfSignedCertificate(nameBox.Text, emailBox.Text);
+        }
+        catch (Exception ex) when (
+            ex is InvalidOperationException or UnauthorizedAccessException or
+            System.Security.Cryptography.CryptographicException)
+        {
+            await ShowSigningErrorAsync(ex.Message);
+            return;
+        }
+
+        await ViewModel.DigitallySignCurrentAsync(field, certificate, reasonBox.Text);
+    }
+
+    private async Task ShowSigningErrorAsync(string message)
+    {
+        var dialog = new ContentDialog
+        {
+            Title = "Could not create the signing certificate",
+            Content = message,
+            CloseButtonText = "Close",
+            XamlRoot = XamlRoot
+        };
+        await dialog.ShowAsync();
     }
 
     private async void PrintButton_Click(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)

@@ -46,9 +46,6 @@
                     Header="Confirm before saving changes back to original files in Organize"
                     IsOn="{x:Bind ViewModel.ConfirmOrganizeSave, Mode=TwoWay}" />
 
-                <ToggleSwitch
-                    Header="Auto-save edit overlays to companion files (.ellie.json)"
-                    IsOn="{x:Bind ViewModel.AutoSaveCompanion, Mode=TwoWay}" />
             </StackPanel>
 
             <Button

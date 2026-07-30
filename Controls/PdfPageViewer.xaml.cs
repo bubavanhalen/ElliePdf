@@ -123,6 +123,50 @@ public sealed partial class PdfPageViewer : UserControl
 
     public event EventHandler? PagePointerPressed;
 
+    public event EventHandler<PdfFormField>? SignActionRequested;
+
+    public void ShowSignActions(
+        IReadOnlyList<PdfFormField> fields,
+        float pageHeightPoints,
+        double displayScale)
+    {
+        SignActionCanvas.Children.Clear();
+        if (pageHeightPoints <= 0 || displayScale <= 0)
+        {
+            return;
+        }
+
+        foreach (var field in fields.Where(field => field.IsSignAction))
+        {
+            var bounds = field.Bounds;
+            var left = bounds.Left * displayScale;
+            var top = (pageHeightPoints - bounds.Top) * displayScale;
+            var width = Math.Max(28, (bounds.Right - bounds.Left) * displayScale);
+            var height = Math.Max(22, (bounds.Top - bounds.Bottom) * displayScale);
+            var label = string.IsNullOrWhiteSpace(field.AlternateName)
+                ? "Sign here"
+                : field.AlternateName;
+            var button = new Button
+            {
+                Content = label,
+                Width = width,
+                Height = height,
+                Padding = new Thickness(4, 0, 4, 0),
+                FontSize = Math.Clamp(height * 0.24, 8, 12),
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(48, 91, 92, 226)),
+                BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(210, 91, 92, 226)),
+                BorderThickness = new Thickness(1.5),
+                CornerRadius = new CornerRadius(4),
+                Tag = field
+            };
+            ToolTipService.SetToolTip(button, "Add a handwritten or digital certificate signature");
+            button.Click += SignActionButton_Click;
+            Canvas.SetLeft(button, left);
+            Canvas.SetTop(button, top);
+            SignActionCanvas.Children.Add(button);
+        }
+    }
+
     private static void OnPageSourceChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         if (d is PdfPageViewer viewer)
@@ -200,6 +244,14 @@ public sealed partial class PdfPageViewer : UserControl
 
     private void OnPagePointerPressed(object sender, PointerRoutedEventArgs e) =>
         PagePointerPressed?.Invoke(this, EventArgs.Empty);
+
+    private void SignActionButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: PdfFormField field })
+        {
+            SignActionRequested?.Invoke(this, field);
+        }
+    }
 
     private void OnSizeChanged(object sender, SizeChangedEventArgs e) => ReportViewportSize();
 

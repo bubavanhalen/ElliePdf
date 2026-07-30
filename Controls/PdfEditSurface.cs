@@ -16,7 +16,7 @@ using TextFontStyle = Windows.UI.Text.FontStyle;
 
 namespace ElliePdf.Controls;
 
-public sealed class PdfEditSurface : Canvas
+public sealed partial class PdfEditSurface : Canvas
 {
     private enum SelectionKind
     {
@@ -50,6 +50,7 @@ public sealed class PdfEditSurface : Canvas
     private string? _selectedId;
     private bool _isRendering;
     private bool _isPlacingText;
+    private ReaderEditTool _activeTool = ReaderEditTool.Select;
     private static readonly InputCursor ArrowCursor = InputSystemCursor.Create(InputSystemCursorShape.Arrow);
     private static readonly InputCursor MoveCursor = InputSystemCursor.Create(InputSystemCursorShape.SizeAll);
     private static readonly InputCursor TextCursor = InputSystemCursor.Create(InputSystemCursorShape.IBeam);
@@ -121,7 +122,23 @@ public sealed class PdfEditSurface : Canvas
 
     public PageOverlayState Overlay { get; private set; } = new();
 
-    public ReaderEditTool ActiveTool { get; set; } = ReaderEditTool.Select;
+    public ReaderEditTool ActiveTool
+    {
+        get => _activeTool;
+        set
+        {
+            if (_activeTool == value)
+            {
+                return;
+            }
+
+            _activeTool = value;
+            foreach (var box in Children.OfType<TextBox>())
+            {
+                box.IsReadOnly = value != ReaderEditTool.Text;
+            }
+        }
+    }
 
     public double DisplayScale { get; set; } = 1.0;
 
@@ -152,19 +169,27 @@ public sealed class PdfEditSurface : Canvas
 
     public void PlaceSignature(string imageBase64)
     {
+        PlaceSignature(imageBase64, null);
+    }
+
+    public void PlaceSignature(string imageBase64, ElliePdf.Services.PdfRect? target)
+    {
         if (string.IsNullOrWhiteSpace(imageBase64))
         {
             return;
         }
 
         PushUndo();
+        var pageHeight = Height / DisplayScale;
         var signature = new SignatureOverlay
         {
-            X = Math.Max(24, (Width / DisplayScale - 150) / 2),
-            Y = Math.Max(24, (Height / DisplayScale - 75) / 2),
+            X = target?.Left ?? Math.Max(24, (Width / DisplayScale - 150) / 2),
+            Y = target is null
+                ? Math.Max(24, (pageHeight - 75) / 2)
+                : pageHeight - target.Top,
             ImageBase64 = imageBase64,
-            Width = 150,
-            Height = 75
+            Width = target is null ? 150 : Math.Max(24, target.Right - target.Left),
+            Height = target is null ? 75 : Math.Max(16, target.Top - target.Bottom)
         };
         Overlay.Signatures.Add(signature);
         RenderOverlay();
@@ -295,11 +320,14 @@ public sealed class PdfEditSurface : Canvas
                     Padding = new Thickness(2),
                     TextWrapping = TextWrapping.Wrap,
                     AcceptsReturn = true,
+                    IsReadOnly = ActiveTool != ReaderEditTool.Text,
+                    IsSpellCheckEnabled = true,
                     Tag = ("text", text.Id)
                 };
                 ApplyTextBoxChrome(box, text.ColorHex);
                 box.TextChanged += TextBox_TextChanged;
                 box.PointerPressed += Selectable_PointerPressed;
+                box.DoubleTapped += TextBox_DoubleTapped;
                 box.PointerEntered += TextBox_PointerEntered;
                 box.PointerExited += TextBox_PointerExited;
                 Canvas.SetLeft(box, text.X * DisplayScale);
@@ -419,8 +447,6 @@ public sealed class PdfEditSurface : Canvas
             if (_isPlacingText)
             {
                 _isPlacingText = false;
-                ActiveTool = ReaderEditTool.Select;
-                ActiveToolChangeRequested?.Invoke(this, ReaderEditTool.Select);
             }
 
             NotifyOverlayChanged(pushUndo: false);
@@ -477,12 +503,35 @@ public sealed class PdfEditSurface : Canvas
 
         CommitActiveEdits();
         PushUndo();
+
+        if (ActiveTool == ReaderEditTool.Text && selected is TextBox textBox)
+        {
+            textBox.IsReadOnly = false;
+            textBox.Focus(FocusState.Pointer);
+            return;
+        }
+
         _dragMode = DragMode.Move;
         _dragStart = e.GetCurrentPoint(this).Position;
         _startLeft = Canvas.GetLeft(selected);
         _startTop = Canvas.GetTop(selected);
         CapturePointer(e.Pointer);
         e.Handled = true;
+    }
+
+    private void TextBox_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+    {
+        if (sender is not TextBox box || !SelectFromTag(box.Tag))
+        {
+            return;
+        }
+
+        PushUndo();
+        ActiveTool = ReaderEditTool.Text;
+        ActiveToolChangeRequested?.Invoke(this, ReaderEditTool.Text);
+        box.IsReadOnly = false;
+        box.Focus(FocusState.Programmatic);
+        e.Handled = false;
     }
 
     private void ResizeHandle_PointerPressed(object sender, PointerRoutedEventArgs e)

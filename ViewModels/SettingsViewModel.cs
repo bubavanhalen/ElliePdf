@@ -26,9 +26,6 @@ public sealed partial class SettingsViewModel : ObservableObject
     public partial bool ConfirmOrganizeSave { get; set; }
 
     [ObservableProperty]
-    public partial bool AutoSaveCompanion { get; set; }
-
-    [ObservableProperty]
     public partial int RecentFilesMaxCount { get; set; }
 
     [ObservableProperty]
@@ -55,7 +52,6 @@ public sealed partial class SettingsViewModel : ObservableObject
         settings.DefaultZoomMode = DefaultZoomMode;
         settings.ConfirmOverwriteSave = ConfirmOverwriteSave;
         settings.ConfirmOrganizeSave = ConfirmOrganizeSave;
-        settings.AutoSaveCompanion = AutoSaveCompanion;
         settings.RecentFilesMaxCount = Math.Clamp(RecentFilesMaxCount, 1, 50);
 
         await _settingsService.SaveAsync();
@@ -72,7 +68,6 @@ public sealed partial class SettingsViewModel : ObservableObject
         DefaultZoomMode = settings.DefaultZoomMode;
         ConfirmOverwriteSave = settings.ConfirmOverwriteSave;
         ConfirmOrganizeSave = settings.ConfirmOrganizeSave;
-        AutoSaveCompanion = settings.AutoSaveCompanion;
         RecentFilesMaxCount = settings.RecentFilesMaxCount;
     }
 }

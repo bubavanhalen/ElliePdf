@@ -41,6 +41,10 @@ public sealed class PdfDocumentSession : IAsyncDisposable
     internal void MarkClosed()
     {
         Handle = IntPtr.Zero;
+    }
+
+    internal void CloseFormFill()
+    {
         FormFill?.Dispose();
         FormFill = null;
     }

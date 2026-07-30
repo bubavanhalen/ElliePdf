@@ -94,8 +94,6 @@ public sealed class DocumentTabService : IDocumentTabService, IAsyncDisposable
     {
         var session = await _documentOpenService.OpenAsync(path, cancellationToken);
         var tab = new DocumentTab(session);
-        await _annotationStore.LoadCompanionAsync(tab.Id, path, cancellationToken);
-        await _recentFilesService.RecordOpenedAsync(path, cancellationToken);
         _tabs.Add(tab);
 
         if (activate)
@@ -105,6 +103,7 @@ public sealed class DocumentTabService : IDocumentTabService, IAsyncDisposable
 
         TabsChanged?.Invoke(this, EventArgs.Empty);
         StateChanged?.Invoke(this, EventArgs.Empty);
+        _ = RecordRecentFileAsync(path);
         return tab;
     }
 
@@ -179,11 +178,11 @@ public sealed class DocumentTabService : IDocumentTabService, IAsyncDisposable
         }
 
         var tab = new DocumentTab(session);
-        await _annotationStore.LoadCompanionAsync(tab.Id, tab.FilePath, cancellationToken);
         _tabs.Add(tab);
         _activeTabId = tab.Id;
         TabsChanged?.Invoke(this, EventArgs.Empty);
         StateChanged?.Invoke(this, EventArgs.Empty);
+        _ = RecordRecentFileAsync(tab.FilePath);
     }
 
     public async Task CloseActiveDocumentAsync(CancellationToken cancellationToken = default)
@@ -205,5 +204,21 @@ public sealed class DocumentTabService : IDocumentTabService, IAsyncDisposable
 
         _tabs.Clear();
         _activeTabId = null;
+    }
+
+    private async Task RecordRecentFileAsync(string path)
+    {
+        try
+        {
+            await _recentFilesService.RecordOpenedAsync(path);
+        }
+        catch (IOException ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Could not update recent files: {ex.Message}");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Could not update recent files: {ex.Message}");
+        }
     }
 }

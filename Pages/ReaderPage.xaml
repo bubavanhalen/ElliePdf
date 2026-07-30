@@ -14,213 +14,60 @@
     <Page.Resources>
         <ContentDialog
             x:Name="SignatureDialog"
-            Title="Capture Signature"
-            PrimaryButtonText="OK"
+            AutomationProperties.AutomationId="SignatureDialog"
+            DefaultButton="Primary"
+            PrimaryButtonText="Insert signature"
             SecondaryButtonText="Cancel"
-            AutomationProperties.AutomationId="SignatureDialog">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
+            Title="Add your signature">
+            <StackPanel Spacing="12">
+                <TextBlock
+                    Foreground="{ThemeResource EllieTextSecondaryBrush}"
+                    Text="Draw inside the box. You can move and resize the signature after inserting it."
+                    TextWrapping="Wrap" />
                 <Border
-                    Grid.Row="0"
                     Padding="8"
-                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    CornerRadius="4">
+                    Background="White"
+                    BorderBrush="{ThemeResource EllieBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8">
                     <Canvas
                         x:Name="SignatureCanvas"
-                        Width="400"
+                        Width="420"
                         Height="200"
-                        AutomationProperties.AutomationId="SignatureCanvas" />
+                        AutomationProperties.AutomationId="SignatureCanvas"
+                        Background="White" />
                 </Border>
                 <Button
                     x:Name="BtnClearSignature"
-                    Grid.Row="1"
-                    Margin="0,8,0,0"
                     HorizontalAlignment="Left"
                     AutomationProperties.AutomationId="BtnClearSignature"
-                    Content="Clear" />
-            </Grid>
+                    Content="Clear"
+                    Style="{StaticResource EllieSecondaryButtonStyle}" />
+            </StackPanel>
         </ContentDialog>
     </Page.Resources>
 
-    <Grid x:Name="RootGrid" Background="Transparent">
-        <controls:PdfPageViewer
-            x:Name="PageViewer"
-            Margin="56,0,56,0"
-            Canvas.ZIndex="0"
-            ContentBottomInset="112"
-            DisplayScale="{x:Bind ViewModel.DisplayScale, Mode=OneWay}"
-            IsChromeless="True"
-            IsOverlayEnabled="{x:Bind ViewModel.IsEditMode, Mode=OneWay}"
-            PageHeightPoints="{x:Bind ViewModel.PageHeightPoints, Mode=OneWay}"
-            PageSource="{x:Bind ViewModel.PageImage, Mode=OneWay}"
-            SearchHighlights="{x:Bind ViewModel.SearchHighlights, Mode=OneWay}"
-            Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.HasDocument), Mode=OneWay}" />
+    <Grid
+        x:Name="RootGrid"
+        AllowDrop="True"
+        Background="{ThemeResource EllieCanvasBrush}"
+        DragOver="ReaderPage_DragOver"
+        Drop="ReaderPage_Drop">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
 
-        <Image
-            x:Name="PrintTarget"
-            Source="{x:Bind ViewModel.PageImage, Mode=OneWay}"
-            Visibility="Collapsed" />
-
-        <!-- Empty state -->
-        <Grid
-            Padding="48"
-            Canvas.ZIndex="5"
-            Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.ShowEmptyState), Mode=OneWay}">
-            <StackPanel
-                MaxWidth="420"
-                HorizontalAlignment="Center"
-                Spacing="16"
-                VerticalAlignment="Center">
-                <TextBlock
-                    HorizontalAlignment="Center"
-                    Opacity="0.7"
-                    Style="{StaticResource SubtitleTextBlockStyle}"
-                    Text="Open a PDF to start reading" />
-                <Button
-                    HorizontalAlignment="Center"
-                    Click="OpenFileButton_Click"
-                    ToolTipService.ToolTip="Open (Ctrl+O)">
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <SymbolIcon Symbol="OpenFile" />
-                        <TextBlock Text="Open PDF" />
-                    </StackPanel>
-                </Button>
-                <ListView
-                    IsItemClickEnabled="True"
-                    ItemClick="RecentFiles_ItemClick"
-                    ItemsSource="{x:Bind ViewModel.RecentFiles, Mode=OneWay}"
-                    SelectionMode="None"
-                    Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.ShowRecentFiles), Mode=OneWay}">
-                    <ListView.ItemTemplate>
-                        <DataTemplate x:DataType="vm:RecentFileItemViewModel">
-                            <TextBlock Padding="8,6" Text="{x:Bind DisplayName, Mode=OneTime}" />
-                        </DataTemplate>
-                    </ListView.ItemTemplate>
-                </ListView>
-            </StackPanel>
-        </Grid>
-
-        <!-- Left flyout: page thumbnails -->
-        <Border
-            x:Name="LeftPanel"
-            Width="220"
-            Margin="0,0,0,92"
-            Canvas.ZIndex="10"
-            HorizontalAlignment="Left"
-            Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="0,0,1,0"
-            Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.IsThumbnailPanelOpen), Mode=OneWay}">
-            <GridView
-                Padding="8"
-                IsItemClickEnabled="True"
-                ItemClick="PageThumbnails_ItemClick"
-                ItemsSource="{x:Bind ViewModel.PageThumbnails, Mode=OneWay}"
-                SelectionMode="None">
-                <GridView.ItemTemplate>
-                    <DataTemplate x:DataType="vm:PageThumbnailViewModel">
-                        <StackPanel Spacing="4" Width="88">
-                            <Grid Height="112">
-                                <ProgressRing
-                                    HorizontalAlignment="Center"
-                                    VerticalAlignment="Center"
-                                    IsActive="{x:Bind IsLoading, Mode=OneWay}"
-                                    Visibility="{x:Bind IsLoading, Mode=OneWay}" />
-                                <Image Source="{x:Bind Thumbnail, Mode=OneWay}" Stretch="Uniform" />
-                            </Grid>
-                            <TextBlock
-                                HorizontalAlignment="Center"
-                                Opacity="0.8"
-                                Style="{StaticResource CaptionTextBlockStyle}"
-                                Text="{x:Bind Label, Mode=OneWay}" />
-                        </StackPanel>
-                    </DataTemplate>
-                </GridView.ItemTemplate>
-            </GridView>
-        </Border>
-
-        <!-- Left flyout: document outline -->
-        <Border
-            x:Name="OutlinePanel"
-            Width="260"
-            Margin="0,0,0,92"
-            Canvas.ZIndex="10"
-            HorizontalAlignment="Left"
-            Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="0,0,1,0"
-            Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.IsOutlinePanelOpen), Mode=OneWay}">
-            <Grid Padding="12,8">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
-                <TextBlock
-                    Margin="0,0,0,8"
-                    Style="{StaticResource SubtitleTextBlockStyle}"
-                    Text="Outline" />
-                <ListView
-                    Grid.Row="1"
-                    IsItemClickEnabled="True"
-                    ItemClick="OutlineItems_ItemClick"
-                    ItemsSource="{x:Bind ViewModel.OutlineItems, Mode=OneWay}"
-                    SelectionMode="None">
-                    <ListView.ItemTemplate>
-                        <DataTemplate x:DataType="vm:OutlineItemViewModel">
-                            <TextBlock
-                                Margin="{x:Bind IndentMargin, Mode=OneWay}"
-                                Padding="4,6"
-                                Text="{x:Bind Title, Mode=OneWay}"
-                                TextTrimming="CharacterEllipsis" />
-                        </DataTemplate>
-                    </ListView.ItemTemplate>
-                </ListView>
-            </Grid>
-        </Border>
-
-        <!-- Right flyout: search -->
-        <Border
-            x:Name="RightPanel"
-            Width="280"
-            Margin="0,0,0,92"
-            Canvas.ZIndex="10"
-            HorizontalAlignment="Right"
-            Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="1,0,0,0"
-            Padding="16"
-            Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.IsSearchPanelOpen), Mode=OneWay}">
-            <StackPanel Spacing="12" VerticalAlignment="Top">
-                <TextBox
-                    x:Name="SearchBox"
-                    KeyDown="SearchBox_KeyDown"
-                    PlaceholderText="Search in document"
-                    Text="{x:Bind ViewModel.SearchQuery, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                <CheckBox Content="Match case" IsChecked="{x:Bind ViewModel.MatchCase, Mode=TwoWay}" />
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button Command="{x:Bind ViewModel.SearchCommand}" Content="Find" />
-                    <Button Command="{x:Bind ViewModel.PreviousSearchMatchCommand}" Content="Previous" />
-                    <Button Command="{x:Bind ViewModel.NextSearchMatchCommand}" Content="Next" />
-                </StackPanel>
-                <TextBlock
-                    Opacity="0.8"
-                    Style="{StaticResource CaptionTextBlockStyle}"
-                    Text="{x:Bind ViewModel.SearchStatus, Mode=OneWay}"
-                    TextWrapping="WrapWholeWords" />
-            </StackPanel>
-        </Border>
-
-        <!-- Slim tab strip: only when multiple documents are open -->
+        <!-- Tabs only add height when more than one document is open. -->
         <TabView
             x:Name="DocumentTabs"
-            Margin="104,4,152,0"
-            Canvas.ZIndex="20"
-            VerticalAlignment="Top"
+            Grid.Row="0"
+            Height="40"
+            Padding="10,0"
             AddTabButtonClick="DocumentTabs_AddTabButtonClick"
-            Background="Transparent"
+            Background="{ThemeResource EllieShellBrush}"
             CanDragTabs="True"
             CanReorderTabs="True"
             IsAddTabButtonVisible="True"
@@ -229,362 +76,691 @@
             SelectionChanged="DocumentTabs_SelectionChanged"
             Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.ShowTabBar), Mode=OneWay}" />
 
-        <!-- Floating reader tools -->
+        <!-- Primary actions stay put when the user switches between viewing and editing. -->
         <Border
-            Margin="12"
-            Canvas.ZIndex="30"
-            HorizontalAlignment="Center"
-            Style="{StaticResource EllieToolbarBorderStyle}"
-            VerticalAlignment="Bottom"
-            Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.ShowReadToolbar), Mode=OneWay}">
-            <StackPanel Orientation="Horizontal" Spacing="2">
-                <AppBarButton
+            Grid.Row="1"
+            MinHeight="64"
+            Padding="14,10"
+            Background="{ThemeResource EllieShellBrush}"
+            BorderBrush="{ThemeResource EllieBorderBrush}"
+            BorderThickness="0,0,0,1">
+            <Grid ColumnSpacing="14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <Button
+                    Grid.Column="0"
+                    AutomationProperties.Name="Open PDF"
                     Click="OpenFileButton_Click"
-                    Icon="OpenFile"
-                    Label="Open"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Open (Ctrl+O)" />
-                <AppBarButton
-                    Click="CloseDocumentButton_Click"
-                    Icon="Cancel"
-                    Label="Close"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Close document (Ctrl+W)"
-                    Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.HasDocument), Mode=OneWay}" />
-                <Border
-                    Width="1"
-                    Height="28"
-                    Margin="6,0"
-                    Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
-                <AppBarButton
-                    Command="{x:Bind ViewModel.ToggleThumbnailPanelCommand}"
-                    Icon="ViewAll"
-                    Label="Pages"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Pages" />
-                <AppBarButton
-                    Command="{x:Bind ViewModel.ToggleOutlinePanelCommand}"
-                    Icon="Library"
-                    Label="Outline"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Document outline" />
-                <AppBarButton
-                    Command="{x:Bind ViewModel.PreviousPageCommand}"
-                    Icon="Back"
-                    Label="Previous"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Previous page" />
-                <Border
-                    MinWidth="112"
-                    Padding="10,0"
-                    VerticalAlignment="Center">
+                    Style="{StaticResource EllieAccentButtonStyle}"
+                    ToolTipService.ToolTip="Open PDF (Ctrl+O)">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <SymbolIcon Symbol="OpenFile" />
+                        <TextBlock Text="Open PDF" />
+                    </StackPanel>
+                </Button>
+
+                <StackPanel
+                    Grid.Column="1"
+                    VerticalAlignment="Center"
+                    Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.HasDocument), Mode=OneWay}">
                     <TextBlock
-                        HorizontalAlignment="Center"
-                        Style="{StaticResource CaptionTextBlockStyle}"
-                        Text="{x:Bind ViewModel.PageLabel, Mode=OneWay}"
+                        FontSize="15"
+                        FontWeight="SemiBold"
+                        Text="{x:Bind ViewModel.DocumentTitle, Mode=OneWay}"
                         TextTrimming="CharacterEllipsis" />
-                </Border>
-                <AppBarButton
-                    Command="{x:Bind ViewModel.NextPageCommand}"
-                    Icon="Forward"
-                    Label="Next"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Next page" />
-                <Border
-                    Width="1"
-                    Height="28"
-                    Margin="6,0"
-                    Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
-                <AppBarButton
-                    Command="{x:Bind ViewModel.ZoomFitWidthCommand}"
-                    Icon="FullScreen"
-                    Label="Fit width"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Fit width" />
-                <AppBarButton
-                    Command="{x:Bind ViewModel.ZoomFitPageCommand}"
-                    Icon="View"
-                    Label="Fit page"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Fit page" />
-                <AppBarButton
-                    Command="{x:Bind ViewModel.ZoomActualSizeCommand}"
-                    Icon="Zoom"
-                    Label="Actual size"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Actual size" />
-                <AppBarButton
-                    Command="{x:Bind ViewModel.ZoomOutCommand}"
-                    Icon="ZoomOut"
-                    Label="Zoom out"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Zoom out (Ctrl+-)" />
-                <Border
-                    MinWidth="58"
-                    Padding="8,0"
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <Ellipse
+                            Width="6"
+                            Height="6"
+                            VerticalAlignment="Center"
+                            Fill="{ThemeResource EllieSuccessBrush}"
+                            Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.IsReadMode), Mode=OneWay}" />
+                        <Ellipse
+                            Width="6"
+                            Height="6"
+                            VerticalAlignment="Center"
+                            Fill="{ThemeResource EllieAccentBrush}"
+                            Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.IsEditMode), Mode=OneWay}" />
+                        <TextBlock
+                            Foreground="{ThemeResource EllieTextSecondaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="Ready"
+                            Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.IsReadMode), Mode=OneWay}" />
+                        <TextBlock
+                            Foreground="{ThemeResource EllieAccentBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="Editing · changes stay editable"
+                            Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.IsEditMode), Mode=OneWay}" />
+                    </StackPanel>
+                </StackPanel>
+
+                <StackPanel
+                    Grid.Column="2"
+                    Orientation="Horizontal"
+                    Spacing="4"
                     VerticalAlignment="Center">
-                    <TextBlock
-                        HorizontalAlignment="Center"
-                        Style="{StaticResource CaptionTextBlockStyle}"
-                        Text="{x:Bind ViewModel.ZoomLabel, Mode=OneWay}" />
-                </Border>
-                <AppBarButton
-                    Command="{x:Bind ViewModel.ZoomInCommand}"
-                    Icon="ZoomIn"
-                    Label="Zoom in"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Zoom in (Ctrl++)" />
-                <Border
-                    Width="1"
-                    Height="28"
-                    Margin="6,0"
-                    Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
-                <AppBarButton
-                    Command="{x:Bind ViewModel.ToggleSearchPanelCommand}"
-                    Icon="Find"
-                    Label="Search"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Search (Ctrl+F)" />
-                <AppBarButton
-                    Click="PrintButton_Click"
-                    Icon="Print"
-                    Label="Print"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Print (Ctrl+P)" />
-                <Border
-                    Width="1"
-                    Height="28"
-                    Margin="6,0"
-                    Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
-                <AppBarButton
-                    Command="{x:Bind ViewModel.OpenOrganizeCommand}"
-                    Icon="Library"
-                    Label="Organize"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Organize pages" />
-                <AppBarButton
-                    Command="{x:Bind ViewModel.EnterEditModeCommand}"
-                    Icon="Edit"
-                    Label="Edit"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Edit PDF" />
-            </StackPanel>
+                    <AppBarButton
+                        Command="{x:Bind ViewModel.ToggleSearchPanelCommand}"
+                        Icon="Find"
+                        Label="Find"
+                        LabelPosition="Collapsed"
+                        Style="{StaticResource EllieCommandBarButtonStyle}"
+                        ToolTipService.ToolTip="Find in document (Ctrl+F)"
+                        Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.HasDocument), Mode=OneWay}" />
+                    <AppBarButton
+                        Command="{x:Bind ViewModel.OpenOrganizeCommand}"
+                        Icon="Library"
+                        Label="Pages"
+                        LabelPosition="Collapsed"
+                        Style="{StaticResource EllieCommandBarButtonStyle}"
+                        ToolTipService.ToolTip="Reorder, rotate, or remove pages"
+                        Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.HasDocument), Mode=OneWay}" />
+                    <Button
+                        AutomationProperties.Name="Edit text"
+                        Command="{x:Bind ViewModel.EnterTextEditModeCommand}"
+                        Style="{StaticResource EllieAccentButtonStyle}"
+                        ToolTipService.ToolTip="Add new text or re-edit text you added"
+                        Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.ShowReadToolbar), Mode=OneWay}">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <SymbolIcon Symbol="Font" />
+                            <TextBlock Text="Edit text" />
+                        </StackPanel>
+                    </Button>
+                    <Button
+                        AutomationProperties.Name="Save"
+                        Click="SaveButton_Click"
+                        Style="{StaticResource EllieAccentButtonStyle}"
+                        ToolTipService.ToolTip="Save edits"
+                        Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.ShowEditToolbar), Mode=OneWay}">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <SymbolIcon Symbol="Save" />
+                            <TextBlock Text="Save" />
+                        </StackPanel>
+                    </Button>
+                    <Button
+                        Command="{x:Bind ViewModel.ExitEditModeCommand}"
+                        Content="Done"
+                        Style="{StaticResource EllieSecondaryButtonStyle}"
+                        ToolTipService.ToolTip="Finish editing"
+                        Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.ShowEditToolbar), Mode=OneWay}" />
+                    <Button
+                        AutomationProperties.Name="More document actions"
+                        Style="{StaticResource EllieIconButtonStyle}"
+                        ToolTipService.ToolTip="More"
+                        Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.HasDocument), Mode=OneWay}">
+                        <Button.Flyout>
+                            <MenuFlyout>
+                                <MenuFlyoutItem
+                                    Click="SaveAsButton_Click"
+                                    Icon="Copy"
+                                    Text="Save a copy" />
+                                <MenuFlyoutItem
+                                    Click="PrintButton_Click"
+                                    Icon="Print"
+                                    Text="Print" />
+                                <MenuFlyoutSeparator />
+                                <MenuFlyoutItem
+                                    Command="{x:Bind ViewModel.EnterEditModeCommand}"
+                                    Icon="Edit"
+                                    Text="Markup tools" />
+                                <MenuFlyoutItem
+                                    Click="CloseDocumentButton_Click"
+                                    Icon="Cancel"
+                                    Text="Close document" />
+                            </MenuFlyout>
+                        </Button.Flyout>
+                        <SymbolIcon Symbol="More" />
+                    </Button>
+                </StackPanel>
+            </Grid>
         </Border>
 
-        <!-- Floating edit tools -->
+        <!-- Editing is a contextual layer, not a separate screen. -->
         <Border
-            Margin="12"
-            Canvas.ZIndex="30"
-            HorizontalAlignment="Center"
-            Style="{StaticResource EllieEditToolbarBorderStyle}"
-            VerticalAlignment="Bottom"
+            Grid.Row="2"
+            Padding="12,7"
+            Background="{ThemeResource EllieSurfaceBrush}"
+            BorderBrush="{ThemeResource EllieBorderBrush}"
+            BorderThickness="0,0,0,1"
             Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.ShowEditToolbar), Mode=OneWay}">
-            <StackPanel Orientation="Horizontal" Spacing="2">
-                <AppBarButton
-                    Command="{x:Bind ViewModel.ExitEditModeCommand}"
-                    Icon="Accept"
-                    Label="Done"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Done editing" />
-                <AppBarButton
-                    Click="SaveButton_Click"
-                    Icon="Save"
-                    Label="Save"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Save edits" />
-                <AppBarButton
-                    Click="SaveAsButton_Click"
-                    Icon="Copy"
-                    Label="Save as"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Save a copy" />
-                <Border
-                    Width="1"
-                    Height="28"
-                    Margin="6,0"
-                    Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
-                <AppBarToggleButton
-                    Command="{x:Bind ViewModel.UseSelectToolCommand}"
-                    Icon="TouchPointer"
-                    IsChecked="{x:Bind ViewModel.IsSelectToolActive, Mode=OneWay}"
-                    Label="Select"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Select and move" />
-                <AppBarToggleButton
-                    x:Name="InkToolButton"
-                    Command="{x:Bind ViewModel.UseInkToolCommand}"
-                    Click="InkToolButton_Click"
-                    Icon="Edit"
-                    IsChecked="{x:Bind ViewModel.IsInkToolActive, Mode=OneWay}"
-                    Label="Ink"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Ink" />
-                <AppBarButton
-                    Click="AddTextButton_Click"
-                    Icon="Font"
-                    Label="Add text"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Add text" />
-                <AppBarButton
-                    Click="SignatureButton_Click"
-                    Icon="Contact"
-                    Label="Signature"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Signature" />
-                <AppBarToggleButton
-                    Command="{x:Bind ViewModel.UseEraserToolCommand}"
-                    Icon="Clear"
-                    IsChecked="{x:Bind ViewModel.IsEraserToolActive, Mode=OneWay}"
-                    Label="Eraser"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Erase selected object" />
-                <AppBarButton
-                    Click="UndoEditButton_Click"
-                    Icon="Undo"
-                    Label="Undo"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Undo edit" />
-                <AppBarButton
-                    Click="DeleteEditButton_Click"
-                    Icon="Delete"
-                    Label="Delete"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Delete selected edit" />
-                <Border
-                    Width="1"
-                    Height="28"
-                    Margin="6,0"
-                    Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
-                <AppBarButton
-                    Command="{x:Bind ViewModel.PreviousPageCommand}"
-                    Icon="Back"
-                    Label="Previous"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Previous page" />
-                <Border
-                    MinWidth="112"
-                    Padding="10,0"
-                    VerticalAlignment="Center">
-                    <TextBlock
-                        HorizontalAlignment="Center"
-                        Style="{StaticResource CaptionTextBlockStyle}"
-                        Text="{x:Bind ViewModel.PageLabel, Mode=OneWay}"
-                        TextTrimming="CharacterEllipsis" />
-                </Border>
-                <AppBarButton
-                    Command="{x:Bind ViewModel.NextPageCommand}"
-                    Icon="Forward"
-                    Label="Next"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Next page" />
-                <Border
-                    Width="1"
-                    Height="28"
-                    Margin="6,0"
-                    Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
-                <AppBarButton
-                    Command="{x:Bind ViewModel.ZoomFitWidthCommand}"
-                    Icon="FullScreen"
-                    Label="Fit width"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Fit width" />
-                <AppBarButton
-                    Command="{x:Bind ViewModel.ZoomOutCommand}"
-                    Icon="ZoomOut"
-                    Label="Zoom out"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Zoom out (Ctrl+-)" />
-                <Border
-                    MinWidth="58"
-                    Padding="8,0"
-                    VerticalAlignment="Center">
-                    <TextBlock
-                        HorizontalAlignment="Center"
-                        Style="{StaticResource CaptionTextBlockStyle}"
-                        Text="{x:Bind ViewModel.ZoomLabel, Mode=OneWay}" />
-                </Border>
-                <AppBarButton
-                    Command="{x:Bind ViewModel.ZoomInCommand}"
-                    Icon="ZoomIn"
-                    Label="Zoom in"
-                    LabelPosition="Collapsed"
-                    ToolTipService.ToolTip="Zoom in (Ctrl++)" />
-            </StackPanel>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel
+                    Grid.Column="1"
+                    Orientation="Horizontal"
+                    Spacing="4">
+                    <AppBarToggleButton
+                        Command="{x:Bind ViewModel.UseSelectToolCommand}"
+                        Icon="TouchPointer"
+                        IsChecked="{x:Bind ViewModel.IsSelectToolActive, Mode=OneWay}"
+                        Label="Select"
+                        Style="{StaticResource EllieToolToggleStyle}"
+                        ToolTipService.ToolTip="Select, move, or resize an edit" />
+                    <AppBarToggleButton
+                        Command="{x:Bind ViewModel.UseTextToolCommand}"
+                        Icon="Font"
+                        IsChecked="{x:Bind ViewModel.IsTextToolActive, Mode=OneWay}"
+                        Label="Text"
+                        Style="{StaticResource EllieToolToggleStyle}"
+                        ToolTipService.ToolTip="Click the page to add text, or click existing text to re-edit" />
+                    <AppBarToggleButton
+                        x:Name="InkToolButton"
+                        Command="{x:Bind ViewModel.UseInkToolCommand}"
+                        Click="InkToolButton_Click"
+                        Icon="Edit"
+                        IsChecked="{x:Bind ViewModel.IsInkToolActive, Mode=OneWay}"
+                        Label="Draw"
+                        Style="{StaticResource EllieToolToggleStyle}"
+                        ToolTipService.ToolTip="Draw and choose pen style" />
+                    <AppBarButton
+                        Click="SignatureButton_Click"
+                        Icon="Contact"
+                        Label="Sign"
+                        Style="{StaticResource EllieCommandBarButtonStyle}"
+                        ToolTipService.ToolTip="Add a signature" />
+                    <AppBarToggleButton
+                        Command="{x:Bind ViewModel.UseEraserToolCommand}"
+                        Icon="Clear"
+                        IsChecked="{x:Bind ViewModel.IsEraserToolActive, Mode=OneWay}"
+                        Label="Erase"
+                        Style="{StaticResource EllieToolToggleStyle}"
+                        ToolTipService.ToolTip="Remove an edit" />
+                    <Border
+                        Width="1"
+                        Height="28"
+                        Margin="6,0"
+                        Background="{ThemeResource EllieBorderBrush}" />
+                    <AppBarButton
+                        Click="UndoEditButton_Click"
+                        Icon="Undo"
+                        Label="Undo"
+                        Style="{StaticResource EllieCommandBarButtonStyle}" />
+                    <AppBarButton
+                        Click="DeleteEditButton_Click"
+                        Icon="Delete"
+                        Label="Delete"
+                        Style="{StaticResource EllieCommandBarButtonStyle}"
+                        ToolTipService.ToolTip="Delete selected edit" />
+                </StackPanel>
+            </Grid>
         </Border>
+
+        <Grid Grid.Row="3">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <Border
+                Grid.Column="0"
+                Width="244"
+                Margin="12,12,0,12"
+                Padding="10"
+                Style="{StaticResource ElliePanelStyle}"
+                Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.IsThumbnailPanelOpen), Mode=OneWay}">
+                <Grid RowSpacing="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid>
+                        <TextBlock
+                            Margin="6,0"
+                            VerticalAlignment="Center"
+                            FontWeight="SemiBold"
+                            Text="Pages" />
+                        <Button
+                            HorizontalAlignment="Right"
+                            AutomationProperties.Name="Close pages panel"
+                            Command="{x:Bind ViewModel.ToggleThumbnailPanelCommand}"
+                            Style="{StaticResource EllieIconButtonStyle}">
+                            <SymbolIcon Symbol="Cancel" />
+                        </Button>
+                    </Grid>
+                    <ListView
+                        Grid.Row="1"
+                        IsItemClickEnabled="True"
+                        ItemClick="PageThumbnails_ItemClick"
+                        ItemsSource="{x:Bind ViewModel.PageThumbnails, Mode=OneWay}"
+                        SelectionMode="None">
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="vm:PageThumbnailViewModel">
+                                <Border
+                                    Margin="0,0,0,6"
+                                    Padding="8"
+                                    Background="{ThemeResource EllieSurfaceSecondaryBrush}"
+                                    BorderBrush="{ThemeResource EllieBorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="8">
+                                    <Grid ColumnSpacing="10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="64" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid Height="82">
+                                            <ProgressRing
+                                                Width="18"
+                                                Height="18"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                IsActive="{x:Bind IsLoading, Mode=OneWay}"
+                                                Visibility="{x:Bind IsLoading, Mode=OneWay}" />
+                                            <Image Source="{x:Bind Thumbnail, Mode=OneWay}" Stretch="Uniform" />
+                                        </Grid>
+                                        <TextBlock
+                                            Grid.Column="1"
+                                            VerticalAlignment="Center"
+                                            Text="{x:Bind Label, Mode=OneWay}" />
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </Grid>
+            </Border>
+
+            <Border
+                Grid.Column="0"
+                Width="268"
+                Margin="12,12,0,12"
+                Padding="10"
+                Style="{StaticResource ElliePanelStyle}"
+                Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.IsOutlinePanelOpen), Mode=OneWay}">
+                <Grid RowSpacing="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid>
+                        <TextBlock
+                            Margin="6,0"
+                            VerticalAlignment="Center"
+                            FontWeight="SemiBold"
+                            Text="Document outline" />
+                        <Button
+                            HorizontalAlignment="Right"
+                            AutomationProperties.Name="Close outline panel"
+                            Command="{x:Bind ViewModel.ToggleOutlinePanelCommand}"
+                            Style="{StaticResource EllieIconButtonStyle}">
+                            <SymbolIcon Symbol="Cancel" />
+                        </Button>
+                    </Grid>
+                    <ListView
+                        Grid.Row="1"
+                        IsItemClickEnabled="True"
+                        ItemClick="OutlineItems_ItemClick"
+                        ItemsSource="{x:Bind ViewModel.OutlineItems, Mode=OneWay}"
+                        SelectionMode="None">
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="vm:OutlineItemViewModel">
+                                <TextBlock
+                                    Margin="{x:Bind IndentMargin, Mode=OneWay}"
+                                    Padding="8,7"
+                                    Text="{x:Bind Title, Mode=OneWay}"
+                                    TextTrimming="CharacterEllipsis" />
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Column="1">
+                <controls:PdfPageViewer
+                    x:Name="PageViewer"
+                    Margin="18,18,18,0"
+                    ContentBottomInset="88"
+                    DisplayScale="{x:Bind ViewModel.DisplayScale, Mode=OneWay}"
+                    IsChromeless="False"
+                    IsOverlayEnabled="{x:Bind ViewModel.IsEditMode, Mode=OneWay}"
+                    PageHeightPoints="{x:Bind ViewModel.PageHeightPoints, Mode=OneWay}"
+                    PageSource="{x:Bind ViewModel.PageImage, Mode=OneWay}"
+                    SearchHighlights="{x:Bind ViewModel.SearchHighlights, Mode=OneWay}"
+                    Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.HasDocument), Mode=OneWay}" />
+
+                <Border
+                    Margin="0,0,0,16"
+                    HorizontalAlignment="Center"
+                    Style="{StaticResource EllieToolbarBorderStyle}"
+                    VerticalAlignment="Bottom"
+                    Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.HasDocument), Mode=OneWay}">
+                    <StackPanel Orientation="Horizontal" Spacing="2">
+                        <AppBarButton
+                            Command="{x:Bind ViewModel.ToggleThumbnailPanelCommand}"
+                            Icon="ViewAll"
+                            Label="Pages"
+                            LabelPosition="Collapsed"
+                            ToolTipService.ToolTip="Page thumbnails" />
+                        <AppBarButton
+                            Command="{x:Bind ViewModel.ToggleOutlinePanelCommand}"
+                            Icon="Library"
+                            Label="Outline"
+                            LabelPosition="Collapsed"
+                            ToolTipService.ToolTip="Document outline" />
+                        <Border
+                            Width="1"
+                            Height="24"
+                            Margin="4,0"
+                            Background="{ThemeResource EllieBorderBrush}" />
+                        <AppBarButton
+                            Command="{x:Bind ViewModel.PreviousPageCommand}"
+                            Icon="Back"
+                            Label="Previous"
+                            LabelPosition="Collapsed"
+                            ToolTipService.ToolTip="Previous page" />
+                        <Border
+                            MinWidth="116"
+                            Padding="10,0"
+                            VerticalAlignment="Center">
+                            <TextBlock
+                                HorizontalAlignment="Center"
+                                FontWeight="SemiBold"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                Text="{x:Bind ViewModel.PageLabel, Mode=OneWay}" />
+                        </Border>
+                        <AppBarButton
+                            Command="{x:Bind ViewModel.NextPageCommand}"
+                            Icon="Forward"
+                            Label="Next"
+                            LabelPosition="Collapsed"
+                            ToolTipService.ToolTip="Next page" />
+                        <Border
+                            Width="1"
+                            Height="24"
+                            Margin="4,0"
+                            Background="{ThemeResource EllieBorderBrush}" />
+                        <AppBarButton
+                            Command="{x:Bind ViewModel.ZoomOutCommand}"
+                            Icon="ZoomOut"
+                            Label="Zoom out"
+                            LabelPosition="Collapsed"
+                            ToolTipService.ToolTip="Zoom out (Ctrl+-)" />
+                        <Border
+                            MinWidth="58"
+                            Padding="8,0"
+                            VerticalAlignment="Center">
+                            <TextBlock
+                                HorizontalAlignment="Center"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                Text="{x:Bind ViewModel.ZoomLabel, Mode=OneWay}" />
+                        </Border>
+                        <AppBarButton
+                            Command="{x:Bind ViewModel.ZoomInCommand}"
+                            Icon="ZoomIn"
+                            Label="Zoom in"
+                            LabelPosition="Collapsed"
+                            ToolTipService.ToolTip="Zoom in (Ctrl++)" />
+                        <AppBarButton
+                            Command="{x:Bind ViewModel.ZoomFitWidthCommand}"
+                            Icon="FullScreen"
+                            Label="Fit width"
+                            LabelPosition="Collapsed"
+                            ToolTipService.ToolTip="Fit width" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <Border
+                Grid.Column="2"
+                Width="292"
+                Margin="0,12,12,12"
+                Padding="14"
+                Style="{StaticResource ElliePanelStyle}"
+                Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.IsSearchPanelOpen), Mode=OneWay}">
+                <StackPanel Spacing="12">
+                    <Grid>
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            FontWeight="SemiBold"
+                            Text="Find in document" />
+                        <Button
+                            HorizontalAlignment="Right"
+                            AutomationProperties.Name="Close search"
+                            Command="{x:Bind ViewModel.ToggleSearchPanelCommand}"
+                            Style="{StaticResource EllieIconButtonStyle}">
+                            <SymbolIcon Symbol="Cancel" />
+                        </Button>
+                    </Grid>
+                    <TextBox
+                        x:Name="SearchBox"
+                        KeyDown="SearchBox_KeyDown"
+                        PlaceholderText="Search words or phrases"
+                        Text="{x:Bind ViewModel.SearchQuery, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <Button
+                            Command="{x:Bind ViewModel.SearchCommand}"
+                            Content="Find"
+                            Style="{StaticResource EllieAccentButtonStyle}" />
+                        <Button
+                            Command="{x:Bind ViewModel.PreviousSearchMatchCommand}"
+                            Style="{StaticResource EllieIconButtonStyle}"
+                            ToolTipService.ToolTip="Previous match">
+                            <FontIcon FontSize="12" Glyph="&#xE70E;" />
+                        </Button>
+                        <Button
+                            Command="{x:Bind ViewModel.NextSearchMatchCommand}"
+                            Style="{StaticResource EllieIconButtonStyle}"
+                            ToolTipService.ToolTip="Next match">
+                            <FontIcon FontSize="12" Glyph="&#xE70D;" />
+                        </Button>
+                    </StackPanel>
+                    <CheckBox Content="Match case" IsChecked="{x:Bind ViewModel.MatchCase, Mode=TwoWay}" />
+                    <TextBlock
+                        Foreground="{ThemeResource EllieTextSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="{x:Bind ViewModel.SearchStatus, Mode=OneWay}"
+                        TextWrapping="WrapWholeWords" />
+                </StackPanel>
+            </Border>
+
+            <!-- Launch surface: one obvious first action, with recents close at hand. -->
+            <Grid
+                Grid.ColumnSpan="3"
+                Padding="40"
+                Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.ShowEmptyState), Mode=OneWay}">
+                <Grid
+                    MaxWidth="900"
+                    HorizontalAlignment="Center"
+                    ColumnSpacing="48"
+                    VerticalAlignment="Center">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.1*" />
+                        <ColumnDefinition Width="0.9*" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel
+                        Grid.Column="0"
+                        MaxWidth="440"
+                        Spacing="18"
+                        VerticalAlignment="Center">
+                        <Border
+                            HorizontalAlignment="Left"
+                            Padding="10,5"
+                            Background="{ThemeResource EllieAccentSubtleBrush}"
+                            CornerRadius="12">
+                            <TextBlock
+                                FontSize="11"
+                                FontWeight="SemiBold"
+                                Foreground="{ThemeResource EllieAccentBrush}"
+                                Text="FAST, NATIVE PDF EDITING" />
+                        </Border>
+                        <TextBlock
+                            FontSize="42"
+                            FontWeight="SemiBold"
+                            LineHeight="48"
+                            Text="Open. Edit text.&#x0a;Keep moving."
+                            TextWrapping="Wrap" />
+                        <TextBlock
+                            MaxWidth="420"
+                            FontSize="16"
+                            Foreground="{ThemeResource EllieTextSecondaryBrush}"
+                            LineHeight="24"
+                            Text="A focused PDF workspace that gets the document on screen fast and keeps every text edit easy to revisit."
+                            TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <Button
+                                Click="OpenFileButton_Click"
+                                Style="{StaticResource EllieAccentButtonStyle}">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <SymbolIcon Symbol="OpenFile" />
+                                    <TextBlock Text="Open a PDF" />
+                                </StackPanel>
+                            </Button>
+                            <Border
+                                Padding="12,0"
+                                VerticalAlignment="Stretch"
+                                Background="{ThemeResource EllieDropZoneBrush}"
+                                BorderBrush="{ThemeResource EllieBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="8">
+                                <TextBlock
+                                    VerticalAlignment="Center"
+                                    Foreground="{ThemeResource EllieTextSecondaryBrush}"
+                                    Text="or drop it here" />
+                            </Border>
+                        </StackPanel>
+                        <TextBlock
+                            Foreground="{ThemeResource EllieTextTertiaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="Tip: press Ctrl+O anywhere to open a file." />
+                    </StackPanel>
+
+                    <Border
+                        Grid.Column="1"
+                        MinHeight="330"
+                        Padding="18"
+                        Style="{StaticResource ElliePanelStyle}">
+                        <Grid RowSpacing="12">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <StackPanel>
+                                <TextBlock FontWeight="SemiBold" Text="Recent PDFs" />
+                                <TextBlock
+                                    Foreground="{ThemeResource EllieTextSecondaryBrush}"
+                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                    Text="Continue where you left off" />
+                            </StackPanel>
+                            <ListView
+                                Grid.Row="1"
+                                IsItemClickEnabled="True"
+                                ItemClick="RecentFiles_ItemClick"
+                                ItemsSource="{x:Bind ViewModel.RecentFiles, Mode=OneWay}"
+                                SelectionMode="None">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:RecentFileItemViewModel">
+                                        <Grid Padding="4,8" ColumnSpacing="10">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="34" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border
+                                                Width="32"
+                                                Height="32"
+                                                Background="{ThemeResource EllieAccentSubtleBrush}"
+                                                CornerRadius="8">
+                                                <SymbolIcon
+                                                    Foreground="{ThemeResource EllieAccentBrush}"
+                                                    Symbol="Document" />
+                                            </Border>
+                                            <StackPanel Grid.Column="1">
+                                                <TextBlock
+                                                    FontWeight="SemiBold"
+                                                    Text="{x:Bind DisplayName, Mode=OneTime}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                                <TextBlock
+                                                    Foreground="{ThemeResource EllieTextTertiaryBrush}"
+                                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                                    Text="{x:Bind Location, Mode=OneTime}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Grid>
+        </Grid>
+
+        <Image
+            x:Name="PrintTarget"
+            Source="{x:Bind ViewModel.PageImage, Mode=OneWay}"
+            Visibility="Collapsed" />
 
         <Popup
             x:Name="InkPalettePopup"
-            Canvas.ZIndex="40"
             IsLightDismissEnabled="True">
             <Border
                 x:Name="InkPalette"
                 Padding="10,8"
-                Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
-                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                Background="{ThemeResource EllieSurfaceBrush}"
+                BorderBrush="{ThemeResource EllieBorderStrongBrush}"
                 BorderThickness="1"
-                CornerRadius="20"
-                Opacity="0.98">
+                CornerRadius="12"
+                Shadow="{ThemeResource EllieCardShadow}">
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <TextBlock
                         Margin="2,0,4,0"
                         VerticalAlignment="Center"
-                        Opacity="0.75"
+                        Foreground="{ThemeResource EllieTextSecondaryBrush}"
                         Style="{StaticResource CaptionTextBlockStyle}"
-                        Text="Ink" />
+                        Text="Pen" />
                     <Button
                         x:Name="InkBlackButton"
-                        Width="30"
-                        Height="30"
+                        Width="32"
+                        Height="32"
                         Padding="0"
                         Background="Transparent"
                         BorderThickness="2"
                         Click="InkColorSwatch_Click"
                         Tag="#000000"
                         ToolTipService.ToolTip="Black">
-                        <Ellipse
-                            Width="16"
-                            Height="16"
-                            Fill="Black" />
+                        <Ellipse Width="16" Height="16" Fill="Black" />
                     </Button>
                     <Button
                         x:Name="InkRedButton"
-                        Width="30"
-                        Height="30"
+                        Width="32"
+                        Height="32"
                         Padding="0"
                         Background="Transparent"
                         BorderThickness="2"
                         Click="InkColorSwatch_Click"
                         Tag="#B3261E"
                         ToolTipService.ToolTip="Red">
-                        <Ellipse
-                            Width="16"
-                            Height="16"
-                            Fill="#B3261E" />
+                        <Ellipse Width="16" Height="16" Fill="#B3261E" />
                     </Button>
                     <Button
                         x:Name="InkBlueButton"
-                        Width="30"
-                        Height="30"
+                        Width="32"
+                        Height="32"
                         Padding="0"
                         Background="Transparent"
                         BorderThickness="2"
                         Click="InkColorSwatch_Click"
                         Tag="#1A73E8"
                         ToolTipService.ToolTip="Blue">
-                        <Ellipse
-                            Width="16"
-                            Height="16"
-                            Fill="#1A73E8" />
+                        <Ellipse Width="16" Height="16" Fill="#1A73E8" />
                     </Button>
                     <Border
                         Width="1"
                         Height="24"
                         Margin="4,0"
-                        Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                        Background="{ThemeResource EllieBorderBrush}" />
                     <Button
                         x:Name="InkThinButton"
-                        Width="34"
-                        Height="30"
+                        Width="36"
+                        Height="32"
                         Padding="0"
                         Background="Transparent"
                         BorderThickness="2"
@@ -600,8 +776,8 @@
                     </Button>
                     <Button
                         x:Name="InkMediumButton"
-                        Width="34"
-                        Height="30"
+                        Width="36"
+                        Height="32"
                         Padding="0"
                         Background="Transparent"
                         BorderThickness="2"
@@ -617,8 +793,8 @@
                     </Button>
                     <Button
                         x:Name="InkThickButton"
-                        Width="34"
-                        Height="30"
+                        Width="36"
+                        Height="32"
                         Padding="0"
                         Background="Transparent"
                         BorderThickness="2"
@@ -636,12 +812,10 @@
             </Border>
         </Popup>
 
-        <!-- Minimal status + page indicator -->
         <StackPanel
-            Margin="0,0,0,64"
-            Canvas.ZIndex="30"
+            Margin="18"
             HorizontalAlignment="Center"
-            Spacing="4"
+            Spacing="6"
             VerticalAlignment="Bottom">
             <InfoBar
                 AutomationProperties.AutomationId="ReaderStatus"
@@ -650,8 +824,8 @@
                 Message="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
                 Severity="{x:Bind ViewModel.StatusSeverity, Mode=OneWay}" />
             <ProgressRing
-                Width="18"
-                Height="18"
+                Width="20"
+                Height="20"
                 IsActive="{x:Bind ViewModel.IsBusy, Mode=OneWay}"
                 Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.IsBusy), Mode=OneWay}" />
         </StackPanel>

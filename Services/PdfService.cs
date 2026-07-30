@@ -279,6 +279,83 @@ public sealed class PdfService : IPdfService, IDisposable
         }, cancellationToken);
     }
 
+    public Task<IReadOnlyList<PdfFormField>> GetFormFieldsAsync(
+        PdfDocumentSession document,
+        int pageIndex,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ObjectDisposedException.ThrowIf(document.IsClosed, document);
+        ArgumentOutOfRangeException.ThrowIfNegative(pageIndex);
+
+        return ExecutePdfiumCallAsync(() =>
+        {
+            if (pageIndex >= document.PageCount || document.FormFill is null)
+            {
+                return (IReadOnlyList<PdfFormField>)[];
+            }
+
+            var page = PdfiumNative.FPDF_LoadPage(document.Handle, pageIndex);
+            if (page == IntPtr.Zero)
+            {
+                throw CreatePdfiumException($"Unable to load page {pageIndex + 1} while reading form fields.");
+            }
+
+            var fields = new List<PdfFormField>();
+            var formHandle = document.FormFill.FormHandle;
+            PdfiumNative.FORM_OnAfterLoadPage(page, formHandle);
+
+            try
+            {
+                var annotationCount = Math.Max(0, PdfiumNative.FPDFPage_GetAnnotCount(page));
+                for (var annotationIndex = 0; annotationIndex < annotationCount; annotationIndex++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var annotation = PdfiumNative.FPDFPage_GetAnnot(page, annotationIndex);
+                    if (annotation == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        if (PdfiumNative.FPDFAnnot_GetSubtype(annotation) != PdfiumNative.AnnotationWidget ||
+                            PdfiumNative.FPDFAnnot_GetRect(annotation, out var rect) == 0)
+                        {
+                            continue;
+                        }
+
+                        var fieldType = (PdfFormFieldType)PdfiumNative.FPDFAnnot_GetFormFieldType(formHandle, annotation);
+                        fields.Add(new PdfFormField(
+                            pageIndex,
+                            annotationIndex,
+                            fieldType,
+                            ReadFormFieldString((buffer, length) =>
+                                PdfiumNative.FPDFAnnot_GetFormFieldName(formHandle, annotation, buffer, length)),
+                            ReadFormFieldString((buffer, length) =>
+                                PdfiumNative.FPDFAnnot_GetFormFieldAlternateName(formHandle, annotation, buffer, length)),
+                            ReadFormFieldString((buffer, length) =>
+                                PdfiumNative.FPDFAnnot_GetFormFieldValue(formHandle, annotation, buffer, length)),
+                            new PdfRect(rect.Left, rect.Top, rect.Right, rect.Bottom),
+                            fieldType == PdfFormFieldType.Signature &&
+                            PdfiumNative.FPDFAnnot_HasKey(annotation, "V") != 0));
+                    }
+                    finally
+                    {
+                        PdfiumNative.FPDFPage_CloseAnnot(annotation);
+                    }
+                }
+            }
+            finally
+            {
+                PdfiumNative.FORM_OnBeforeClosePage(page, formHandle);
+                PdfiumNative.FPDF_ClosePage(page);
+            }
+
+            return (IReadOnlyList<PdfFormField>)fields;
+        }, cancellationToken);
+    }
+
     public Task RotatePageAsync(
         PdfDocumentSession document,
         int pageIndex,
@@ -481,47 +558,26 @@ public sealed class PdfService : IPdfService, IDisposable
             try
             {
                 PdfiumNative.FPDF_CopyViewerPreferences(destination, document.Handle);
-                const double renderScale = 2.0;
-
                 for (var pageIndex = 0; pageIndex < document.PageCount; pageIndex++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    overlays!.Pages.TryGetValue(pageIndex, out var pageOverlay);
+                    var indices = new[] { pageIndex };
+                    var imported = PdfiumNative.FPDF_ImportPagesByIndex(
+                        destination,
+                        document.Handle,
+                        indices,
+                        1,
+                        pageIndex);
 
-                    if (!OverlayCompositor.HasContent(pageOverlay))
+                    if (imported == 0)
                     {
-                        var indices = new[] { pageIndex };
-                        var imported = PdfiumNative.FPDF_ImportPagesByIndex(
-                            destination,
-                            document.Handle,
-                            indices,
-                            1,
-                            pageIndex);
-
-                        if (imported == 0)
-                        {
-                            throw CreatePdfiumException($"PDFium could not import page {pageIndex + 1}.");
-                        }
+                        throw CreatePdfiumException($"PDFium could not import page {pageIndex + 1}.");
                     }
-                    else
-                    {
-                        var rendered = RenderPageToPackedBgra(document.Handle, document.FormFill?.FormHandle ?? IntPtr.Zero, pageIndex, renderScale);
-                        var composited = OverlayCompositor.Composite(
-                            rendered.Pixels,
-                            rendered.Width,
-                            rendered.Height,
-                            pageOverlay!,
-                            rendered.PageWidthPoints,
-                            rendered.PageHeightPoints);
 
-                        CreateImagePage(
-                            destination,
-                            pageIndex,
-                            rendered.PageWidthPoints,
-                            rendered.PageHeightPoints,
-                            composited,
-                            rendered.Width,
-                            rendered.Height);
+                    overlays!.Pages.TryGetValue(pageIndex, out var pageOverlay);
+                    if (OverlayCompositor.HasContent(pageOverlay))
+                    {
+                        ApplyPageOverlay(destination, pageIndex, pageOverlay!);
                     }
                 }
 
@@ -545,6 +601,7 @@ public sealed class PdfService : IPdfService, IDisposable
                 return;
             }
 
+            document.CloseFormFill();
             PdfiumNative.FPDF_CloseDocument(document.Handle);
             document.MarkClosed();
         }, cancellationToken);
@@ -569,6 +626,322 @@ public sealed class PdfService : IPdfService, IDisposable
 
         _pdfiumGate.Dispose();
         _activeWriteStream?.Dispose();
+    }
+
+    private static string ReadFormFieldString(Func<byte[]?, uint, uint> read)
+    {
+        var byteLength = read(null, 0);
+        if (byteLength <= 2)
+        {
+            return string.Empty;
+        }
+
+        var buffer = new byte[byteLength];
+        var written = read(buffer, byteLength);
+        if (written <= 2)
+        {
+            return string.Empty;
+        }
+
+        return System.Text.Encoding.Unicode
+            .GetString(buffer, 0, checked((int)Math.Min(written, byteLength)))
+            .TrimEnd('\0');
+    }
+
+    private static void ApplyPageOverlay(IntPtr document, int pageIndex, PageOverlayState overlay)
+    {
+        var page = PdfiumNative.FPDF_LoadPage(document, pageIndex);
+        if (page == IntPtr.Zero)
+        {
+            throw CreatePdfiumException($"Unable to load page {pageIndex + 1} while embedding edits.");
+        }
+
+        try
+        {
+            var pageHeight = Math.Max(1f, PdfiumNative.FPDF_GetPageHeightF(page));
+
+            foreach (var stroke in overlay.InkStrokes)
+            {
+                AddInkStroke(page, pageHeight, stroke);
+            }
+
+            foreach (var text in overlay.TextItems)
+            {
+                AddTextOverlay(document, page, pageHeight, text);
+            }
+
+            foreach (var signature in overlay.Signatures)
+            {
+                AddSignatureOverlay(document, page, pageHeight, signature);
+            }
+
+            if (PdfiumNative.FPDFPage_GenerateContent(page) == 0)
+            {
+                throw CreatePdfiumException($"PDFium could not generate edited content for page {pageIndex + 1}.");
+            }
+        }
+        finally
+        {
+            PdfiumNative.FPDF_ClosePage(page);
+        }
+    }
+
+    private static void AddInkStroke(IntPtr page, float pageHeight, InkStrokeOverlay stroke)
+    {
+        if (stroke.Points.Count < 2)
+        {
+            return;
+        }
+
+        var first = stroke.Points[0];
+        var path = PdfiumNative.FPDFPageObj_CreateNewPath((float)first.X, (float)(pageHeight - first.Y));
+        if (path == IntPtr.Zero)
+        {
+            throw CreatePdfiumException("PDFium could not create an ink path.");
+        }
+
+        var inserted = false;
+        try
+        {
+            for (var index = 1; index < stroke.Points.Count; index++)
+            {
+                var point = stroke.Points[index];
+                if (PdfiumNative.FPDFPath_LineTo(path, (float)point.X, (float)(pageHeight - point.Y)) == 0)
+                {
+                    throw CreatePdfiumException("PDFium could not extend an ink path.");
+                }
+            }
+
+            var (red, green, blue) = ParseRgb(stroke.ColorHex);
+            if (PdfiumNative.FPDFPageObj_SetStrokeColor(path, red, green, blue, 255) == 0 ||
+                PdfiumNative.FPDFPageObj_SetStrokeWidth(path, (float)Math.Max(0.5, stroke.Thickness)) == 0 ||
+                PdfiumNative.FPDFPageObj_SetLineCap(path, 1) == 0 ||
+                PdfiumNative.FPDFPageObj_SetLineJoin(path, 1) == 0 ||
+                PdfiumNative.FPDFPath_SetDrawMode(path, 0, 1) == 0 ||
+                PdfiumNative.FPDFPage_InsertObject(page, path) == 0)
+            {
+                throw CreatePdfiumException("PDFium could not add an ink path to the page.");
+            }
+
+            inserted = true;
+        }
+        finally
+        {
+            if (!inserted)
+            {
+                PdfiumNative.FPDFPageObj_Destroy(path);
+            }
+        }
+    }
+
+    private static void AddTextOverlay(IntPtr document, IntPtr page, float pageHeight, TextOverlay text)
+    {
+        if (string.IsNullOrEmpty(text.Text))
+        {
+            return;
+        }
+
+        var fontName = (text.IsBold, text.IsItalic) switch
+        {
+            (true, true) => "Helvetica-BoldOblique",
+            (true, false) => "Helvetica-Bold",
+            (false, true) => "Helvetica-Oblique",
+            _ => "Helvetica"
+        };
+        var font = PdfiumNative.FPDFText_LoadStandardFont(document, fontName);
+        if (font == IntPtr.Zero)
+        {
+            throw CreatePdfiumException($"PDFium could not load the standard font '{fontName}'.");
+        }
+
+        try
+        {
+            var fontSize = (float)Math.Clamp(text.FontSize, 4, 144);
+            var lineHeight = fontSize * 1.2f;
+            var maxLines = Math.Max(1, (int)Math.Floor(Math.Max(lineHeight, text.Height) / lineHeight));
+            var lines = WrapText(text.Text, Math.Max(24, text.Width), fontSize).Take(maxLines);
+            var (red, green, blue) = ParseRgb(text.ColorHex);
+            var lineIndex = 0;
+
+            foreach (var line in lines)
+            {
+                var textObject = PdfiumNative.FPDFPageObj_CreateTextObj(document, font, fontSize);
+                if (textObject == IntPtr.Zero)
+                {
+                    throw CreatePdfiumException("PDFium could not create a text object.");
+                }
+
+                var inserted = false;
+                try
+                {
+                    var encoded = System.Text.Encoding.Unicode.GetBytes(line + '\0');
+                    var baseline = pageHeight - text.Y - fontSize - (lineIndex * lineHeight);
+                    if (PdfiumNative.FPDFText_SetText(textObject, encoded) == 0 ||
+                        PdfiumNative.FPDFPageObj_SetFillColor(textObject, red, green, blue, 255) == 0 ||
+                        PdfiumNative.FPDFPageObj_SetMatrix(textObject, 1, 0, 0, 1, text.X, baseline) == 0 ||
+                        PdfiumNative.FPDFPage_InsertObject(page, textObject) == 0)
+                    {
+                        throw CreatePdfiumException("PDFium could not add text to the page.");
+                    }
+
+                    inserted = true;
+                }
+                finally
+                {
+                    if (!inserted)
+                    {
+                        PdfiumNative.FPDFPageObj_Destroy(textObject);
+                    }
+                }
+
+                lineIndex++;
+            }
+        }
+        finally
+        {
+            PdfiumNative.FPDFFont_Close(font);
+        }
+    }
+
+    private static IEnumerable<string> WrapText(string value, double width, float fontSize)
+    {
+        var maximumCharacters = Math.Max(1, (int)Math.Floor(width / Math.Max(1, fontSize * 0.52)));
+        foreach (var paragraph in value.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Split('\n'))
+        {
+            if (paragraph.Length == 0)
+            {
+                yield return string.Empty;
+                continue;
+            }
+
+            var remaining = paragraph;
+            while (remaining.Length > maximumCharacters)
+            {
+                var splitAt = remaining.LastIndexOf(' ', maximumCharacters - 1, maximumCharacters);
+                if (splitAt <= 0)
+                {
+                    splitAt = maximumCharacters;
+                }
+
+                yield return remaining[..splitAt].TrimEnd();
+                remaining = remaining[splitAt..].TrimStart();
+            }
+
+            yield return remaining;
+        }
+    }
+
+    private static unsafe void AddSignatureOverlay(
+        IntPtr document,
+        IntPtr page,
+        float pageHeight,
+        SignatureOverlay signature)
+    {
+        if (string.IsNullOrWhiteSpace(signature.ImageBase64) || signature.Width <= 0 || signature.Height <= 0)
+        {
+            return;
+        }
+
+        byte[] imageBytes;
+        try
+        {
+            imageBytes = Convert.FromBase64String(signature.ImageBase64);
+        }
+        catch (FormatException)
+        {
+            return;
+        }
+
+        using var stream = new MemoryStream(imageBytes, writable: false);
+        using var source = new System.Drawing.Bitmap(stream);
+        using var bitmap = new System.Drawing.Bitmap(
+            source.Width,
+            source.Height,
+            System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using (var graphics = System.Drawing.Graphics.FromImage(bitmap))
+        {
+            graphics.Clear(System.Drawing.Color.Transparent);
+            graphics.DrawImage(source, 0, 0, source.Width, source.Height);
+        }
+
+        var pdfBitmap = PdfiumNative.FPDFBitmap_Create(bitmap.Width, bitmap.Height, 1);
+        if (pdfBitmap == IntPtr.Zero)
+        {
+            throw CreatePdfiumException("PDFium could not allocate a signature bitmap.");
+        }
+
+        IntPtr imageObject = IntPtr.Zero;
+        var inserted = false;
+        try
+        {
+            CopyBitmapToPdfium(bitmap, pdfBitmap);
+            imageObject = PdfiumNative.FPDFPageObj_NewImageObj(document);
+            if (imageObject == IntPtr.Zero)
+            {
+                throw CreatePdfiumException("PDFium could not create a signature image object.");
+            }
+
+            var pagePtr = page;
+            if (PdfiumNative.FPDFImageObj_SetBitmap(&pagePtr, 1, imageObject, pdfBitmap) == 0 ||
+                PdfiumNative.FPDFPageObj_SetMatrix(
+                    imageObject,
+                    signature.Width,
+                    0,
+                    0,
+                    signature.Height,
+                    signature.X,
+                    pageHeight - signature.Y - signature.Height) == 0 ||
+                PdfiumNative.FPDFPage_InsertObject(page, imageObject) == 0)
+            {
+                throw CreatePdfiumException("PDFium could not add the signature image to the page.");
+            }
+
+            inserted = true;
+        }
+        finally
+        {
+            if (!inserted && imageObject != IntPtr.Zero)
+            {
+                PdfiumNative.FPDFPageObj_Destroy(imageObject);
+            }
+
+            PdfiumNative.FPDFBitmap_Destroy(pdfBitmap);
+        }
+    }
+
+    private static void CopyBitmapToPdfium(System.Drawing.Bitmap bitmap, IntPtr pdfBitmap)
+    {
+        var rectangle = new System.Drawing.Rectangle(0, 0, bitmap.Width, bitmap.Height);
+        var data = bitmap.LockBits(
+            rectangle,
+            System.Drawing.Imaging.ImageLockMode.ReadOnly,
+            System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+
+        try
+        {
+            var target = PdfiumNative.FPDFBitmap_GetBuffer(pdfBitmap);
+            var targetStride = PdfiumNative.FPDFBitmap_GetStride(pdfBitmap);
+            var row = new byte[bitmap.Width * 4];
+            for (var y = 0; y < bitmap.Height; y++)
+            {
+                var sourceY = data.Stride < 0 ? bitmap.Height - 1 - y : y;
+                Marshal.Copy(data.Scan0 + (sourceY * Math.Abs(data.Stride)), row, 0, row.Length);
+                Marshal.Copy(row, 0, target + (y * targetStride), row.Length);
+            }
+        }
+        finally
+        {
+            bitmap.UnlockBits(data);
+        }
+    }
+
+    private static (uint Red, uint Green, uint Blue) ParseRgb(string colorHex)
+    {
+        var hex = colorHex?.Trim().TrimStart('#');
+        return hex is { Length: 6 } &&
+               uint.TryParse(hex, System.Globalization.NumberStyles.HexNumber, null, out var value)
+            ? ((value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff)
+            : (0, 0, 0);
     }
 
     private static List<PdfOutlineItem> ReadOutlineChildren(
@@ -898,13 +1271,6 @@ public sealed class PdfService : IPdfService, IDisposable
         }
     }
 
-    private sealed record PackedPageRender(
-        byte[] Pixels,
-        int Width,
-        int Height,
-        float PageWidthPoints,
-        float PageHeightPoints);
-
     private static void RenderPageBitmap(
         IntPtr formHandle,
         IntPtr page,
@@ -952,121 +1318,6 @@ public sealed class PdfService : IPdfService, IDisposable
             {
                 PdfiumNative.FORM_OnBeforeClosePage(page, formHandle);
             }
-        }
-    }
-
-    private static PackedPageRender RenderPageToPackedBgra(IntPtr documentHandle, IntPtr formHandle, int pageIndex, double scale)
-    {
-        var page = PdfiumNative.FPDF_LoadPage(documentHandle, pageIndex);
-        if (page == IntPtr.Zero)
-        {
-            throw CreatePdfiumException($"Unable to load page {pageIndex + 1} for saving.");
-        }
-
-        IntPtr bitmap = IntPtr.Zero;
-
-        try
-        {
-            var pageWidth = Math.Max(1f, PdfiumNative.FPDF_GetPageWidthF(page));
-            var pageHeight = Math.Max(1f, PdfiumNative.FPDF_GetPageHeightF(page));
-            var renderWidth = Math.Max(1, (int)Math.Ceiling(pageWidth * scale));
-            var renderHeight = Math.Max(1, (int)Math.Ceiling(pageHeight * scale));
-
-            bitmap = PdfiumNative.FPDFBitmap_Create(renderWidth, renderHeight, 1);
-            if (bitmap == IntPtr.Zero)
-            {
-                throw new InvalidOperationException("PDFium failed to allocate a render bitmap.");
-            }
-
-            PdfiumNative.FPDFBitmap_FillRect(bitmap, 0, 0, renderWidth, renderHeight, PdfiumNative.WhiteArgb);
-            RenderPageBitmap(formHandle, page, bitmap, renderWidth, renderHeight);
-
-            var stride = PdfiumNative.FPDFBitmap_GetStride(bitmap);
-            var sourceLength = stride * renderHeight;
-            var sourcePixels = new byte[sourceLength];
-            Marshal.Copy(PdfiumNative.FPDFBitmap_GetBuffer(bitmap), sourcePixels, 0, sourceLength);
-            var packedPixels = PackBitmapRows(sourcePixels, stride, renderWidth, renderHeight);
-
-            return new PackedPageRender(packedPixels, renderWidth, renderHeight, pageWidth, pageHeight);
-        }
-        finally
-        {
-            if (bitmap != IntPtr.Zero)
-            {
-                PdfiumNative.FPDFBitmap_Destroy(bitmap);
-            }
-
-            PdfiumNative.FPDF_ClosePage(page);
-        }
-    }
-
-    private static unsafe void CreateImagePage(
-        IntPtr destinationDocument,
-        int pageIndex,
-        float pageWidthPoints,
-        float pageHeightPoints,
-        byte[] packedBgra,
-        int renderWidth,
-        int renderHeight)
-    {
-        var page = PdfiumNative.FPDFPage_New(destinationDocument, pageIndex, pageWidthPoints, pageHeightPoints);
-        if (page == IntPtr.Zero)
-        {
-            throw CreatePdfiumException($"PDFium could not create page {pageIndex + 1}.");
-        }
-
-        IntPtr bitmap = IntPtr.Zero;
-        IntPtr imageObject = IntPtr.Zero;
-
-        try
-        {
-            bitmap = PdfiumNative.FPDFBitmap_Create(renderWidth, renderHeight, 1);
-            if (bitmap == IntPtr.Zero)
-            {
-                throw new InvalidOperationException("PDFium failed to allocate an image bitmap.");
-            }
-
-            var stride = PdfiumNative.FPDFBitmap_GetStride(bitmap);
-            var expectedStride = renderWidth * 4;
-            var buffer = PdfiumNative.FPDFBitmap_GetBuffer(bitmap);
-
-            for (var row = 0; row < renderHeight; row++)
-            {
-                Marshal.Copy(
-                    packedBgra,
-                    row * expectedStride,
-                    buffer + (row * stride),
-                    expectedStride);
-            }
-
-            imageObject = PdfiumNative.FPDFPageObj_NewImageObj(destinationDocument);
-            if (imageObject == IntPtr.Zero)
-            {
-                throw CreatePdfiumException("PDFium could not create an image object.");
-            }
-
-            PdfiumNative.FPDFPageObj_SetMatrix(imageObject, pageWidthPoints, 0, 0, pageHeightPoints, 0, 0);
-            var pagePtr = page;
-            if (PdfiumNative.FPDFImageObj_SetBitmap(&pagePtr, 1, imageObject, bitmap) == 0)
-            {
-                throw CreatePdfiumException("PDFium could not attach the flattened image to the page.");
-            }
-
-            if (PdfiumNative.FPDFPage_InsertObject(page, imageObject) == 0)
-            {
-                throw CreatePdfiumException("PDFium could not insert the flattened image.");
-            }
-
-            PdfiumNative.FPDFPage_GenerateContent(page);
-        }
-        finally
-        {
-            if (bitmap != IntPtr.Zero)
-            {
-                PdfiumNative.FPDFBitmap_Destroy(bitmap);
-            }
-
-            PdfiumNative.FPDF_ClosePage(page);
         }
     }
 

@@ -32,6 +32,7 @@
                     x:Name="PageEditSurface"
                     IsHitTestVisible="False"
                     Visibility="Collapsed" />
+                <Canvas x:Name="SignActionCanvas" />
             </Grid>
         </Border>
     </ScrollViewer>

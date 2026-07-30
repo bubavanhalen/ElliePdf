@@ -10,6 +10,7 @@ internal static partial class PdfiumNative
     public const uint MatchCase = 0x01;
     public const uint MatchWholeWord = 0x02;
     public const uint ErrPassword = 4;
+    public const int AnnotationWidget = 20;
 
     [LibraryImport("pdfium.dll")]
     public static partial void FPDF_InitLibrary();
@@ -89,6 +90,48 @@ internal static partial class PdfiumNative
         int flags);
 
     [LibraryImport("pdfium.dll")]
+    public static partial int FPDFPage_GetAnnotCount(IntPtr page);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial IntPtr FPDFPage_GetAnnot(IntPtr page, int index);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial void FPDFPage_CloseAnnot(IntPtr annotation);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial int FPDFAnnot_GetSubtype(IntPtr annotation);
+
+    [LibraryImport("pdfium.dll", StringMarshalling = StringMarshalling.Utf8)]
+    public static partial int FPDFAnnot_HasKey(IntPtr annotation, string key);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial int FPDFAnnot_GetFormFieldType(IntPtr formHandle, IntPtr annotation);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial int FPDFAnnot_GetRect(IntPtr annotation, out FsRectF rect);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial uint FPDFAnnot_GetFormFieldName(
+        IntPtr formHandle,
+        IntPtr annotation,
+        [Out] byte[]? buffer,
+        uint bufferLength);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial uint FPDFAnnot_GetFormFieldAlternateName(
+        IntPtr formHandle,
+        IntPtr annotation,
+        [Out] byte[]? buffer,
+        uint bufferLength);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial uint FPDFAnnot_GetFormFieldValue(
+        IntPtr formHandle,
+        IntPtr annotation,
+        [Out] byte[]? buffer,
+        uint bufferLength);
+
+    [LibraryImport("pdfium.dll")]
     public static partial int FPDFPage_GetRotation(IntPtr page);
 
     [LibraryImport("pdfium.dll")]
@@ -101,10 +144,66 @@ internal static partial class PdfiumNative
     public static partial void FPDFPage_Delete(IntPtr document, int page_index);
 
     [LibraryImport("pdfium.dll")]
-    public static partial IntPtr FPDFPage_New(IntPtr document, int page_index, double width, double height);
+    public static partial IntPtr FPDFPageObj_NewImageObj(IntPtr document);
+
+    [LibraryImport("pdfium.dll", StringMarshalling = StringMarshalling.Utf8)]
+    public static partial IntPtr FPDFText_LoadStandardFont(IntPtr document, string font);
 
     [LibraryImport("pdfium.dll")]
-    public static partial IntPtr FPDFPageObj_NewImageObj(IntPtr document);
+    public static partial void FPDFFont_Close(IntPtr font);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial IntPtr FPDFPageObj_CreateTextObj(IntPtr document, IntPtr font, float fontSize);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial int FPDFText_SetText(IntPtr textObject, byte[] text);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial IntPtr FPDFPageObj_CreateNewPath(float x, float y);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial int FPDFPath_LineTo(IntPtr path, float x, float y);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial int FPDFPath_SetDrawMode(IntPtr path, int fillMode, int stroke);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial int FPDFPageObj_SetStrokeColor(
+        IntPtr pageObject,
+        uint red,
+        uint green,
+        uint blue,
+        uint alpha);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial int FPDFPageObj_SetFillColor(
+        IntPtr pageObject,
+        uint red,
+        uint green,
+        uint blue,
+        uint alpha);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial int FPDFPageObj_SetStrokeWidth(IntPtr pageObject, float width);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial int FPDFPageObj_SetLineCap(IntPtr pageObject, int lineCap);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial int FPDFPageObj_SetLineJoin(IntPtr pageObject, int lineJoin);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial int FPDFPageObj_SetMatrix(
+        IntPtr pageObject,
+        double a,
+        double b,
+        double c,
+        double d,
+        double e,
+        double f);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial void FPDFPageObj_Destroy(IntPtr pageObject);
 
     [LibraryImport("pdfium.dll")]
     public static unsafe partial int FPDFImageObj_SetBitmap(
@@ -112,16 +211,6 @@ internal static partial class PdfiumNative
         int count,
         IntPtr image_object,
         IntPtr bitmap);
-
-    [LibraryImport("pdfium.dll")]
-    public static partial void FPDFPageObj_SetMatrix(
-        IntPtr page_object,
-        double a,
-        double b,
-        double c,
-        double d,
-        double e,
-        double f);
 
     [LibraryImport("pdfium.dll")]
     public static partial int FPDFPage_InsertObject(IntPtr page, IntPtr page_object);
@@ -216,3 +305,12 @@ internal struct FpdfFileWrite
 
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 internal delegate int FpdfWriteBlockCallback(IntPtr fileWrite, IntPtr data, uint size);
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct FsRectF
+{
+    public float Left;
+    public float Bottom;
+    public float Right;
+    public float Top;
+}

@@ -22,10 +22,6 @@ public sealed partial class MainPage : Page
         Unloaded += OnUnloaded;
 
         ContentFrame.Navigate(typeof(ReaderPage));
-        if (NavView.MenuItems[0] is NavigationViewItem readItem)
-        {
-            NavView.SelectedItem = readItem;
-        }
     }
 
     public async Task OpenFilesAsync(IReadOnlyList<string> filePaths)
@@ -62,22 +58,24 @@ public sealed partial class MainPage : Page
         AppNavigation.ReaderPageRequested -= OnReaderPageRequested;
     }
 
-    private void PaneToggleButton_Click(object sender, RoutedEventArgs e) =>
-        NavView.IsPaneOpen = !NavView.IsPaneOpen;
-
     private void BackButton_Click(object sender, RoutedEventArgs e)
     {
-        if (ContentFrame.CanGoBack)
-        {
-            ContentFrame.GoBack();
-        }
+        SelectWorkspace("read");
     }
 
     private void ContentFrame_Navigated(object sender, Microsoft.UI.Xaml.Navigation.NavigationEventArgs e) =>
         SyncShellButtons();
 
     private void SyncShellButtons() =>
-        BackButton.Visibility = ContentFrame.CanGoBack ? Visibility.Visible : Visibility.Collapsed;
+        BackButton.Visibility = ContentFrame.CurrentSourcePageType == typeof(ReaderPage)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+
+    private void OrganizeButton_Click(object sender, RoutedEventArgs e) =>
+        SelectWorkspace("organize");
+
+    private void SettingsButton_Click(object sender, RoutedEventArgs e) =>
+        SelectWorkspace("settings");
 
     private void OnWorkspaceRequested(string tag) => SelectWorkspace(tag);
 
@@ -107,30 +105,10 @@ public sealed partial class MainPage : Page
         return _readerPage;
     }
 
-    private void NavView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
-    {
-        if (args.SelectedItemContainer is NavigationViewItem item && item.Tag is string tag)
-        {
-            if (tag == "read")
-            {
-                sender.IsPaneOpen = false;
-            }
-
-            SelectWorkspace(tag);
-        }
-    }
-
     private void SelectWorkspace(string tag)
     {
         if (tag == "read")
         {
-            NavView.IsPaneOpen = false;
-
-            if (NavView.MenuItems[0] is NavigationViewItem readItem)
-            {
-                NavView.SelectedItem = readItem;
-            }
-
             if (ContentFrame.CurrentSourcePageType != typeof(ReaderPage))
             {
                 ContentFrame.Navigate(typeof(ReaderPage));
@@ -139,11 +117,6 @@ public sealed partial class MainPage : Page
         }
         else if (tag == "organize")
         {
-            if (NavView.MenuItems[1] is NavigationViewItem organizeItem)
-            {
-                NavView.SelectedItem = organizeItem;
-            }
-
             if (ContentFrame.CurrentSourcePageType != typeof(OrganizePage))
             {
                 ContentFrame.Navigate(typeof(OrganizePage));
@@ -151,11 +124,6 @@ public sealed partial class MainPage : Page
         }
         else if (tag == "settings")
         {
-            if (NavView.MenuItems[2] is NavigationViewItem settingsItem)
-            {
-                NavView.SelectedItem = settingsItem;
-            }
-
             if (ContentFrame.CurrentSourcePageType != typeof(SettingsPage))
             {
                 ContentFrame.Navigate(typeof(SettingsPage));

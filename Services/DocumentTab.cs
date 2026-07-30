@@ -11,7 +11,7 @@ public sealed class DocumentTab
 
     public Guid Id { get; } = Guid.NewGuid();
 
-    public PdfDocumentSession Session { get; }
+    public PdfDocumentSession Session { get; private set; }
 
     public string FilePath => Session.SourcePath;
 
@@ -24,4 +24,15 @@ public sealed class DocumentTab
     public PdfZoomMode ZoomMode { get; set; } = PdfZoomMode.FitWidth;
 
     public bool IsDirty { get; set; }
+
+    internal PdfDocumentSession ReplaceSession(PdfDocumentSession session)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ObjectDisposedException.ThrowIf(session.IsClosed, session);
+
+        var previous = Session;
+        Session = session;
+        CurrentPageIndex = Math.Clamp(CurrentPageIndex, 0, Math.Max(0, session.PageCount - 1));
+        return previous;
+    }
 }

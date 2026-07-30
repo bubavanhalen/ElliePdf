@@ -10,7 +10,5 @@ public sealed class UserSettings
 
     public bool ConfirmOrganizeSave { get; set; } = true;
 
-    public bool AutoSaveCompanion { get; set; } = true;
-
     public int RecentFilesMaxCount { get; set; } = 12;
 }

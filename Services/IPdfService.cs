@@ -39,6 +39,11 @@ public interface IPdfService
         PdfDocumentSession document,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<PdfFormField>> GetFormFieldsAsync(
+        PdfDocumentSession document,
+        int pageIndex,
+        CancellationToken cancellationToken = default);
+
     Task RotatePageAsync(
         PdfDocumentSession document,
         int pageIndex,
