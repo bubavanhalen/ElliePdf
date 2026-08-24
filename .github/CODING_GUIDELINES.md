@@ -3,18 +3,18 @@
 ## Agentic workflows
 
 Five GitHub Actions workflows automate developer tasks using `actions/ai-inference@v1`.
-They work with **any model supported by GitHub Models**: GPT-4.1, o4-mini, Claude Sonnet, Codex, etc.
+They work with **any model supported by GitHub Models**: GPT latest, Claude Sonnet, o-mini, Codex, etc.
 
 ### Choosing a model
 
-Set the **`AGENT_MODEL` repository variable** (Settings → Secrets and variables → Variables) to control which model all agent workflows use by default. Examples:
+Set the **`AGENT_MODEL` repository variable** (Settings → Secrets and variables → Variables) to control which model all agent workflows use by default. Use versionless aliases so you always get the current release without updating workflows:
 
 | Value | Model |
 |---|---|
-| `gpt-4.1` | GPT-4.1 (default) |
-| `claude-sonnet-4-5` | Claude Sonnet 4.5 |
-| `o4-mini` | OpenAI o4-mini |
-| `gpt-4.1-mini` | GPT-4.1 mini (faster/cheaper) |
+| `gpt-latest` | GPT latest (default) |
+| `claude-sonnet` | Claude Sonnet (currently Sonnet 5) |
+| `o-mini-latest` | OpenAI o-mini latest |
+| `gpt-mini-latest` | GPT mini latest (faster/cheaper) |
 
 Each workflow also accepts a `model` input when triggered via `workflow_dispatch`, overriding `AGENT_MODEL` for that single run.
 
