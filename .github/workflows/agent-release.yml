@@ -4,10 +4,18 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Version tag (e.g. v1.2.0)'
+        required: true
+      model:
+        description: 'AI model to use (e.g. gpt-4.1, claude-sonnet-4-5, o4-mini)'
+        required: false
+        default: ''
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
   build-x64:
@@ -16,13 +24,19 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Extract version from tag
+      - name: Extract version
         id: version
         shell: pwsh
         run: |
-          $v = "${{ github.ref_name }}".TrimStart('v')
+          $tag = if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            "${{ inputs.tag }}"
+          } else { "${{ github.ref_name }}" }
+          $v = $tag.TrimStart('v')
           echo "version=$v" >> $env:GITHUB_OUTPUT
+          echo "tag=$tag" >> $env:GITHUB_OUTPUT
 
       - name: Patch version in csproj
         shell: pwsh
@@ -32,7 +46,7 @@ jobs:
           if ($csproj -match '<Version>') {
             $csproj = $csproj -replace '<Version>[^<]*</Version>', "<Version>$v</Version>"
           } else {
-            $csproj = $csproj -replace '</PropertyGroup>', "  <Version>$v</Version>`n  </PropertyGroup>"
+            $csproj = $csproj -replace '(</PropertyGroup>)', "  <Version>$v</Version>`n  `$1"
           }
           Set-Content ElliePdf.csproj $csproj
 
@@ -49,7 +63,7 @@ jobs:
           dotnet build ElliePdf.slnx -c Release -p:Platform=x64 --no-restore
           dotnet test ElliePdf.Tests/ElliePdf.Tests.csproj -c Release -p:Platform=x64
 
-      - name: Publish x64 self-contained
+      - name: Publish x64
         run: >
           dotnet publish ElliePdf.csproj
           -c Release
@@ -59,13 +73,11 @@ jobs:
           -r win-x64
           -o publish/x64
 
-      - name: Zip x64 artifact
+      - name: Zip x64
         shell: pwsh
-        run: |
-          Compress-Archive -Path publish/x64/* -DestinationPath ElliePdf-${{ steps.version.outputs.version }}-win-x64.zip
+        run: Compress-Archive -Path publish/x64/* -DestinationPath ElliePdf-${{ steps.version.outputs.version }}-win-x64.zip
 
-      - name: Upload x64 artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: win-x64
           path: ElliePdf-${{ steps.version.outputs.version }}-win-x64.zip
@@ -84,7 +96,7 @@ jobs:
           if ($csproj -match '<Version>') {
             $csproj = $csproj -replace '<Version>[^<]*</Version>', "<Version>$v</Version>"
           } else {
-            $csproj = $csproj -replace '</PropertyGroup>', "  <Version>$v</Version>`n  </PropertyGroup>"
+            $csproj = $csproj -replace '(</PropertyGroup>)', "  <Version>$v</Version>`n  `$1"
           }
           Set-Content ElliePdf.csproj $csproj
 
@@ -96,7 +108,7 @@ jobs:
       - name: Restore
         run: dotnet restore ElliePdf.slnx
 
-      - name: Publish ARM64 self-contained
+      - name: Publish ARM64
         run: >
           dotnet publish ElliePdf.csproj
           -c Release
@@ -106,13 +118,11 @@ jobs:
           -r win-arm64
           -o publish/arm64
 
-      - name: Zip ARM64 artifact
+      - name: Zip ARM64
         shell: pwsh
-        run: |
-          Compress-Archive -Path publish/arm64/* -DestinationPath ElliePdf-${{ needs.build-x64.outputs.version }}-win-arm64.zip
+        run: Compress-Archive -Path publish/arm64/* -DestinationPath ElliePdf-${{ needs.build-x64.outputs.version }}-win-arm64.zip
 
-      - name: Upload ARM64 artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: win-arm64
           path: ElliePdf-${{ needs.build-x64.outputs.version }}-win-arm64.zip
@@ -122,47 +132,56 @@ jobs:
     needs: [build-x64, build-arm64]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Collect commit log since last tag
+        id: log
+        run: |
+          PREV=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || git rev-list --max-parents=0 HEAD)
+          LOG=$(git log --oneline "$PREV"..HEAD)
+          echo "log<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$LOG" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Generate changelog with AI
+        id: ai
+        uses: actions/ai-inference@v1
+        with:
+          model: ${{ inputs.model || vars.AGENT_MODEL || 'gpt-4.1' }}
+          system-prompt-file: .github/prompts/system-dotnet.txt
+          prompt: |
+            Write concise, user-facing release notes for ElliePdf ${{ needs.build-x64.outputs.version }}.
+
+            ElliePdf is a Windows native PDF reader/organizer (WinUI 3 + PDFium).
+            Features: multi-tab reading, zoom/search, ink/text/signature annotations,
+            page reorder/rotate/delete, merge/export, recent files, password-protected PDFs.
+
+            Categorize the following commits into these sections (omit empty sections):
+            - ✨ Features
+            - 🐛 Bug Fixes
+            - 🔧 Improvements
+            - 📦 Dependencies
+
+            Write user-facing descriptions — no commit hashes, no internal jargon.
+            Output only the Markdown release notes, no preamble.
+
+            ## Commits
+            ${{ steps.log.outputs.log }}
 
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts/
 
-      - name: Generate changelog with Copilot
-        uses: github/copilot-cli-action@v1
-        with:
-          prompt: |
-            You are a technical writer creating release notes for ElliePdf v${{ needs.build-x64.outputs.version }}.
-
-            ElliePdf is a Windows native PDF reader and organizer built with WinUI 3 and PDFium.
-            Key features: multi-tab reading, zoom/search, ink/text/signature annotations,
-            page organize (reorder/rotate/delete), merge/export, recent files, password-protected PDFs.
-
-            1. Run: git log --oneline $(git describe --tags --abbrev=0 HEAD^)..HEAD
-            2. Categorize commits into: ✨ Features, 🐛 Bug Fixes, 🔧 Improvements, 📦 Dependencies
-            3. Write concise, user-facing release notes in Markdown (no commit hashes, no jargon)
-            4. Save the output to RELEASE_NOTES.md in the repo root (overwrite if exists)
-
-            Version: ${{ needs.build-x64.outputs.version }}
-          mode: autopilot
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Read release notes
-        id: notes
-        run: |
-          NOTES=$(cat RELEASE_NOTES.md 2>/dev/null || echo "Release ${{ needs.build-x64.outputs.version }}")
-          echo "notes<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$NOTES" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name || inputs.tag }}
           name: ElliePdf ${{ needs.build-x64.outputs.version }}
-          body: ${{ steps.notes.outputs.notes }}
+          body: ${{ steps.ai.outputs.response }}
           draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(needs.build-x64.outputs.version, '-') }}
           files: |
             artifacts/win-x64/*.zip
             artifacts/win-arm64/*.zip

@@ -3,6 +3,15 @@ name: Agent – Feature Implementation
 on:
   issues:
     types: [labeled]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Issue number to implement'
+        required: true
+      model:
+        description: 'AI model to use (e.g. gpt-4.1, claude-sonnet-4-5, o4-mini)'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -11,46 +20,115 @@ permissions:
 
 jobs:
   scaffold-feature:
-    if: github.event.label.name == 'feature'
+    if: github.event.label.name == 'feature' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Scaffold feature with Copilot
-        uses: github/copilot-cli-action@v1
+      - name: Resolve issue details
+        id: issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NUM="${{ github.event.issue.number || inputs.issue_number }}"
+          TITLE=$(gh issue view "$NUM" --json title -q .title)
+          BODY=$(gh issue view "$NUM" --json body -q .body)
+          echo "number=$NUM" >> "$GITHUB_OUTPUT"
+          echo "title=$TITLE" >> "$GITHUB_OUTPUT"
+          echo "body<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$BODY" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Read architecture context
+        id: arch
+        run: |
+          CONTEXT=$(cat .github/CODING_GUIDELINES.md)
+          echo "context<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$CONTEXT" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Generate implementation plan and code with AI
+        id: ai
+        uses: actions/ai-inference@v1
         with:
+          model: ${{ inputs.model || vars.AGENT_MODEL || 'gpt-4.1' }}
+          system-prompt-file: .github/prompts/system-dotnet.txt
           prompt: |
-            You are a senior .NET developer working on ElliePdf — a WinUI 3 PDF reader and organizer.
+            Implement the feature described in GitHub issue #${{ steps.issue.outputs.number }}.
 
-            ## Architecture overview
-            - Services layer: interfaces in Services/ (IPdfService, IDocumentTabService, etc.) with DI wiring in App.xaml.cs
-            - ViewModels layer: MVVM via CommunityToolkit.Mvvm (ObservableObject, [ObservableProperty], [RelayCommand])
-            - Pages layer: Pages/ with code-behind binding to ViewModels
-            - Core library: ElliePdf.Core/ for pure .NET logic (no WinUI)
-            - PDFium wrapper: Services/PdfiumNative.cs + PdfService.cs
-            - Tests: ElliePdf.Tests/ (xunit, net11.0)
+            ## Architecture guidelines
+            ${{ steps.arch.outputs.context }}
 
-            ## Task
-            Implement the feature described in GitHub issue #${{ github.event.issue.number }}:
-
-            **Title:** ${{ github.event.issue.title }}
+            ## Issue
+            **Title:** ${{ steps.issue.outputs.title }}
 
             **Body:**
-            ${{ github.event.issue.body }}
+            ${{ steps.issue.outputs.body }}
 
             ## Instructions
-            1. Read the relevant existing source files to understand the affected area
-            2. Identify the correct layer(s) to modify (service interface → implementation → viewmodel → XAML)
-            3. Make surgical, focused changes — extend interfaces before adding new ones
-            4. Add a stub implementation with TODO comments where complex PDFium work is needed
-            5. Wire DI registration in App.xaml.cs if new services are added
-            6. Add or update xUnit tests in ElliePdf.Tests/ for any new pure logic
-            7. Create a draft pull request targeting master with:
-               - Title: "feat: <short description from issue title>"
-               - Body referencing "Closes #${{ github.event.issue.number }}"
-               - Label: feature
+            1. Identify the correct layer(s): service interface → implementation → viewmodel → XAML
+            2. Extend existing interfaces before creating new ones
+            3. Add stub implementation with TODO comments where complex PDFium work is needed
+            4. Add xUnit tests in ElliePdf.Tests/ for new pure logic
+            5. For DI: note which registrations to add in App.xaml.cs
 
-            Branch name: feature/issue-${{ github.event.issue.number }}
-          mode: autopilot
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+            Output each file preceded by: FILE: <repo-relative-path>
+            Output only complete, compilable C# or XAML files.
+            End with a section: ## PR_BODY (markdown for the pull request description)
+
+      - name: Write files and open draft PR
+        env:
+          AI_RESPONSE: ${{ steps.ai.outputs.response }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUM: ${{ steps.issue.outputs.number }}
+          ISSUE_TITLE: ${{ steps.issue.outputs.title }}
+        run: |
+          BRANCH="feature/issue-${ISSUE_NUM}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+
+          python3 - <<'PYEOF'
+          import os, re
+
+          response = os.environ["AI_RESPONSE"]
+          parts = re.split(r'^FILE:\s*(.+)$', response, flags=re.MULTILINE)
+
+          i = 1
+          while i < len(parts) - 1:
+              path = parts[i].strip()
+              # Stop at PR_BODY section marker if it leaked into a file path
+              if path.startswith('#'):
+                  break
+              body = parts[i + 1]
+              # Trim up to next FILE or ## PR_BODY
+              body = re.split(r'^(FILE:|## PR_BODY)', body, maxsplit=1, flags=re.MULTILINE)[0]
+              body = re.sub(r'^```\w*\n?', '', body.strip())
+              body = re.sub(r'\n?```$', '', body)
+              os.makedirs(os.path.dirname(path) if os.path.dirname(path) else '.', exist_ok=True)
+              with open(path, 'w') as f:
+                  f.write(body + '\n')
+              print(f"Written: {path}")
+              i += 2
+          PYEOF
+
+          # Extract PR body
+          PR_BODY=$(python3 -c "
+          import os, re, sys
+          r = os.environ['AI_RESPONSE']
+          m = re.search(r'## PR_BODY\s*\n([\s\S]+)', r)
+          print(m.group(1).strip() if m else 'Implements #' + os.environ['ISSUE_NUM'])
+          ")
+
+          git add -A
+          git diff --cached --quiet || git commit -m "feat: scaffold issue #${ISSUE_NUM} - ${ISSUE_TITLE}"
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --title "feat: ${ISSUE_TITLE}" \
+            --body "$(printf '%s\n\nCloses #%s' "$PR_BODY" "$ISSUE_NUM")" \
+            --base master \
+            --head "$BRANCH" \
+            --draft \
+            --label feature
