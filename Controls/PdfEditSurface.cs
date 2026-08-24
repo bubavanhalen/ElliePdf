@@ -16,7 +16,7 @@ using TextFontStyle = Windows.UI.Text.FontStyle;
 
 namespace ElliePdf.Controls;
 
-public sealed class PdfEditSurface : Canvas
+public sealed partial class PdfEditSurface : Canvas
 {
     private enum SelectionKind
     {

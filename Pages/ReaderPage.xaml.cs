@@ -6,12 +6,15 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Printing;
 using Microsoft.UI.Xaml.Shapes;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.Windows.Storage.Pickers;
 using System.Globalization;
 using System.Runtime.InteropServices.WindowsRuntime;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.Foundation;
 using Windows.Graphics.Printing;
 using Windows.Storage.Streams;
@@ -21,13 +24,17 @@ namespace ElliePdf.Pages;
 
 public sealed partial class ReaderPage : Page
 {
-    private bool _isSyncingTabs;
     private readonly List<List<Point>> _signatureStrokes = [];
     private List<Point>? _currentSignatureStroke;
 
     private PrintDocument? _printDocument;
     private IReadOnlyList<int> _printPageIndices = [];
     private int _printPageCursor;
+
+    private readonly DispatcherTimer _chromeIdleTimer = new() { Interval = TimeSpan.FromSeconds(2.8) };
+    private bool _isChromeHidden;
+    private int _openFlyoutCount;
+    private bool _isSyncingZoomSlider;
 
     public ReaderPage()
     {
@@ -48,13 +55,13 @@ public sealed partial class ReaderPage : Page
         };
         PageViewer.EditSurface.OverlayChanged += EditSurface_OverlayChanged;
         PageViewer.EditSurface.ActiveToolChangeRequested += EditSurface_ActiveToolChangeRequested;
-        ViewModel.TabItems.CollectionChanged += OnTabItemsChanged;
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
         BtnClearSignature.Click += BtnClearSignature_Click;
         SignatureDialog.PrimaryButtonClick += SignatureDialog_PrimaryButtonClick;
         SignatureCanvas.PointerMoved += SignatureCanvas_PointerMoved;
         SignatureCanvas.PointerPressed += SignatureCanvas_PointerPressed;
         SignatureCanvas.PointerReleased += SignatureCanvas_PointerReleased;
+        _chromeIdleTimer.Tick += ChromeIdleTimer_Tick;
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
     }
@@ -69,14 +76,13 @@ public sealed partial class ReaderPage : Page
         }
 
         await ViewModel.LoadFilesAsync(filePaths);
-        SyncTabViewItems();
     }
 
     public void GoToPage(int pageIndex) => ViewModel.GoToPage(pageIndex);
 
     private async void OnLoaded(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
     {
-        SyncTabViewItems();
+        RestartChromeTimer();
         await ViewModel.RefreshRecentFilesAsync();
         if (ViewModel.HasDocument)
         {
@@ -87,8 +93,8 @@ public sealed partial class ReaderPage : Page
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
+        _chromeIdleTimer.Stop();
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
-        ViewModel.TabItems.CollectionChanged -= OnTabItemsChanged;
         PageViewer.EditSurface.OverlayChanged -= EditSurface_OverlayChanged;
         PageViewer.EditSurface.ActiveToolChangeRequested -= EditSurface_ActiveToolChangeRequested;
     }
@@ -116,13 +122,25 @@ public sealed partial class ReaderPage : Page
                 InkPalettePopup.IsOpen = false;
             }
         }
-    }
-
-    private void OnTabItemsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
-    {
-        if (!_isSyncingTabs)
+        else if (e.PropertyName == nameof(ReaderViewModel.IsThumbnailPanelOpen) && ViewModel.IsThumbnailPanelOpen)
         {
-            SyncTabViewItems();
+            AnimatePanelIn(ThumbnailsPanel, -24);
+            ShowChrome();
+        }
+        else if (e.PropertyName == nameof(ReaderViewModel.IsOutlinePanelOpen) && ViewModel.IsOutlinePanelOpen)
+        {
+            AnimatePanelIn(OutlinePanel, -24);
+            ShowChrome();
+        }
+        else if (e.PropertyName == nameof(ReaderViewModel.IsSearchPanelOpen) && ViewModel.IsSearchPanelOpen)
+        {
+            AnimatePanelIn(SearchPanel, 24);
+            ShowChrome();
+            SearchBox.Focus(FocusState.Programmatic);
+        }
+        else if (e.PropertyName == nameof(ReaderViewModel.ToolMode))
+        {
+            ShowChrome();
         }
     }
 
@@ -131,9 +149,6 @@ public sealed partial class ReaderPage : Page
 
     private async void CloseDocumentButton_Click(object sender, Microsoft.UI.Xaml.RoutedEventArgs e) =>
         await CloseActiveTabAsync();
-
-    private async void DocumentTabs_AddTabButtonClick(TabView sender, object args) =>
-        await PickAndOpenFileAsync();
 
     private async Task PickAndOpenFileAsync()
     {
@@ -151,74 +166,6 @@ public sealed partial class ReaderPage : Page
 
         ViewModel.ClosePanels();
         await ViewModel.LoadDocumentAsync(file.Path);
-        SyncTabViewItems();
-    }
-
-    private async void DocumentTabs_TabCloseRequested(TabView sender, TabViewTabCloseRequestedEventArgs args)
-    {
-        if (args.Tab?.Tag is not Guid tabId)
-        {
-            return;
-        }
-
-        var tabItem = args.Tab;
-        if (!await ViewModel.TryCloseTabAsync(tabId))
-        {
-            return;
-        }
-
-        if (sender.TabItems.Contains(tabItem))
-        {
-            sender.TabItems.Remove(tabItem);
-        }
-
-        SyncTabViewItems();
-    }
-
-    private async void DocumentTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_isSyncingTabs || DocumentTabs.SelectedItem is not TabViewItem item || item.Tag is not Guid tabId)
-        {
-            return;
-        }
-
-        ViewModel.ClosePanels();
-        await ViewModel.ActivateTabAsync(tabId);
-    }
-
-    private void SyncTabViewItems()
-    {
-        _isSyncingTabs = true;
-        try
-        {
-            DocumentTabs.TabItems.Clear();
-
-            foreach (var tab in ViewModel.TabItems)
-            {
-                DocumentTabs.TabItems.Add(new TabViewItem
-                {
-                    Header = tab.Title,
-                    IsClosable = true,
-                    Tag = tab.TabId
-                });
-            }
-
-            if (ViewModel.SelectedTabId is Guid selectedId)
-            {
-                var selectedItem = DocumentTabs.TabItems
-                    .OfType<TabViewItem>()
-                    .FirstOrDefault(item => item.Tag is Guid id && id == selectedId);
-
-                if (selectedItem is not null)
-                {
-                    DocumentTabs.SelectedItem = selectedItem;
-                }
-            }
-        }
-        finally
-        {
-            _isSyncingTabs = false;
-        }
     }
 
     private void SearchBox_KeyDown(object sender, KeyRoutedEventArgs e)
@@ -252,7 +199,6 @@ public sealed partial class ReaderPage : Page
         {
             ViewModel.ClosePanels();
             await ViewModel.OpenRecentCommand.ExecuteAsync(item);
-            SyncTabViewItems();
         }
     }
 
@@ -358,10 +304,10 @@ public sealed partial class ReaderPage : Page
     private static void UpdatePaletteButton(Button button, bool isSelected)
     {
         button.BorderBrush = isSelected
-            ? new SolidColorBrush(Microsoft.UI.Colors.DodgerBlue)
+            ? new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0xDC, 0xAE, 0x96))
             : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         button.Background = isSelected
-            ? new SolidColorBrush(Windows.UI.Color.FromArgb(30, 30, 144, 255))
+            ? new SolidColorBrush(Windows.UI.Color.FromArgb(0x2E, 0xDC, 0xAE, 0x96))
             : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
     }
 
@@ -800,11 +746,245 @@ public sealed partial class ReaderPage : Page
             return;
         }
 
-        if (!await ViewModel.TryCloseTabAsync(tabId))
+        await ViewModel.TryCloseTabAsync(tabId);
+    }
+
+    // ═══════════ Chrome auto-hide ═══════════
+
+    private void RootGrid_PointerMoved(object sender, PointerRoutedEventArgs e) => ShowChrome();
+
+    private void ChromeIdleTimer_Tick(object? sender, object e)
+    {
+        _chromeIdleTimer.Stop();
+
+        var canHide = ViewModel.HasDocument
+            && ViewModel.IsReadMode
+            && _openFlyoutCount == 0
+            && !ViewModel.IsThumbnailPanelOpen
+            && !ViewModel.IsOutlinePanelOpen
+            && !ViewModel.IsSearchPanelOpen;
+
+        if (!canHide)
         {
             return;
         }
 
-        SyncTabViewItems();
+        _isChromeHidden = true;
+        FadeChrome(ReadToolbar, 0, 12);
+        FadeChrome(TopCommandBar, 0, -12);
+        ReadToolbar.IsHitTestVisible = false;
+        TopCommandBar.IsHitTestVisible = false;
+    }
+
+    private void ShowChrome()
+    {
+        if (_isChromeHidden)
+        {
+            _isChromeHidden = false;
+            FadeChrome(ReadToolbar, 1, 0);
+            FadeChrome(TopCommandBar, 1, 0);
+            ReadToolbar.IsHitTestVisible = true;
+            TopCommandBar.IsHitTestVisible = true;
+        }
+
+        RestartChromeTimer();
+    }
+
+    private void RestartChromeTimer()
+    {
+        _chromeIdleTimer.Stop();
+        _chromeIdleTimer.Start();
+    }
+
+    private static void FadeChrome(FrameworkElement element, double toOpacity, double toOffsetY)
+    {
+        if (element.RenderTransform is not TranslateTransform transform)
+        {
+            transform = new TranslateTransform();
+            element.RenderTransform = transform;
+        }
+
+        var duration = new Duration(TimeSpan.FromMilliseconds(260));
+        var storyboard = new Storyboard();
+
+        var fade = new DoubleAnimation
+        {
+            To = toOpacity,
+            Duration = duration,
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+        Storyboard.SetTarget(fade, element);
+        Storyboard.SetTargetProperty(fade, "Opacity");
+        storyboard.Children.Add(fade);
+
+        var slide = new DoubleAnimation
+        {
+            To = toOffsetY,
+            Duration = duration,
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+        Storyboard.SetTarget(slide, transform);
+        Storyboard.SetTargetProperty(slide, "Y");
+        storyboard.Children.Add(slide);
+
+        storyboard.Begin();
+    }
+
+    private static void AnimatePanelIn(FrameworkElement panel, double fromOffsetX)
+    {
+        if (panel.RenderTransform is not TranslateTransform transform)
+        {
+            transform = new TranslateTransform();
+            panel.RenderTransform = transform;
+        }
+
+        panel.Opacity = 0;
+        transform.X = fromOffsetX;
+
+        var duration = new Duration(TimeSpan.FromMilliseconds(240));
+        var storyboard = new Storyboard();
+
+        var fade = new DoubleAnimation
+        {
+            From = 0,
+            To = 1,
+            Duration = duration,
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+        Storyboard.SetTarget(fade, panel);
+        Storyboard.SetTargetProperty(fade, "Opacity");
+        storyboard.Children.Add(fade);
+
+        var slide = new DoubleAnimation
+        {
+            From = fromOffsetX,
+            To = 0,
+            Duration = duration,
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+        Storyboard.SetTarget(slide, transform);
+        Storyboard.SetTargetProperty(slide, "X");
+        storyboard.Children.Add(slide);
+
+        storyboard.Begin();
+    }
+
+    // ═══════════ Flyouts ═══════════
+
+    private void Flyout_Opening(object? sender, object e)
+    {
+        _openFlyoutCount++;
+        ShowChrome();
+    }
+
+    private void Flyout_Closed(object? sender, object e)
+    {
+        _openFlyoutCount = Math.Max(0, _openFlyoutCount - 1);
+        RestartChromeTimer();
+    }
+
+    private void ZoomFlyout_Opening(object? sender, object e)
+    {
+        Flyout_Opening(sender, e);
+        _isSyncingZoomSlider = true;
+        ZoomSlider.Value = Math.Clamp(Math.Round(ViewModel.EffectiveZoomScale * 100), 25, 400);
+        _isSyncingZoomSlider = false;
+    }
+
+    private void ZoomSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        // ViewModel is null while InitializeComponent coerces the slider's initial value.
+        if (!_isSyncingZoomSlider && ViewModel is not null)
+        {
+            ViewModel.SetZoomPercentCommand.Execute(e.NewValue);
+        }
+    }
+
+    private void ZoomPreset_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string preset })
+        {
+            return;
+        }
+
+        switch (preset)
+        {
+            case "fitwidth":
+                ViewModel.ZoomFitWidthCommand.Execute(null);
+                break;
+            case "fitpage":
+                ViewModel.ZoomFitPageCommand.Execute(null);
+                break;
+            default:
+                ViewModel.ZoomActualSizeCommand.Execute(null);
+                break;
+        }
+
+        ZoomFlyout.Hide();
+    }
+
+    private void GoToPageFlyout_Opening(object? sender, object e)
+    {
+        Flyout_Opening(sender, e);
+        GoToPageBox.Maximum = Math.Max(1, ViewModel.DocumentPageCount);
+        GoToPageBox.Value = ViewModel.CurrentPageIndex + 1;
+    }
+
+    private void GoToPageBox_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == VirtualKey.Enter)
+        {
+            CommitGoToPage();
+            e.Handled = true;
+        }
+    }
+
+    private void GoToPageButton_Click(object sender, RoutedEventArgs e) => CommitGoToPage();
+
+    private void CommitGoToPage()
+    {
+        if (!double.IsNaN(GoToPageBox.Value) && ViewModel.DocumentPageCount > 0)
+        {
+            var pageIndex = (int)Math.Clamp(GoToPageBox.Value, 1, ViewModel.DocumentPageCount) - 1;
+            ViewModel.GoToPage(pageIndex);
+        }
+
+        GoToPageFlyout.Hide();
+    }
+
+    // ═══════════ Drag & drop ═══════════
+
+    private void RootGrid_DragOver(object sender, DragEventArgs e)
+    {
+        if (e.DataView.Contains(StandardDataFormats.StorageItems))
+        {
+            e.AcceptedOperation = DataPackageOperation.Copy;
+            if (e.DragUIOverride is not null)
+            {
+                e.DragUIOverride.Caption = "Open in ElliePdf";
+            }
+        }
+    }
+
+    private async void RootGrid_Drop(object sender, DragEventArgs e)
+    {
+        if (!e.DataView.Contains(StandardDataFormats.StorageItems))
+        {
+            return;
+        }
+
+        var items = await e.DataView.GetStorageItemsAsync();
+        var paths = items
+            .OfType<Windows.Storage.StorageFile>()
+            .Where(file => string.Equals(file.FileType, ".pdf", StringComparison.OrdinalIgnoreCase))
+            .Select(file => file.Path)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .ToArray();
+
+        if (paths.Length > 0)
+        {
+            ViewModel.ClosePanels();
+            await ViewModel.LoadFilesAsync(paths);
+        }
     }
 }

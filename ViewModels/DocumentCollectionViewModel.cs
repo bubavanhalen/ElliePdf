@@ -18,6 +18,7 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
     private bool _isStatusOpen;
     private string _statusMessage = string.Empty;
     private InfoBarSeverity _statusSeverity = InfoBarSeverity.Informational;
+    private int _statusVersion;
 
     public DocumentCollectionViewModel(
         IPdfService pdfService,
@@ -89,12 +90,6 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
             {
                 await AddDocumentAsync(filePath, cancellationToken);
             }
-
-            SetStatus(
-                append
-                    ? $"Added {filePaths.Count} document(s). Total pages: {Pages.Count}."
-                    : $"Loaded {Pages.Count} page(s) from {SourceDocumentCount} document(s).",
-                InfoBarSeverity.Success);
         }
         catch (PdfiumDependencyException ex)
         {
@@ -106,7 +101,7 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
         }
         catch (OperationCanceledException)
         {
-            SetStatus("Import cancelled.", InfoBarSeverity.Informational);
+            // User cancelled the import; no status needed.
         }
         finally
         {
@@ -137,7 +132,6 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
             await _pdfService.RotatePageAsync(item.Document, item.PageIndex, 1, cancellationToken);
             var thumbnailBytes = await _pdfService.RenderPageThumbnailAsync(item.Document, item.PageIndex, 240, 320, cancellationToken);
             item.Thumbnail = await BitmapHelper.CreateBitmapAsync(thumbnailBytes);
-            SetStatus($"Rotated {item.DisplayName}.", InfoBarSeverity.Success);
         }
         catch (PdfiumDependencyException ex)
         {
@@ -164,7 +158,6 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
 
         try
         {
-            var deletedDisplayName = item.DisplayName;
             await _pdfService.DeletePageAsync(item.Document, item.PageIndex, cancellationToken);
 
             var itemsInDocument = Pages
@@ -185,8 +178,6 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
                 _sourceDocuments.Remove(item.Document);
                 await item.Document.DisposeAsync();
             }
-
-            SetStatus($"Deleted {deletedDisplayName}.", InfoBarSeverity.Warning);
         }
         catch (PdfiumDependencyException ex)
         {
@@ -270,7 +261,7 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
                 await _pdfService.MergeOrderedPagesAsync(orderedPages, outputPath, cancellationToken);
             }
 
-            SetStatus($"Exported {orderedPages.Count} page(s) to '{Path.GetFileName(outputPath)}'.", InfoBarSeverity.Success);
+            // The export-complete dialog confirms the result; no toast needed.
             MergeCompleted?.Invoke(this, outputPath);
             return outputPath;
         }
@@ -333,6 +324,22 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
         StatusMessage = message;
         StatusSeverity = severity;
         IsStatusOpen = true;
+
+        // Errors stay until dismissed; everything else fades out on its own.
+        var version = ++_statusVersion;
+        if (severity != InfoBarSeverity.Error)
+        {
+            _ = AutoDismissStatusAsync(version);
+        }
+    }
+
+    private async Task AutoDismissStatusAsync(int version)
+    {
+        await Task.Delay(TimeSpan.FromSeconds(4));
+        if (version == _statusVersion)
+        {
+            IsStatusOpen = false;
+        }
     }
 
     private static async Task<bool> ConfirmOrganizeSaveAsync(CancellationToken cancellationToken)

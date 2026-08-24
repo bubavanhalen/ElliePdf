@@ -9,53 +9,245 @@
     Background="Transparent"
     mc:Ignorable="d">
 
-    <ScrollViewer Padding="32,24,32,32">
-        <StackPanel MaxWidth="640" Spacing="20">
-            <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Settings" />
+    <ScrollViewer Padding="32,60,32,32">
+        <StackPanel MaxWidth="720" Spacing="8">
+            <TextBlock
+                Margin="0,0,0,8"
+                Style="{StaticResource TitleTextBlockStyle}"
+                Text="Settings" />
 
-            <InfoBar
-                IsClosable="True"
-                IsOpen="{x:Bind ViewModel.IsStatusOpen, Mode=OneWay}"
-                Message="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
-                Severity="{x:Bind ViewModel.StatusSeverity, Mode=OneWay}" />
+            <!--  Appearance  -->
+            <TextBlock Style="{StaticResource EllieSectionHeaderStyle}" Text="Appearance" />
+            <Border Style="{StaticResource EllieSettingsCardStyle}">
+                <Grid ColumnSpacing="14">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Border Style="{StaticResource EllieIconWellStyle}" VerticalAlignment="Center">
+                        <FontIcon
+                            FontSize="16"
+                            Foreground="{ThemeResource EllieAccentStrongBrush}"
+                            Glyph="&#xE790;" />
+                    </Border>
+                    <StackPanel
+                        Grid.Column="1"
+                        Spacing="2"
+                        VerticalAlignment="Center">
+                        <TextBlock Style="{StaticResource BodyTextBlockStyle}" Text="App theme" />
+                        <TextBlock
+                            Opacity="0.6"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="Changes apply immediately" />
+                    </StackPanel>
+                    <ComboBox
+                        Grid.Column="2"
+                        MinWidth="180"
+                        ItemsSource="{x:Bind ViewModel.ThemeOptions}"
+                        SelectedIndex="{x:Bind ViewModel.ThemeIndex, Mode=TwoWay}"
+                        VerticalAlignment="Center" />
+                </Grid>
+            </Border>
 
-            <StackPanel Spacing="16">
-                <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="Reading" />
+            <!--  Reading  -->
+            <TextBlock Style="{StaticResource EllieSectionHeaderStyle}" Text="Reading" />
+            <Border Style="{StaticResource EllieSettingsCardStyle}">
+                <Grid ColumnSpacing="14">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Border Style="{StaticResource EllieIconWellStyle}" VerticalAlignment="Center">
+                        <FontIcon
+                            FontSize="16"
+                            Foreground="{ThemeResource EllieAccentStrongBrush}"
+                            Glyph="&#xE736;" />
+                    </Border>
+                    <StackPanel
+                        Grid.Column="1"
+                        Spacing="2"
+                        VerticalAlignment="Center">
+                        <TextBlock Style="{StaticResource BodyTextBlockStyle}" Text="Default zoom" />
+                        <TextBlock
+                            Opacity="0.6"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="Used when a PDF is opened" />
+                    </StackPanel>
+                    <ComboBox
+                        Grid.Column="2"
+                        MinWidth="180"
+                        ItemsSource="{x:Bind ViewModel.ZoomModeOptions}"
+                        SelectedIndex="{x:Bind ViewModel.DefaultZoomModeIndex, Mode=TwoWay}"
+                        VerticalAlignment="Center" />
+                </Grid>
+            </Border>
+            <Border Style="{StaticResource EllieSettingsCardStyle}">
+                <Grid ColumnSpacing="14">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Border Style="{StaticResource EllieIconWellStyle}" VerticalAlignment="Center">
+                        <FontIcon
+                            FontSize="16"
+                            Foreground="{ThemeResource EllieAccentStrongBrush}"
+                            Glyph="&#xE823;" />
+                    </Border>
+                    <StackPanel
+                        Grid.Column="1"
+                        Spacing="2"
+                        VerticalAlignment="Center">
+                        <TextBlock Style="{StaticResource BodyTextBlockStyle}" Text="Recent files" />
+                        <TextBlock
+                            Opacity="0.6"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="How many recent files to remember" />
+                    </StackPanel>
+                    <NumberBox
+                        Grid.Column="2"
+                        MinWidth="140"
+                        Maximum="50"
+                        Minimum="1"
+                        SpinButtonPlacementMode="Inline"
+                        Value="{x:Bind ViewModel.RecentFilesMaxCount, Mode=TwoWay}"
+                        VerticalAlignment="Center" />
+                </Grid>
+            </Border>
 
-                <ComboBox
-                    Header="Default zoom when opening a PDF"
-                    ItemsSource="{x:Bind ViewModel.ZoomModeOptions, Mode=OneWay}"
-                    SelectedItem="{x:Bind ViewModel.DefaultZoomMode, Mode=TwoWay}" />
+            <!--  Saving  -->
+            <TextBlock Style="{StaticResource EllieSectionHeaderStyle}" Text="Saving" />
+            <Border Style="{StaticResource EllieSettingsCardStyle}">
+                <Grid ColumnSpacing="14">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Border Style="{StaticResource EllieIconWellStyle}" VerticalAlignment="Center">
+                        <FontIcon
+                            FontSize="16"
+                            Foreground="{ThemeResource EllieAccentStrongBrush}"
+                            Glyph="&#xE74E;" />
+                    </Border>
+                    <StackPanel
+                        Grid.Column="1"
+                        Spacing="2"
+                        VerticalAlignment="Center">
+                        <TextBlock Style="{StaticResource BodyTextBlockStyle}" Text="Confirm before overwriting" />
+                        <TextBlock
+                            Opacity="0.6"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="Ask before saving edits over the original PDF" />
+                    </StackPanel>
+                    <ToggleSwitch
+                        Grid.Column="2"
+                        MinWidth="0"
+                        IsOn="{x:Bind ViewModel.ConfirmOverwriteSave, Mode=TwoWay}"
+                        OffContent=""
+                        OnContent=""
+                        VerticalAlignment="Center" />
+                </Grid>
+            </Border>
+            <Border Style="{StaticResource EllieSettingsCardStyle}">
+                <Grid ColumnSpacing="14">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Border Style="{StaticResource EllieIconWellStyle}" VerticalAlignment="Center">
+                        <FontIcon
+                            FontSize="16"
+                            Foreground="{ThemeResource EllieAccentStrongBrush}"
+                            Glyph="&#xE8A9;" />
+                    </Border>
+                    <StackPanel
+                        Grid.Column="1"
+                        Spacing="2"
+                        VerticalAlignment="Center">
+                        <TextBlock Style="{StaticResource BodyTextBlockStyle}" Text="Confirm Organize saves" />
+                        <TextBlock
+                            Opacity="0.6"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="Ask before saving changes back to original files in Organize" />
+                    </StackPanel>
+                    <ToggleSwitch
+                        Grid.Column="2"
+                        MinWidth="0"
+                        IsOn="{x:Bind ViewModel.ConfirmOrganizeSave, Mode=TwoWay}"
+                        OffContent=""
+                        OnContent=""
+                        VerticalAlignment="Center" />
+                </Grid>
+            </Border>
+            <Border Style="{StaticResource EllieSettingsCardStyle}">
+                <Grid ColumnSpacing="14">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Border Style="{StaticResource EllieIconWellStyle}" VerticalAlignment="Center">
+                        <FontIcon
+                            FontSize="16"
+                            Foreground="{ThemeResource EllieAccentStrongBrush}"
+                            Glyph="&#xE70F;" />
+                    </Border>
+                    <StackPanel
+                        Grid.Column="1"
+                        Spacing="2"
+                        VerticalAlignment="Center">
+                        <TextBlock Style="{StaticResource BodyTextBlockStyle}" Text="Auto-save edit overlays" />
+                        <TextBlock
+                            Opacity="0.6"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="Keep companion files (.ellie.json) up to date automatically" />
+                    </StackPanel>
+                    <ToggleSwitch
+                        Grid.Column="2"
+                        MinWidth="0"
+                        IsOn="{x:Bind ViewModel.AutoSaveCompanion, Mode=TwoWay}"
+                        OffContent=""
+                        OnContent=""
+                        VerticalAlignment="Center" />
+                </Grid>
+            </Border>
 
-                <NumberBox
-                    Header="Recent files to remember"
-                    Maximum="50"
-                    Minimum="1"
-                    SpinButtonPlacementMode="Inline"
-                    Value="{x:Bind ViewModel.RecentFilesMaxCount, Mode=TwoWay}" />
-            </StackPanel>
-
-            <StackPanel Spacing="16">
-                <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="Saving" />
-
-                <ToggleSwitch
-                    Header="Confirm before overwriting a PDF when saving edits"
-                    IsOn="{x:Bind ViewModel.ConfirmOverwriteSave, Mode=TwoWay}" />
-
-                <ToggleSwitch
-                    Header="Confirm before saving changes back to original files in Organize"
-                    IsOn="{x:Bind ViewModel.ConfirmOrganizeSave, Mode=TwoWay}" />
-
-                <ToggleSwitch
-                    Header="Auto-save edit overlays to companion files (.ellie.json)"
-                    IsOn="{x:Bind ViewModel.AutoSaveCompanion, Mode=TwoWay}" />
-            </StackPanel>
-
-            <Button
-                HorizontalAlignment="Left"
-                Command="{x:Bind ViewModel.SaveCommand}"
-                Content="Save settings"
-                Style="{StaticResource EllieAccentButtonStyle}" />
+            <!--  About  -->
+            <TextBlock Style="{StaticResource EllieSectionHeaderStyle}" Text="About" />
+            <Border Style="{StaticResource EllieSettingsCardStyle}">
+                <Grid ColumnSpacing="14">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Image
+                        Width="36"
+                        Height="36"
+                        Source="ms-appx:///Assets/Brand/elliepdf-logo-master.png"
+                        VerticalAlignment="Center" />
+                    <StackPanel
+                        Grid.Column="1"
+                        Spacing="2"
+                        VerticalAlignment="Center">
+                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="ElliePdf" />
+                        <TextBlock
+                            Opacity="0.6"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="Built with WinUI 3 and PDFium" />
+                    </StackPanel>
+                    <TextBlock
+                        Grid.Column="2"
+                        Opacity="0.6"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="{x:Bind ViewModel.AppVersion}"
+                        VerticalAlignment="Center" />
+                </Grid>
+            </Border>
         </StackPanel>
     </ScrollViewer>
 </Page>

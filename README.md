@@ -7,8 +7,19 @@ A Windows native PDF reader and organizer built with **WinUI 3** and **PDFium**.
 - **Read** — Multi-tab PDF viewing with zoom, page navigation, text search, and in-place editing
 - **Organize** — Reorder, rotate, and delete pages; export merged PDFs in grid order
 - **Edit** — Ink, text, and signatures on the active page; **Save** (with overwrite confirmation) and **Save As**
+- **Personalize** — System/Light/Dark theme and instant-apply settings
 - **Password-protected PDFs** — Prompts for a password when opening encrypted files
 - **File association** — Double-click a `.pdf` to open in ElliePdf
+
+## Design
+
+The UI follows Fluent 2 with an Ellie-branded `#dcae96` accent system (`Themes/ElliePdf.xaml`):
+
+- Custom title bar with integrated document tabs, a Read/Organize workspace switcher, and settings
+- Chromeless reader with floating pill toolbars that auto-hide while reading
+- Floating Pages/Outline/Search panels with slide-in animations and shadows
+- Drop-zone empty state with rich recent-file cards and drag & drop support
+- Card-based, instant-apply Settings page with theme picker
 
 ## Requirements
 

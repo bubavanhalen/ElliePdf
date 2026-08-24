@@ -2,25 +2,202 @@
 <ResourceDictionary
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <Color x:Key="EllieAccentColor">#DCAE96</Color>
-    <SolidColorBrush x:Key="EllieAccentBrush" Color="{StaticResource EllieAccentColor}" />
-    <SolidColorBrush x:Key="EllieAccentSubtleBrush" Color="#33DCAE96" />
 
-    <Style x:Key="EllieAccentButtonStyle" BasedOn="{StaticResource AccentButtonStyle}" TargetType="Button">
-        <Setter Property="Background" Value="{StaticResource EllieAccentBrush}" />
+    <!--  ═══════════════ Ellie design tokens ═══════════════  -->
+    <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Light">
+            <Color x:Key="EllieAccentColor">#DCAE96</Color>
+            <SolidColorBrush x:Key="EllieAccentBrush" Color="#DCAE96" />
+            <SolidColorBrush x:Key="EllieAccentHoverBrush" Color="#E5C0AB" />
+            <SolidColorBrush x:Key="EllieAccentPressedBrush" Color="#C6906F" />
+            <SolidColorBrush x:Key="EllieAccentStrongBrush" Color="#A96A45" />
+            <SolidColorBrush x:Key="EllieOnAccentBrush" Color="#3D2418" />
+            <SolidColorBrush x:Key="EllieAccentSubtleBrush" Color="#2EDCAE96" />
+            <SolidColorBrush x:Key="EllieAccentSubtleHoverBrush" Color="#47DCAE96" />
+
+            <!--  Accent button — Ellie branded  -->
+            <SolidColorBrush x:Key="AccentButtonBackground" Color="#DCAE96" />
+            <SolidColorBrush x:Key="AccentButtonBackgroundPointerOver" Color="#E5C0AB" />
+            <SolidColorBrush x:Key="AccentButtonBackgroundPressed" Color="#C6906F" />
+            <SolidColorBrush x:Key="AccentButtonForeground" Color="#3D2418" />
+            <SolidColorBrush x:Key="AccentButtonForegroundPointerOver" Color="#3D2418" />
+            <SolidColorBrush x:Key="AccentButtonForegroundPressed" Color="#4E3223" />
+            <SolidColorBrush x:Key="AccentButtonBorderBrush" Color="#26000000" />
+
+            <!--  Checked toggle buttons — Ellie branded  -->
+            <SolidColorBrush x:Key="ToggleButtonBackgroundChecked" Color="#DCAE96" />
+            <SolidColorBrush x:Key="ToggleButtonBackgroundCheckedPointerOver" Color="#E5C0AB" />
+            <SolidColorBrush x:Key="ToggleButtonBackgroundCheckedPressed" Color="#C6906F" />
+            <SolidColorBrush x:Key="ToggleButtonForegroundChecked" Color="#3D2418" />
+            <SolidColorBrush x:Key="ToggleButtonForegroundCheckedPointerOver" Color="#3D2418" />
+            <SolidColorBrush x:Key="ToggleButtonForegroundCheckedPressed" Color="#4E3223" />
+
+            <!--  Toggle switch — Ellie branded  -->
+            <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="#D4A488" />
+            <SolidColorBrush x:Key="ToggleSwitchFillOnPointerOver" Color="#DCAE96" />
+            <SolidColorBrush x:Key="ToggleSwitchFillOnPressed" Color="#C6906F" />
+            <SolidColorBrush x:Key="ToggleSwitchStrokeOn" Color="#D4A488" />
+            <SolidColorBrush x:Key="ToggleSwitchStrokeOnPointerOver" Color="#DCAE96" />
+            <SolidColorBrush x:Key="ToggleSwitchStrokeOnPressed" Color="#C6906F" />
+            <SolidColorBrush x:Key="ToggleSwitchKnobFillOn" Color="#FFFDFB" />
+            <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPointerOver" Color="#FFFDFB" />
+            <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPressed" Color="#FFFDFB" />
+
+            <!--  Slider — Ellie branded  -->
+            <SolidColorBrush x:Key="SliderTrackValueFill" Color="#D4A488" />
+            <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#DCAE96" />
+            <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#C6906F" />
+        </ResourceDictionary>
+
+        <ResourceDictionary x:Key="Default">
+            <Color x:Key="EllieAccentColor">#DCAE96</Color>
+            <SolidColorBrush x:Key="EllieAccentBrush" Color="#DCAE96" />
+            <SolidColorBrush x:Key="EllieAccentHoverBrush" Color="#E5C0AB" />
+            <SolidColorBrush x:Key="EllieAccentPressedBrush" Color="#C6906F" />
+            <SolidColorBrush x:Key="EllieAccentStrongBrush" Color="#E7C3AF" />
+            <SolidColorBrush x:Key="EllieOnAccentBrush" Color="#3D2418" />
+            <SolidColorBrush x:Key="EllieAccentSubtleBrush" Color="#30DCAE96" />
+            <SolidColorBrush x:Key="EllieAccentSubtleHoverBrush" Color="#4ADCAE96" />
+
+            <SolidColorBrush x:Key="AccentButtonBackground" Color="#DCAE96" />
+            <SolidColorBrush x:Key="AccentButtonBackgroundPointerOver" Color="#E5C0AB" />
+            <SolidColorBrush x:Key="AccentButtonBackgroundPressed" Color="#C6906F" />
+            <SolidColorBrush x:Key="AccentButtonForeground" Color="#3D2418" />
+            <SolidColorBrush x:Key="AccentButtonForegroundPointerOver" Color="#3D2418" />
+            <SolidColorBrush x:Key="AccentButtonForegroundPressed" Color="#4E3223" />
+            <SolidColorBrush x:Key="AccentButtonBorderBrush" Color="#26FFFFFF" />
+
+            <SolidColorBrush x:Key="ToggleButtonBackgroundChecked" Color="#DCAE96" />
+            <SolidColorBrush x:Key="ToggleButtonBackgroundCheckedPointerOver" Color="#E5C0AB" />
+            <SolidColorBrush x:Key="ToggleButtonBackgroundCheckedPressed" Color="#C6906F" />
+            <SolidColorBrush x:Key="ToggleButtonForegroundChecked" Color="#3D2418" />
+            <SolidColorBrush x:Key="ToggleButtonForegroundCheckedPointerOver" Color="#3D2418" />
+            <SolidColorBrush x:Key="ToggleButtonForegroundCheckedPressed" Color="#4E3223" />
+
+            <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="#DCAE96" />
+            <SolidColorBrush x:Key="ToggleSwitchFillOnPointerOver" Color="#E5C0AB" />
+            <SolidColorBrush x:Key="ToggleSwitchFillOnPressed" Color="#C6906F" />
+            <SolidColorBrush x:Key="ToggleSwitchStrokeOn" Color="#DCAE96" />
+            <SolidColorBrush x:Key="ToggleSwitchStrokeOnPointerOver" Color="#E5C0AB" />
+            <SolidColorBrush x:Key="ToggleSwitchStrokeOnPressed" Color="#C6906F" />
+            <SolidColorBrush x:Key="ToggleSwitchKnobFillOn" Color="#3D2418" />
+            <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPointerOver" Color="#3D2418" />
+            <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPressed" Color="#3D2418" />
+
+            <SolidColorBrush x:Key="SliderTrackValueFill" Color="#DCAE96" />
+            <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#E5C0AB" />
+            <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#C6906F" />
+        </ResourceDictionary>
+
+        <ResourceDictionary x:Key="HighContrast">
+            <Color x:Key="EllieAccentColor">#DCAE96</Color>
+            <SolidColorBrush x:Key="EllieAccentBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+            <SolidColorBrush x:Key="EllieAccentHoverBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+            <SolidColorBrush x:Key="EllieAccentPressedBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+            <SolidColorBrush x:Key="EllieAccentStrongBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+            <SolidColorBrush x:Key="EllieOnAccentBrush" Color="{ThemeResource SystemColorHighlightTextColor}" />
+            <SolidColorBrush x:Key="EllieAccentSubtleBrush" Color="Transparent" />
+            <SolidColorBrush x:Key="EllieAccentSubtleHoverBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+        </ResourceDictionary>
+    </ResourceDictionary.ThemeDictionaries>
+
+    <!--  Shared shadow for floating surfaces  -->
+    <ThemeShadow x:Key="EllieShadow" />
+
+    <!--  ═══════════════ Buttons ═══════════════  -->
+    <Style x:Key="EllieAccentButtonStyle" BasedOn="{StaticResource AccentButtonStyle}" TargetType="Button" />
+
+    <!--  Compact icon button used inside pill toolbars  -->
+    <Style x:Key="EllieToolButtonStyle" BasedOn="{StaticResource DefaultButtonStyle}" TargetType="Button">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="MinWidth" Value="38" />
+        <Setter Property="MinHeight" Value="36" />
+        <Setter Property="CornerRadius" Value="9" />
     </Style>
 
-    <Style x:Key="EllieToolbarBorderStyle" TargetType="Border">
+    <Style x:Key="EllieToolToggleStyle" BasedOn="{StaticResource DefaultToggleButtonStyle}" TargetType="ToggleButton">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="MinWidth" Value="38" />
+        <Setter Property="MinHeight" Value="36" />
+        <Setter Property="CornerRadius" Value="9" />
+    </Style>
+
+    <!--  Icon glyph inside tool buttons  -->
+    <Style x:Key="EllieToolIconStyle" TargetType="FontIcon">
+        <Setter Property="FontSize" Value="16" />
+    </Style>
+
+    <!--  ═══════════════ Floating pill toolbars ═══════════════  -->
+    <Style x:Key="ElliePillStyle" TargetType="Border">
         <Setter Property="Background" Value="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}" />
         <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
         <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="CornerRadius" Value="22" />
-        <Setter Property="Padding" Value="8,6" />
-        <Setter Property="Opacity" Value="0.96" />
+        <Setter Property="CornerRadius" Value="26" />
+        <Setter Property="Padding" Value="10,6" />
     </Style>
 
-    <Style x:Key="EllieEditToolbarBorderStyle" BasedOn="{StaticResource EllieToolbarBorderStyle}" TargetType="Border">
-        <Setter Property="BorderBrush" Value="{StaticResource EllieAccentBrush}" />
+    <Style x:Key="EllieEditPillStyle" BasedOn="{StaticResource ElliePillStyle}" TargetType="Border">
+        <Setter Property="BorderBrush" Value="{ThemeResource EllieAccentBrush}" />
         <Setter Property="BorderThickness" Value="1.5" />
+    </Style>
+
+    <!--  Thin divider inside pill toolbars  -->
+    <Style x:Key="EllieDividerStyle" TargetType="Border">
+        <Setter Property="Width" Value="1" />
+        <Setter Property="Height" Value="24" />
+        <Setter Property="Margin" Value="7,0" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Background" Value="{ThemeResource DividerStrokeColorDefaultBrush}" />
+    </Style>
+
+    <!--  ═══════════════ Floating side panels ═══════════════  -->
+    <Style x:Key="ElliePanelStyle" TargetType="Border">
+        <Setter Property="Background" Value="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="16" />
+    </Style>
+
+    <!--  ═══════════════ Cards ═══════════════  -->
+    <Style x:Key="EllieCardStyle" TargetType="Border">
+        <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="12" />
+    </Style>
+
+    <Style x:Key="EllieSettingsCardStyle" TargetType="Border">
+        <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="16,14" />
+    </Style>
+
+    <!--  Rounded icon well shown at the left edge of settings cards & recent files  -->
+    <Style x:Key="EllieIconWellStyle" TargetType="Border">
+        <Setter Property="Background" Value="{ThemeResource EllieAccentSubtleBrush}" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Width" Value="36" />
+        <Setter Property="Height" Value="36" />
+    </Style>
+
+    <!--  Small badge / chip  -->
+    <Style x:Key="EllieBadgeStyle" TargetType="Border">
+        <Setter Property="Background" Value="{ThemeResource EllieAccentSubtleBrush}" />
+        <Setter Property="CornerRadius" Value="10" />
+        <Setter Property="Padding" Value="8,2" />
+    </Style>
+
+    <!--  Section headers on Settings / Organize  -->
+    <Style x:Key="EllieSectionHeaderStyle" BasedOn="{StaticResource BodyStrongTextBlockStyle}" TargetType="TextBlock">
+        <Setter Property="Margin" Value="2,10,0,2" />
+        <Setter Property="Opacity" Value="0.9" />
     </Style>
 </ResourceDictionary>
