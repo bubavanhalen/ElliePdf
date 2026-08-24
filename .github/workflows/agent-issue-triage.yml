@@ -1,0 +1,64 @@
+name: Agent – Issue Triage
+
+on:
+  issues:
+    types: [opened, reopened]
+
+permissions:
+  issues: write
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Triage issue with Copilot
+        uses: github/copilot-cli-action@v1
+        with:
+          prompt: |
+            You are a project maintainer for ElliePdf, a Windows native PDF reader/organizer (WinUI 3 + PDFium).
+
+            ## Product areas and their labels
+            - **reader** — PDF viewing, zoom, page navigation, tab management, outline panel, thumbnails
+            - **organize** — page reorder, rotate, delete, merge, export
+            - **annotations** — ink drawing, text overlays, signatures, save/save-as with overlays
+            - **search** — full-text search within a PDF
+            - **settings** — user preferences (zoom default, confirm dialogs, recent files count)
+            - **file-handling** — open, close, recent files, password-protected PDFs, file association
+            - **performance** — render speed, memory usage, thumbnail caching
+            - **accessibility** — keyboard navigation, screen reader support, high-contrast
+            - **docs** — README, comments, developer documentation
+            - **ci-cd** — GitHub Actions, build pipeline, release process
+            - **dependencies** — NuGet packages, pdfium.dll, .NET SDK
+
+            ## Severity labels
+            - **bug** — something is broken or throws an exception
+            - **feature** — new capability requested
+            - **enhancement** — improvement to existing behaviour
+            - **question** — user asking how something works
+
+            ## Priority labels
+            - **priority: high** — crash, data loss, or blocks common workflow
+            - **priority: medium** — notable inconvenience, workaround exists
+            - **priority: low** — cosmetic or rare edge case
+
+            ## Task
+            Analyze issue #${{ github.event.issue.number }}:
+
+            **Title:** ${{ github.event.issue.title }}
+
+            **Body:**
+            ${{ github.event.issue.body }}
+
+            1. Apply the most relevant product-area label(s) from the list above (create the label if it doesn't exist, using color #0075ca for features, #d73a4a for bugs, #e4e669 for enhancements, #cfd3d7 for others)
+            2. Apply exactly one severity label (bug / feature / enhancement / question)
+            3. Apply a priority label if the issue describes a crash, data loss, or clearly low-impact cosmetic change
+            4. If this is a bug report, post a comment asking for: OS version, ElliePdf version, steps to reproduce, and whether the PDF is password-protected
+            5. If this is a feature request, post a comment thanking the reporter and noting it will be reviewed for the next milestone
+            6. Do NOT close the issue
+
+            GitHub token is available via the environment.
+          mode: autopilot
+          github-token: ${{ secrets.GITHUB_TOKEN }}

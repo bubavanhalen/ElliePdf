@@ -1,0 +1,50 @@
+name: Feature Request
+description: Suggest a new capability for ElliePdf
+labels: ["feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea! Labelling this as **feature** will automatically trigger the
+        feature-implementation agent to scaffold the code.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      placeholder: "I often need to … but currently I have to …"
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Describe the feature
+      placeholder: "Add a button in the toolbar that …"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which area of the app does this affect?
+      options:
+        - Reader (viewing, zoom, navigation)
+        - Organize (reorder, rotate, delete, merge)
+        - Annotations (ink, text, signatures)
+        - Search
+        - Settings
+        - File handling (open, recent, passwords)
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context or mockups

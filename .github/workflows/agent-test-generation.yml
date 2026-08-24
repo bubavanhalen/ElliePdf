@@ -1,0 +1,58 @@
+name: Agent – Test Generation
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    paths:
+      - 'Services/**/*.cs'
+      - 'ViewModels/**/*.cs'
+      - 'ElliePdf.Core/**/*.cs'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  generate-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.head_ref }}
+
+      - name: Detect changed C# files
+        id: changed
+        run: |
+          BASE=${{ github.event.pull_request.base.sha }}
+          HEAD=${{ github.event.pull_request.head.sha }}
+          FILES=$(git diff --name-only "$BASE" "$HEAD" \
+            | grep -E '^(Services|ViewModels|ElliePdf\.Core)/.+\.cs$' \
+            | grep -v '\.Tests\.' \
+            | tr '\n' ',')
+          echo "files=$FILES" >> "$GITHUB_OUTPUT"
+          echo "Changed files: $FILES"
+
+      - name: Generate tests with Copilot
+        if: steps.changed.outputs.files != ''
+        uses: github/copilot-cli-action@v1
+        with:
+          prompt: |
+            You are a senior .NET developer working on ElliePdf — a WinUI 3 PDF reader and organizer.
+
+            The test project is at ElliePdf.Tests/ and uses xunit. It currently only references ElliePdf.Core
+            (no WinUI or Windows App SDK deps). Tests must compile with `net11.0` (non-Windows target).
+
+            For each changed file listed below, generate xUnit test classes that:
+            - Cover public methods/properties with meaningful unit tests (happy path + edge cases)
+            - Only test pure .NET logic; skip any method that requires WinUI, P/Invoke, or file I/O
+            - Use NSubstitute for mocking interfaces (add the package if not present in ElliePdf.Tests.csproj)
+            - Place each test class in ElliePdf.Tests/ named <ClassName>Tests.cs
+            - Do not duplicate ZoomScaleCalculatorTests.cs
+
+            Changed files: ${{ steps.changed.outputs.files }}
+
+            Read each changed file, identify testable logic, write the tests, and commit them to this PR branch.
+          mode: autopilot
+          github-token: ${{ secrets.GITHUB_TOKEN }}

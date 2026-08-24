@@ -1,0 +1,26 @@
+# ElliePdf — GitHub Copilot app repository configuration
+# https://docs.github.com/copilot/reference/github-copilot-app-reference/repository-configuration
+
+copilot:
+  # Allow Copilot coding agent to read/write the repo on issues and PRs
+  agent:
+    enabled: true
+
+  # Context files the agent always reads before acting on this repo
+  knowledge:
+    - path: README.md
+    - path: .github/CODING_GUIDELINES.md
+
+  # Keep the agent focused on Windows-native .NET concerns
+  instructions: |
+    ElliePdf is a WinUI 3 PDF reader/organizer targeting Windows 10 1809+.
+    Key constraints:
+    - Target framework: net11.0-windows10.0.26100.0 for the main app, net11.0 for ElliePdf.Core and tests
+    - Do NOT introduce Linux/macOS-only APIs (e.g. System.Drawing on non-Windows)
+    - PDFium interop lives in Services/PdfiumNative.cs; never add new P/Invoke elsewhere
+    - All public service methods must accept CancellationToken
+    - Use CommunityToolkit.Mvvm source generators: [ObservableProperty] on private partial properties,
+      [RelayCommand] on async Task methods
+    - DI registration is in App.xaml.cs; register new services there
+    - Tests go in ElliePdf.Tests/ and must compile without WinUI (net11.0, not net11.0-windows*)
+    - Always run `dotnet build ElliePdf.slnx -p:Platform=x64` to verify changes compile

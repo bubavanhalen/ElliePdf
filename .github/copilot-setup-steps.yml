@@ -1,0 +1,14 @@
+# Copilot cloud agent environment setup for ElliePdf
+# Preinstalls .NET 11 and restores NuGet packages so agent sessions start fast.
+
+steps:
+  - name: Setup .NET 11
+    uses: actions/setup-dotnet@v4
+    with:
+      dotnet-version: '11.0.x'
+
+  - name: Restore NuGet packages
+    run: dotnet restore ElliePdf.slnx
+
+  - name: Install NSubstitute for test generation
+    run: dotnet add ElliePdf.Tests/ElliePdf.Tests.csproj package NSubstitute --version 5.3.0 || true

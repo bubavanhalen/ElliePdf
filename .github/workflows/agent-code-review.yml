@@ -1,0 +1,63 @@
+name: Agent – Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+    paths:
+      - '**/*.cs'
+      - '**/*.xaml'
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  review:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Collect diff
+        id: diff
+        run: |
+          git diff origin/${{ github.base_ref }}...HEAD -- '*.cs' '*.xaml' > /tmp/pr.diff
+          LINES=$(wc -l < /tmp/pr.diff)
+          echo "diff_lines=$LINES" >> "$GITHUB_OUTPUT"
+
+      - name: Run Copilot code review agent
+        uses: github/copilot-cli-action@v1
+        with:
+          prompt: |
+            You are a strict code reviewer for ElliePdf, a WinUI 3 PDF app built on PDFium, CommunityToolkit.Mvvm,
+            and Microsoft.Extensions.DependencyInjection.
+
+            Review the diff for this pull request and post inline review comments for any of the following issues.
+            Only report HIGH-CONFIDENCE problems — no style nits, no speculation.
+
+            ## Checklist
+            1. **Resource leaks** — every `PdfDocumentSession` opened via `IPdfService.OpenDocumentAsync` must be
+               closed with `CloseDocumentAsync` in a `finally` block or `IDisposable` implementation.
+            2. **CancellationToken threading** — async methods that call `IPdfService` must accept and forward a
+               `CancellationToken`; do not pass `CancellationToken.None` unless justified by a comment.
+            3. **ObservableProperty correctness** — source-generated `[ObservableProperty]` fields must be
+               `private partial` (not backing fields prefixed with `_`). `[RelayCommand]` methods must be
+               non-static and non-partial themselves.
+            4. **pdfium.dll committed** — flag any `*.dll` added to the repo; pdfium.dll is synced at build time.
+            5. **Thread safety** — PDFium calls in `PdfService` must remain on a single synchronous lock or
+               background thread. Do not call `PdfiumNative` methods from the UI thread directly.
+            6. **Null safety** — nullable reference type annotations (`?`) must be respected; no unchecked
+               dereferences of nullable returned from service methods.
+            7. **XAML binding mode** — new two-way bindings on read-only ViewModel properties should be flagged.
+
+            For each issue found, post an inline review comment on the exact line.
+            If no issues are found, post a single approving summary comment: "✅ No issues found."
+
+            PR number: ${{ github.event.pull_request.number }}
+            Base branch: ${{ github.base_ref }}
+            Head branch: ${{ github.head_ref }}
+          mode: autopilot
+          github-token: ${{ secrets.GITHUB_TOKEN }}
