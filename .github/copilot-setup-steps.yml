@@ -1,6 +1,5 @@
-# Copilot cloud agent environment setup for ElliePdf.
+# Copilot cloud agent environment setup for ElliePdf
 # Preinstalls .NET 11 and restores NuGet packages so agent sessions start fast.
-# Applies to Copilot coding agent sessions; standard CI uses ci.yml.
 
 steps:
   - name: Setup .NET 11

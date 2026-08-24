@@ -1,33 +1,6 @@
 # ElliePdf Coding Guidelines
 
-## Agentic workflows
-
-Five GitHub Actions workflows automate developer tasks using `actions/ai-inference@v1`.
-They work with **any model supported by GitHub Models**: GPT-4.1, o4-mini, Claude Sonnet, Codex, etc.
-
-### Choosing a model
-
-Set the **`AGENT_MODEL` repository variable** (Settings → Secrets and variables → Variables) to control which model all agent workflows use by default. Examples:
-
-| Value | Model |
-|---|---|
-| `gpt-4.1` | GPT-4.1 (default) |
-| `claude-sonnet-4-5` | Claude Sonnet 4.5 |
-| `o4-mini` | OpenAI o4-mini |
-| `gpt-4.1-mini` | GPT-4.1 mini (faster/cheaper) |
-
-Each workflow also accepts a `model` input when triggered via `workflow_dispatch`, overriding `AGENT_MODEL` for that single run.
-
-### Workflows at a glance
-
-| Workflow | Trigger | What the AI does |
-|---|---|---|
-| `agent-test-generation` | PR touches Services/ViewModels/Core | Generates xUnit tests, commits to PR branch |
-| `agent-feature-implementation` | Issue labeled `feature` | Scaffolds code + draft PR |
-| `agent-code-review` | PR (non-draft) touches .cs/.xaml | Reviews diff, posts comment |
-| `agent-release` | Tag `v*.*.*` push | Generates changelog, creates GitHub Release |
-| `agent-issue-triage` | Issue opened/reopened | Labels issue, posts follow-up comment |
-
+## Architecture
 
 ```
 ElliePdf (WinUI 3, net11.0-windows10.0.26100.0)
