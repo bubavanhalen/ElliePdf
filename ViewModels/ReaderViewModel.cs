@@ -28,6 +28,7 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
     private float _pageHeightPoints = 792f;
     private IReadOnlyList<TextMatch> _searchMatches = [];
     private int _activeSearchMatchIndex = -1;
+    private int _statusVersion;
     private byte[]? _lastRenderedPng;
 
     public ObservableCollection<DocumentTabItemViewModel> TabItems { get; } = [];
@@ -259,7 +260,6 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
             NotifyDocumentChanged();
             await RenderCurrentPageAsync();
             await RefreshRecentFilesAsync(cancellationToken);
-            SetStatus($"Opened {Path.GetFileName(path)}.", InfoBarSeverity.Success);
         }
         catch (PdfiumDependencyException ex)
         {
@@ -271,7 +271,7 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         }
         catch (OperationCanceledException)
         {
-            SetStatus("Open cancelled.", InfoBarSeverity.Informational);
+            // User cancelled the open; no status needed.
         }
         finally
         {
@@ -1125,5 +1125,21 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         StatusMessage = message;
         StatusSeverity = severity;
         IsStatusOpen = true;
+
+        // Errors stay until dismissed; everything else fades out on its own.
+        var version = ++_statusVersion;
+        if (severity != InfoBarSeverity.Error)
+        {
+            _ = AutoDismissStatusAsync(version);
+        }
+    }
+
+    private async Task AutoDismissStatusAsync(int version)
+    {
+        await Task.Delay(TimeSpan.FromSeconds(4));
+        if (version == _statusVersion)
+        {
+            IsStatusOpen = false;
+        }
     }
 }
