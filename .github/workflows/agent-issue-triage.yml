@@ -1,0 +1,124 @@
+name: Agent – Issue Triage
+
+on:
+  issues:
+    types: [opened, reopened]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Issue number to triage'
+        required: true
+      model:
+        description: 'AI model to use (e.g. gpt-4.1, claude-sonnet-4-5, o4-mini)'
+        required: false
+        default: ''
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/prompts/
+          sparse-checkout-cone-mode: false
+
+      - name: Resolve issue details
+        id: issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NUM="${{ github.event.issue.number || inputs.issue_number }}"
+          TITLE=$(gh issue view "$NUM" --json title -q .title)
+          BODY=$(gh issue view "$NUM" --json body -q .body)
+          echo "number=$NUM" >> "$GITHUB_OUTPUT"
+          echo "title=$TITLE" >> "$GITHUB_OUTPUT"
+          echo "body<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$BODY" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Triage with AI
+        id: ai
+        uses: actions/ai-inference@v1
+        with:
+          model: ${{ inputs.model || vars.AGENT_MODEL || 'gpt-4.1' }}
+          system-prompt-file: .github/prompts/system-dotnet.txt
+          prompt: |
+            Triage the following GitHub issue for ElliePdf (WinUI 3 PDF reader/organizer).
+
+            ## Product areas → labels
+            reader, organize, annotations, search, settings, file-handling, performance, accessibility, docs, ci-cd, dependencies
+
+            ## Severity → labels
+            bug, feature, enhancement, question
+
+            ## Priority → labels
+            "priority: high" (crash/data-loss), "priority: medium" (workaround exists), "priority: low" (cosmetic)
+
+            ## Issue #${{ steps.issue.outputs.number }}
+            **Title:** ${{ steps.issue.outputs.title }}
+            **Body:** ${{ steps.issue.outputs.body }}
+
+            Output exactly the following structure (no extra text):
+            LABELS: <comma-separated label names>
+            SEVERITY: <bug|feature|enhancement|question>
+            PRIORITY: <high|medium|low|none>
+            COMMENT: <markdown comment to post on the issue — for bugs ask for OS version, ElliePdf version, steps to reproduce, and whether PDF is password-protected; for features thank the reporter>
+
+      - name: Apply labels and post comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AI_RESPONSE: ${{ steps.ai.outputs.response }}
+          ISSUE_NUM: ${{ steps.issue.outputs.number }}
+        run: |
+          python3 - <<'PYEOF'
+          import os, re, subprocess
+
+          r = os.environ["AI_RESPONSE"]
+          num = os.environ["ISSUE_NUM"]
+
+          def extract(key):
+              m = re.search(rf'^{key}:\s*(.+)$', r, re.MULTILINE)
+              return m.group(1).strip() if m else ""
+
+          labels_raw = extract("LABELS")
+          severity   = extract("SEVERITY")
+          priority   = extract("PRIORITY")
+          comment    = re.search(r'^COMMENT:\s*([\s\S]+)', r, re.MULTILINE)
+          comment    = comment.group(1).strip() if comment else ""
+
+          # Collect all labels to apply
+          all_labels = [l.strip() for l in labels_raw.split(",") if l.strip()]
+          if severity:
+              all_labels.append(severity)
+          if priority and priority != "none":
+              all_labels.append(f"priority: {priority}")
+
+          # Ensure labels exist (create with default colour if missing)
+          colours = {
+              "bug": "d73a4a", "feature": "0075ca", "enhancement": "a2eeef",
+              "question": "d876e3", "priority: high": "b60205",
+              "priority: medium": "e4e669", "priority: low": "0e8a16",
+          }
+          for label in all_labels:
+              colour = colours.get(label, "cfd3d7")
+              subprocess.run(
+                  ["gh", "label", "create", label, "--color", colour, "--force"],
+                  check=False, capture_output=True
+              )
+
+          # Apply labels
+          if all_labels:
+              subprocess.run(
+                  ["gh", "issue", "edit", num, "--add-label", ",".join(all_labels)],
+                  check=True
+              )
+
+          # Post comment
+          if comment:
+              subprocess.run(["gh", "issue", "comment", num, "--body", comment], check=True)
+          PYEOF

@@ -1,0 +1,144 @@
+name: Agent – Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Version tag (e.g. v1.2.0)'
+        required: true
+      model:
+        description: 'AI model to use (e.g. gpt-4.1, claude-sonnet-4-5, o4-mini)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build-x64:
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version
+        id: version
+        shell: pwsh
+        run: |
+          $tag = if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            "${{ inputs.tag }}"
+          } else { "${{ github.ref_name }}" }
+          $v = $tag.TrimStart('v')
+          echo "version=$v" >> $env:GITHUB_OUTPUT
+          echo "tag=$tag" >> $env:GITHUB_OUTPUT
+
+      - name: Patch version in csproj
+        shell: pwsh
+        run: |
+          $v = "${{ steps.version.outputs.version }}"
+          $csproj = Get-Content ElliePdf.csproj -Raw
+          if ($csproj -match '<Version>') {
+            $csproj = $csproj -replace '<Version>[^<]*</Version>', "<Version>$v</Version>"
+          } else {
+            $csproj = $csproj -replace '(</PropertyGroup>)', "  <Version>$v</Version>`n  `$1"
+          }
+          Set-Content ElliePdf.csproj $csproj
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '11.0.x'
+
+      - name: Restore
+        run: dotnet restore ElliePdf.slnx
+
+      - name: Build & test
+        run: |
+          dotnet build ElliePdf.slnx -c Release -p:Platform=x64 --no-restore
+          dotnet test ElliePdf.Tests/ElliePdf.Tests.csproj -c Release -p:Platform=x64
+
+      - name: Publish x64
+        run: >
+          dotnet publish ElliePdf.csproj
+          -c Release
+          -p:Platform=x64
+          -p:PublishSingleFile=true
+          --self-contained true
+          -r win-x64
+          -o publish/x64
+
+      - name: Zip x64
+        shell: pwsh
+        run: Compress-Archive -Path publish/x64/* -DestinationPath ElliePdf-${{ steps.version.outputs.version }}-win-x64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win-x64
+          path: ElliePdf-${{ steps.version.outputs.version }}-win-x64.zip
+
+  create-release:
+    runs-on: ubuntu-latest
+    # ARM64 is intentionally omitted: ElliePdf.csproj only bundles pdfium_x64.dll;
+    # there is no pdfium_arm64.dll in the PDFium.WindowsV2 package. Add ARM64 once
+    # an ARM64 PDFium binary is available.
+    needs: [build-x64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Collect commit log since last tag
+        id: log
+        run: |
+          PREV=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || git rev-list --max-parents=0 HEAD)
+          LOG=$(git log --oneline "$PREV"..HEAD)
+          echo "log<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$LOG" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Generate changelog with AI
+        id: ai
+        uses: actions/ai-inference@v1
+        with:
+          model: ${{ inputs.model || vars.AGENT_MODEL || 'gpt-4.1' }}
+          system-prompt-file: .github/prompts/system-dotnet.txt
+          prompt: |
+            Write concise, user-facing release notes for ElliePdf ${{ needs.build-x64.outputs.version }}.
+
+            ElliePdf is a Windows native PDF reader/organizer (WinUI 3 + PDFium).
+            Features: multi-tab reading, zoom/search, ink/text/signature annotations,
+            page reorder/rotate/delete, merge/export, recent files, password-protected PDFs.
+
+            Categorize the following commits into these sections (omit empty sections):
+            - ✨ Features
+            - 🐛 Bug Fixes
+            - 🔧 Improvements
+            - 📦 Dependencies
+
+            Write user-facing descriptions — no commit hashes, no internal jargon.
+            Output only the Markdown release notes, no preamble.
+
+            ## Commits
+            ${{ steps.log.outputs.log }}
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name || inputs.tag }}
+          name: ElliePdf ${{ needs.build-x64.outputs.version }}
+          body: ${{ steps.ai.outputs.response }}
+          draft: false
+          prerelease: ${{ contains(needs.build-x64.outputs.version, '-') }}
+          files: |
+            artifacts/win-x64/*.zip

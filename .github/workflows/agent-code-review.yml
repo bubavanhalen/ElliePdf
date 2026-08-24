@@ -1,0 +1,97 @@
+name: Agent – Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+    paths:
+      - '**/*.cs'
+      - '**/*.xaml'
+  workflow_dispatch:
+    inputs:
+      model:
+        description: 'AI model to use (e.g. gpt-4.1, claude-sonnet-4-5, o4-mini)'
+        required: false
+        default: ''
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  review:
+    if: github.event.pull_request.draft == false || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Collect diff
+        id: diff
+        run: |
+          git diff origin/${{ github.base_ref }}...HEAD -- '*.cs' '*.xaml' > /tmp/pr.diff
+          echo "diff<<EOF" >> "$GITHUB_OUTPUT"
+          head -c 12000 /tmp/pr.diff >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Run AI code review
+        id: ai
+        uses: actions/ai-inference@v1
+        with:
+          model: ${{ inputs.model || vars.AGENT_MODEL || 'gpt-4.1' }}
+          system-prompt-file: .github/prompts/system-dotnet.txt
+          prompt: |
+            Review the following diff for a pull request in ElliePdf (WinUI 3 PDF app, PDFium, CommunityToolkit.Mvvm).
+
+            ## Checklist — only report HIGH-CONFIDENCE issues, no style nits
+            1. **Resource leaks** — `PdfDocumentSession` from `OpenDocumentAsync` must be closed with `CloseDocumentAsync` in a `finally` block
+            2. **CancellationToken** — async methods calling `IPdfService` must accept and forward a `CancellationToken`; flag `CancellationToken.None` without a comment
+            3. **ObservableProperty** — `[ObservableProperty]` fields must be `private partial` not manual backing fields; `[RelayCommand]` methods must be non-static
+            4. **Native binaries** — flag any `*.dll` added to the repo
+            5. **Thread safety** — PDFium calls must stay off the UI thread; flag direct `PdfiumNative` calls from XAML code-behind
+            6. **Null safety** — flag unchecked dereferences of nullable values returned from service methods
+            7. **XAML bindings** — flag `Mode=TwoWay` on read-only ViewModel properties
+
+            ## Output format
+            For each issue, output exactly:
+            ISSUE|<file>|<line>|<severity: warning|error>|<short description>
+
+            If no issues found, output exactly: NO_ISSUES
+
+            ## Diff
+            ${{ steps.diff.outputs.diff }}
+
+      - name: Post review comments
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AI_RESPONSE: ${{ steps.ai.outputs.response }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PYEOF'
+          import os, subprocess, json, re
+
+          response = os.environ["AI_RESPONSE"].strip()
+          pr = os.environ["PR_NUMBER"]
+          repo = os.environ["REPO"]
+          token = os.environ["GH_TOKEN"]
+
+          if response == "NO_ISSUES":
+              body = "✅ **AI code review passed** — no issues found."
+              subprocess.run(["gh", "pr", "comment", pr, "--body", body], check=True)
+          else:
+              lines = [l for l in response.splitlines() if l.startswith("ISSUE|")]
+              if not lines:
+                  subprocess.run(["gh", "pr", "comment", pr, "--body",
+                      "✅ **AI code review passed** — no issues found."], check=True)
+              else:
+                  summary = "## 🤖 AI Code Review\n\n"
+                  for line in lines:
+                      parts = line.split("|", 4)
+                      if len(parts) == 5:
+                          _, file, lineno, severity, desc = parts
+                          icon = "🔴" if severity == "error" else "🟡"
+                          summary += f"{icon} **{file}:{lineno}** — {desc}\n\n"
+                  subprocess.run(["gh", "pr", "comment", pr, "--body", summary.strip()], check=True)
+          PYEOF
