@@ -82,54 +82,12 @@ jobs:
           name: win-x64
           path: ElliePdf-${{ steps.version.outputs.version }}-win-x64.zip
 
-  build-arm64:
-    runs-on: windows-latest
-    needs: build-x64
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Patch version in csproj
-        shell: pwsh
-        run: |
-          $v = "${{ needs.build-x64.outputs.version }}"
-          $csproj = Get-Content ElliePdf.csproj -Raw
-          if ($csproj -match '<Version>') {
-            $csproj = $csproj -replace '<Version>[^<]*</Version>', "<Version>$v</Version>"
-          } else {
-            $csproj = $csproj -replace '(</PropertyGroup>)', "  <Version>$v</Version>`n  `$1"
-          }
-          Set-Content ElliePdf.csproj $csproj
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '11.0.x'
-
-      - name: Restore
-        run: dotnet restore ElliePdf.slnx
-
-      - name: Publish ARM64
-        run: >
-          dotnet publish ElliePdf.csproj
-          -c Release
-          -p:Platform=ARM64
-          -p:PublishSingleFile=true
-          --self-contained true
-          -r win-arm64
-          -o publish/arm64
-
-      - name: Zip ARM64
-        shell: pwsh
-        run: Compress-Archive -Path publish/arm64/* -DestinationPath ElliePdf-${{ needs.build-x64.outputs.version }}-win-arm64.zip
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: win-arm64
-          path: ElliePdf-${{ needs.build-x64.outputs.version }}-win-arm64.zip
-
   create-release:
     runs-on: ubuntu-latest
-    needs: [build-x64, build-arm64]
+    # ARM64 is intentionally omitted: ElliePdf.csproj only bundles pdfium_x64.dll;
+    # there is no pdfium_arm64.dll in the PDFium.WindowsV2 package. Add ARM64 once
+    # an ARM64 PDFium binary is available.
+    needs: [build-x64]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -184,4 +142,3 @@ jobs:
           prerelease: ${{ contains(needs.build-x64.outputs.version, '-') }}
           files: |
             artifacts/win-x64/*.zip
-            artifacts/win-arm64/*.zip
