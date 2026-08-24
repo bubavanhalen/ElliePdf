@@ -13,4 +13,6 @@ public sealed class UserSettings
     public bool AutoSaveCompanion { get; set; } = true;
 
     public int RecentFilesMaxCount { get; set; } = 12;
+
+    public string AppTheme { get; set; } = "System";
 }

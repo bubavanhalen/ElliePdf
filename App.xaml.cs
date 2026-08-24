@@ -43,9 +43,11 @@ public partial class App : Application
 
     protected override async void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
     {
-        await Services.GetRequiredService<IUserSettingsService>().InitializeAsync();
+        var settingsService = Services.GetRequiredService<IUserSettingsService>();
+        await settingsService.InitializeAsync();
         Window = new MainWindow();
         DispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+        Helpers.ThemeHelper.Apply(settingsService.Settings.AppTheme);
         Window.Activate();
         _ = ProcessInitialActivationAsync();
     }

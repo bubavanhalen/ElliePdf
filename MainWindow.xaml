@@ -9,7 +9,7 @@
     Title="ElliePdf"
     mc:Ignorable="d">
     <Window.SystemBackdrop>
-        <MicaBackdrop />
+        <MicaBackdrop Kind="BaseAlt" />
     </Window.SystemBackdrop>
 
     <Frame x:Name="RootFrame" />

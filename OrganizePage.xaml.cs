@@ -15,14 +15,50 @@ public sealed partial class OrganizePage : Page
         ViewModel = App.Services.GetRequiredService<DocumentCollectionViewModel>();
         DataContext = ViewModel;
         ViewModel.MergeCompleted += OnMergeCompleted;
+        ViewModel.Pages.CollectionChanged += OnPagesChanged;
+        Loaded += OnPageLoaded;
         Unloaded += OnUnloaded;
     }
 
     public DocumentCollectionViewModel ViewModel { get; }
 
+    private void OnPageLoaded(object sender, RoutedEventArgs e) => UpdateCollectionState();
+
+    private void OnPagesChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e) =>
+        UpdateCollectionState();
+
+    private void UpdateCollectionState()
+    {
+        var count = ViewModel.Pages.Count;
+        PageCountText.Text = count switch
+        {
+            0 => string.Empty,
+            1 => "1 page",
+            _ => $"{count} pages · drag to reorder"
+        };
+        EmptyState.Visibility = count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        ThumbnailGrid.Visibility = count == 0 ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void Card_PointerEntered(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e) =>
+        SetCardActionsVisible(sender, true);
+
+    private void Card_PointerExited(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e) =>
+        SetCardActionsVisible(sender, false);
+
+    private static void SetCardActionsVisible(object sender, bool visible)
+    {
+        if (sender is FrameworkElement card && card.FindName("CardActions") is UIElement actions)
+        {
+            actions.Opacity = visible ? 1 : 0;
+            actions.IsHitTestVisible = visible;
+        }
+    }
+
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
         ViewModel.MergeCompleted -= OnMergeCompleted;
+        ViewModel.Pages.CollectionChanged -= OnPagesChanged;
     }
 
     private async void ImportButton_Click(object sender, RoutedEventArgs e)

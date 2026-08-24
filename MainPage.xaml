@@ -4,76 +4,132 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:helpers="using:ElliePdf.Helpers"
     xmlns:local="using:ElliePdf"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     Background="Transparent"
     mc:Ignorable="d">
 
-    <Grid Background="Transparent">
-        <NavigationView
-            x:Name="NavView"
-            AutomationProperties.AutomationId="NavView"
-            AlwaysShowHeader="False"
-            Background="Transparent"
-            IsBackButtonVisible="Collapsed"
-            IsPaneOpen="False"
-            IsPaneToggleButtonVisible="False"
-            IsTitleBarAutoPaddingEnabled="False"
-            PaneDisplayMode="LeftMinimal"
-            SelectionChanged="NavView_SelectionChanged">
-            <NavigationView.Resources>
-                <SolidColorBrush x:Key="NavigationViewDefaultPaneBackground" Color="Transparent" />
-                <Thickness x:Key="NavigationViewContentGridBorderThickness">0</Thickness>
-            </NavigationView.Resources>
-            <NavigationView.PaneHeader>
-                <Border Height="48" />
-            </NavigationView.PaneHeader>
-            <NavigationView.MenuItems>
-                <NavigationViewItem AutomationProperties.AutomationId="NavItemRead" Content="Read" Icon="Document" Tag="read" />
-                <NavigationViewItem AutomationProperties.AutomationId="NavItemOrganize" Content="Organize" Icon="Library" Tag="organize" />
-                <NavigationViewItem AutomationProperties.AutomationId="NavItemSettings" Content="Settings" Icon="Setting" Tag="settings" />
-            </NavigationView.MenuItems>
-            <Frame x:Name="ContentFrame" AutomationProperties.AutomationId="ContentFrame" Background="Transparent" />
-        </NavigationView>
+    <Grid x:Name="RootGrid" Background="Transparent">
+        <!--  Content fills the window edge-to-edge; pages manage their own top inset  -->
+        <Frame
+            x:Name="ContentFrame"
+            AutomationProperties.AutomationId="ContentFrame"
+            Background="Transparent" />
 
-        <Border
-            x:Name="WindowDragSurface"
-            Height="44"
-            Margin="320,0,152,0"
-            Canvas.ZIndex="40"
-            Background="Transparent"
-            VerticalAlignment="Top" />
-
-        <StackPanel
-            Margin="8,6,0,0"
-            Canvas.ZIndex="50"
-            HorizontalAlignment="Left"
-            Orientation="Horizontal"
-            Spacing="4"
+        <!--  ═══════════ Custom title bar ═══════════  -->
+        <Grid
+            x:Name="AppTitleBar"
+            Height="48"
+            Canvas.ZIndex="100"
             VerticalAlignment="Top">
-            <Button
-                x:Name="PaneToggleButton"
-                Width="36"
-                Height="32"
-                Padding="0"
-                AutomationProperties.Name="Menu"
-                Click="PaneToggleButton_Click"
-                Style="{StaticResource SubtleButtonStyle}"
-                ToolTipService.ToolTip="Menu">
-                <SymbolIcon Symbol="GlobalNavigationButton" />
-            </Button>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" MinWidth="48" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="142" />
+            </Grid.ColumnDefinitions>
+
+            <!--  Drag surface underneath the interactive chrome; sized by the star column  -->
+            <Border
+                x:Name="DragRegion"
+                Grid.ColumnSpan="6"
+                Background="Transparent" />
+
+            <!--  Back  -->
             <Button
                 x:Name="BackButton"
+                Grid.Column="0"
                 Width="36"
-                Height="32"
-                Padding="0"
+                Height="34"
+                Margin="6,0,0,0"
+                VerticalAlignment="Center"
                 AutomationProperties.Name="Back"
                 Click="BackButton_Click"
-                Style="{StaticResource SubtleButtonStyle}"
+                Style="{StaticResource EllieToolButtonStyle}"
                 ToolTipService.ToolTip="Back"
                 Visibility="Collapsed">
-                <SymbolIcon Symbol="Back" />
+                <FontIcon FontSize="14" Glyph="&#xE72B;" />
             </Button>
-        </StackPanel>
+
+            <!--  Brand  -->
+            <StackPanel
+                Grid.Column="1"
+                Margin="12,0,8,0"
+                Orientation="Horizontal"
+                Spacing="8"
+                VerticalAlignment="Center">
+                <Image
+                    Width="20"
+                    Height="20"
+                    Source="ms-appx:///Assets/Brand/elliepdf-logo-master.png" />
+                <TextBlock
+                    FontWeight="SemiBold"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Text="ElliePdf"
+                    VerticalAlignment="Center" />
+            </StackPanel>
+
+            <!--  Document tabs, integrated into the title bar  -->
+            <TabView
+                x:Name="DocumentTabs"
+                Grid.Column="2"
+                MaxWidth="640"
+                Margin="4,4,0,0"
+                VerticalAlignment="Bottom"
+                AddTabButtonClick="DocumentTabs_AddTabButtonClick"
+                AutomationProperties.AutomationId="DocumentTabs"
+                Background="Transparent"
+                CanDragTabs="True"
+                CanReorderTabs="True"
+                IsAddTabButtonVisible="True"
+                SelectionChanged="DocumentTabs_SelectionChanged"
+                TabCloseRequested="DocumentTabs_TabCloseRequested"
+                TabWidthMode="SizeToContent"
+                Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(Reader.ShowTabBar), Mode=OneWay}" />
+
+            <!--  Workspace switcher + settings  -->
+            <StackPanel
+                Grid.Column="4"
+                Margin="0,0,4,0"
+                Orientation="Horizontal"
+                Spacing="4"
+                VerticalAlignment="Center">
+                <SelectorBar x:Name="WorkspaceSwitcher" SelectionChanged="WorkspaceSwitcher_SelectionChanged">
+                    <SelectorBarItem
+                        x:Name="ReadWorkspaceItem"
+                        AutomationProperties.AutomationId="NavItemRead"
+                        Tag="read"
+                        Text="Read">
+                        <SelectorBarItem.Icon>
+                            <FontIcon FontSize="14" Glyph="&#xE736;" />
+                        </SelectorBarItem.Icon>
+                    </SelectorBarItem>
+                    <SelectorBarItem
+                        x:Name="OrganizeWorkspaceItem"
+                        AutomationProperties.AutomationId="NavItemOrganize"
+                        Tag="organize"
+                        Text="Organize">
+                        <SelectorBarItem.Icon>
+                            <FontIcon FontSize="14" Glyph="&#xE8A9;" />
+                        </SelectorBarItem.Icon>
+                    </SelectorBarItem>
+                </SelectorBar>
+                <Border Height="20" Style="{StaticResource EllieDividerStyle}" />
+                <Button
+                    x:Name="SettingsButton"
+                    Width="36"
+                    Height="34"
+                    AutomationProperties.AutomationId="NavItemSettings"
+                    AutomationProperties.Name="Settings"
+                    Click="SettingsButton_Click"
+                    Style="{StaticResource EllieToolButtonStyle}"
+                    ToolTipService.ToolTip="Settings">
+                    <FontIcon FontSize="15" Glyph="&#xE713;" />
+                </Button>
+            </StackPanel>
+        </Grid>
     </Grid>
 </Page>

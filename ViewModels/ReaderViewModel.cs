@@ -84,7 +84,7 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
 
     public bool ShowEmptyState => !HasDocument;
 
-    public bool ShowTabBar => TabCount > 1;
+    public bool ShowTabBar => TabCount > 0;
 
     public bool IsReadMode => ToolMode == ReaderToolMode.Read;
 
@@ -379,6 +379,7 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         }
 
         IsSearchPanelOpen = false;
+        IsOutlinePanelOpen = false;
         IsThumbnailPanelOpen = true;
     }
 
@@ -509,6 +510,20 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
     private void ZoomFitPage()
     {
         _tabService.ZoomMode = PdfZoomMode.FitPage;
+        NotifyZoomChanged();
+        _ = RenderCurrentPageAsync();
+    }
+
+    [RelayCommand]
+    private void SetZoomPercent(double percent)
+    {
+        if (!HasDocument)
+        {
+            return;
+        }
+
+        _tabService.ZoomMode = PdfZoomMode.Custom;
+        _tabService.ZoomScale = Math.Clamp(percent, 25, 400) / 100.0;
         NotifyZoomChanged();
         _ = RenderCurrentPageAsync();
     }
