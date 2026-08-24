@@ -9,7 +9,7 @@ on:
         description: 'Issue number to implement'
         required: true
       model:
-        description: 'AI model to use (e.g. gpt-4.1, claude-sonnet-4-5, o4-mini)'
+        description: 'AI model to use (e.g. gpt-latest, claude-sonnet, o-mini-latest)'
         required: false
         default: ''
 
@@ -52,7 +52,7 @@ jobs:
         id: ai
         uses: actions/ai-inference@v1
         with:
-          model: ${{ inputs.model || vars.AGENT_MODEL || 'gpt-4.1' }}
+          model: ${{ inputs.model || vars.AGENT_MODEL || 'gpt-latest' }}
           system-prompt-file: .github/prompts/system-dotnet.txt
           prompt: |
             Implement the feature described in GitHub issue #${{ steps.issue.outputs.number }}.
