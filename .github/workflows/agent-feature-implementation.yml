@@ -125,10 +125,11 @@ jobs:
           git diff --cached --quiet || git commit -m "feat: scaffold issue #${ISSUE_NUM} - ${ISSUE_TITLE}"
           git push origin "$BRANCH"
 
+          DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)
           gh pr create \
             --title "feat: ${ISSUE_TITLE}" \
             --body "$(printf '%s\n\nCloses #%s' "$PR_BODY" "$ISSUE_NUM")" \
-            --base master \
+            --base "$DEFAULT_BRANCH" \
             --head "$BRANCH" \
             --draft \
             --label feature
