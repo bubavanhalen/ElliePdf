@@ -7,6 +7,12 @@ on:
       - 'Services/**/*.cs'
       - 'ViewModels/**/*.cs'
       - 'ElliePdf.Core/**/*.cs'
+  workflow_dispatch:
+    inputs:
+      model:
+        description: 'AI model to use (e.g. gpt-4.1, claude-sonnet-4-5, o4-mini)'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -30,29 +36,76 @@ jobs:
           FILES=$(git diff --name-only "$BASE" "$HEAD" \
             | grep -E '^(Services|ViewModels|ElliePdf\.Core)/.+\.cs$' \
             | grep -v '\.Tests\.' \
-            | tr '\n' ',')
-          echo "files=$FILES" >> "$GITHUB_OUTPUT"
-          echo "Changed files: $FILES"
+            | tr '\n' '\n')
+          echo "files<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$FILES" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          echo "has_files=$([ -n "$FILES" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
-      - name: Generate tests with Copilot
-        if: steps.changed.outputs.files != ''
-        uses: github/copilot-cli-action@v1
+      - name: Read changed source files
+        if: steps.changed.outputs.has_files == 'true'
+        id: sources
+        run: |
+          CONTENT=""
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            CONTENT+="### $f\n\`\`\`csharp\n$(cat "$f")\n\`\`\`\n\n"
+          done <<< "${{ steps.changed.outputs.files }}"
+          echo "content<<EOF" >> "$GITHUB_OUTPUT"
+          printf "%s" "$CONTENT" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Generate tests with AI
+        if: steps.changed.outputs.has_files == 'true'
+        id: ai
+        uses: actions/ai-inference@v1
         with:
+          model: ${{ inputs.model || vars.AGENT_MODEL || 'gpt-4.1' }}
+          system-prompt-file: .github/prompts/system-dotnet.txt
           prompt: |
-            You are a senior .NET developer working on ElliePdf — a WinUI 3 PDF reader and organizer.
+            Generate xUnit tests for the following changed C# files in the ElliePdf project.
 
-            The test project is at ElliePdf.Tests/ and uses xunit. It currently only references ElliePdf.Core
-            (no WinUI or Windows App SDK deps). Tests must compile with `net11.0` (non-Windows target).
-
-            For each changed file listed below, generate xUnit test classes that:
-            - Cover public methods/properties with meaningful unit tests (happy path + edge cases)
-            - Only test pure .NET logic; skip any method that requires WinUI, P/Invoke, or file I/O
-            - Use NSubstitute for mocking interfaces (add the package if not present in ElliePdf.Tests.csproj)
-            - Place each test class in ElliePdf.Tests/ named <ClassName>Tests.cs
+            ## Rules
+            - Test project: ElliePdf.Tests/ (framework net11.0 — no WinUI, no Windows App SDK)
+            - Use NSubstitute for mocking interfaces
+            - Cover public methods: happy path + edge cases
+            - Skip methods that require WinUI, P/Invoke, or direct file I/O
+            - Name each file <ClassName>Tests.cs in ElliePdf.Tests/
             - Do not duplicate ZoomScaleCalculatorTests.cs
+            - Output ONLY complete, compilable C# files, each preceded by a line: FILE: <path>
 
-            Changed files: ${{ steps.changed.outputs.files }}
+            ## Changed files
+            ${{ steps.sources.outputs.content }}
 
-            Read each changed file, identify testable logic, write the tests, and commit them to this PR branch.
-          mode: autopilot
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Write test files and commit
+        if: steps.changed.outputs.has_files == 'true'
+        env:
+          AI_RESPONSE: ${{ steps.ai.outputs.response }}
+        run: |
+          # Parse FILE: markers and write each file
+          python3 - <<'PYEOF'
+          import os, re
+
+          response = os.environ["AI_RESPONSE"]
+          # Split on FILE: markers
+          parts = re.split(r'^FILE:\s*(.+)$', response, flags=re.MULTILINE)
+
+          i = 1
+          while i < len(parts) - 1:
+              path = parts[i].strip()
+              body = parts[i + 1].strip()
+              # Strip markdown code fences if present
+              body = re.sub(r'^```\w*\n?', '', body)
+              body = re.sub(r'\n?```$', '', body)
+              os.makedirs(os.path.dirname(path) if os.path.dirname(path) else '.', exist_ok=True)
+              with open(path, 'w') as f:
+                  f.write(body + '\n')
+              print(f"Written: {path}")
+              i += 2
+          PYEOF
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ElliePdf.Tests/
+          git diff --cached --quiet || git commit -m "test: auto-generate unit tests for changed files [skip ci]"
+          git push

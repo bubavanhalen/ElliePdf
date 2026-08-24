@@ -6,6 +6,12 @@ on:
     paths:
       - '**/*.cs'
       - '**/*.xaml'
+  workflow_dispatch:
+    inputs:
+      model:
+        description: 'AI model to use (e.g. gpt-4.1, claude-sonnet-4-5, o4-mini)'
+        required: false
+        default: ''
 
 permissions:
   pull-requests: write
@@ -13,7 +19,7 @@ permissions:
 
 jobs:
   review:
-    if: github.event.pull_request.draft == false
+    if: github.event.pull_request.draft == false || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
     steps:
@@ -25,39 +31,67 @@ jobs:
         id: diff
         run: |
           git diff origin/${{ github.base_ref }}...HEAD -- '*.cs' '*.xaml' > /tmp/pr.diff
-          LINES=$(wc -l < /tmp/pr.diff)
-          echo "diff_lines=$LINES" >> "$GITHUB_OUTPUT"
+          echo "diff<<EOF" >> "$GITHUB_OUTPUT"
+          head -c 12000 /tmp/pr.diff >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
 
-      - name: Run Copilot code review agent
-        uses: github/copilot-cli-action@v1
+      - name: Run AI code review
+        id: ai
+        uses: actions/ai-inference@v1
         with:
+          model: ${{ inputs.model || vars.AGENT_MODEL || 'gpt-4.1' }}
+          system-prompt-file: .github/prompts/system-dotnet.txt
           prompt: |
-            You are a strict code reviewer for ElliePdf, a WinUI 3 PDF app built on PDFium, CommunityToolkit.Mvvm,
-            and Microsoft.Extensions.DependencyInjection.
+            Review the following diff for a pull request in ElliePdf (WinUI 3 PDF app, PDFium, CommunityToolkit.Mvvm).
 
-            Review the diff for this pull request and post inline review comments for any of the following issues.
-            Only report HIGH-CONFIDENCE problems — no style nits, no speculation.
+            ## Checklist — only report HIGH-CONFIDENCE issues, no style nits
+            1. **Resource leaks** — `PdfDocumentSession` from `OpenDocumentAsync` must be closed with `CloseDocumentAsync` in a `finally` block
+            2. **CancellationToken** — async methods calling `IPdfService` must accept and forward a `CancellationToken`; flag `CancellationToken.None` without a comment
+            3. **ObservableProperty** — `[ObservableProperty]` fields must be `private partial` not manual backing fields; `[RelayCommand]` methods must be non-static
+            4. **Native binaries** — flag any `*.dll` added to the repo
+            5. **Thread safety** — PDFium calls must stay off the UI thread; flag direct `PdfiumNative` calls from XAML code-behind
+            6. **Null safety** — flag unchecked dereferences of nullable values returned from service methods
+            7. **XAML bindings** — flag `Mode=TwoWay` on read-only ViewModel properties
 
-            ## Checklist
-            1. **Resource leaks** — every `PdfDocumentSession` opened via `IPdfService.OpenDocumentAsync` must be
-               closed with `CloseDocumentAsync` in a `finally` block or `IDisposable` implementation.
-            2. **CancellationToken threading** — async methods that call `IPdfService` must accept and forward a
-               `CancellationToken`; do not pass `CancellationToken.None` unless justified by a comment.
-            3. **ObservableProperty correctness** — source-generated `[ObservableProperty]` fields must be
-               `private partial` (not backing fields prefixed with `_`). `[RelayCommand]` methods must be
-               non-static and non-partial themselves.
-            4. **pdfium.dll committed** — flag any `*.dll` added to the repo; pdfium.dll is synced at build time.
-            5. **Thread safety** — PDFium calls in `PdfService` must remain on a single synchronous lock or
-               background thread. Do not call `PdfiumNative` methods from the UI thread directly.
-            6. **Null safety** — nullable reference type annotations (`?`) must be respected; no unchecked
-               dereferences of nullable returned from service methods.
-            7. **XAML binding mode** — new two-way bindings on read-only ViewModel properties should be flagged.
+            ## Output format
+            For each issue, output exactly:
+            ISSUE|<file>|<line>|<severity: warning|error>|<short description>
 
-            For each issue found, post an inline review comment on the exact line.
-            If no issues are found, post a single approving summary comment: "✅ No issues found."
+            If no issues found, output exactly: NO_ISSUES
 
-            PR number: ${{ github.event.pull_request.number }}
-            Base branch: ${{ github.base_ref }}
-            Head branch: ${{ github.head_ref }}
-          mode: autopilot
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+            ## Diff
+            ${{ steps.diff.outputs.diff }}
+
+      - name: Post review comments
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AI_RESPONSE: ${{ steps.ai.outputs.response }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PYEOF'
+          import os, subprocess, json, re
+
+          response = os.environ["AI_RESPONSE"].strip()
+          pr = os.environ["PR_NUMBER"]
+          repo = os.environ["REPO"]
+          token = os.environ["GH_TOKEN"]
+
+          if response == "NO_ISSUES":
+              body = "✅ **AI code review passed** — no issues found."
+              subprocess.run(["gh", "pr", "comment", pr, "--body", body], check=True)
+          else:
+              lines = [l for l in response.splitlines() if l.startswith("ISSUE|")]
+              if not lines:
+                  subprocess.run(["gh", "pr", "comment", pr, "--body",
+                      "✅ **AI code review passed** — no issues found."], check=True)
+              else:
+                  summary = "## 🤖 AI Code Review\n\n"
+                  for line in lines:
+                      parts = line.split("|", 4)
+                      if len(parts) == 5:
+                          _, file, lineno, severity, desc = parts
+                          icon = "🔴" if severity == "error" else "🟡"
+                          summary += f"{icon} **{file}:{lineno}** — {desc}\n\n"
+                  subprocess.run(["gh", "pr", "comment", pr, "--body", summary.strip()], check=True)
+          PYEOF
