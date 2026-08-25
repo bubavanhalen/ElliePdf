@@ -11,7 +11,7 @@ public sealed class DocumentTab
 
     public Guid Id { get; } = Guid.NewGuid();
 
-    public PdfDocumentSession Session { get; }
+    public PdfDocumentSession Session { get; internal set; }
 
     public string FilePath => Session.SourcePath;
 

@@ -30,8 +30,7 @@
                 <Canvas x:Name="SearchHighlightCanvas" IsHitTestVisible="False" />
                 <controls:PdfEditSurface
                     x:Name="PageEditSurface"
-                    IsHitTestVisible="False"
-                    Visibility="Collapsed" />
+                    IsHitTestVisible="False" />
             </Grid>
         </Border>
     </ScrollViewer>

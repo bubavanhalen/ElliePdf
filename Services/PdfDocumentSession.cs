@@ -20,6 +20,9 @@ public sealed class PdfDocumentSession : IAsyncDisposable
 
     public string SourcePath { get; }
 
+    /// <summary>Stable identity for caching; PDFium recycles native handles across close/open.</summary>
+    internal Guid Id { get; } = Guid.NewGuid();
+
     public int PageCount { get; internal set; }
 
     internal IntPtr Handle { get; private set; }
@@ -41,6 +44,15 @@ public sealed class PdfDocumentSession : IAsyncDisposable
     internal void MarkClosed()
     {
         Handle = IntPtr.Zero;
+        FormFill = null;
+    }
+
+    /// <summary>
+    /// Releases the form-fill environment. It must go before <c>FPDF_CloseDocument</c>, because
+    /// tearing it down dereferences the document and its page views.
+    /// </summary>
+    internal void ReleaseFormFill()
+    {
         FormFill?.Dispose();
         FormFill = null;
     }

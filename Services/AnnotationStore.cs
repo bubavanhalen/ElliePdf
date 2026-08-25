@@ -1,21 +1,45 @@
-using System.Text.Json;
 using ElliePdf.Models;
 
 namespace ElliePdf.Services;
 
+/// <summary>
+/// Holds the annotations being edited, per tab and page.
+/// </summary>
+/// <remarks>
+/// Purely in-memory. Annotations are persisted by writing them into the PDF itself, so there is no
+/// companion file: a saved document carries everything it needs and can be shared as-is.
+/// </remarks>
+public interface IAnnotationStore
+{
+    PageOverlayState GetPageOverlay(Guid tabId, int pageIndex);
+
+    void SetPageOverlay(Guid tabId, int pageIndex, PageOverlayState state);
+
+    /// <summary>Replaces everything held for a tab, used when a document is opened or reloaded.</summary>
+    void SetOverlayDocument(Guid tabId, PageOverlayDocument document);
+
+    bool IsTabDirty(Guid tabId);
+
+    void MarkTabClean(Guid tabId);
+
+    void RemoveTab(Guid tabId);
+
+    /// <summary>Drops every overlay for a tab, e.g. once they have been written into the PDF.</summary>
+    void ClearOverlays(Guid tabId);
+
+    /// <summary>
+    /// Drops a page's overlays and shifts later pages down, keeping the store aligned with a
+    /// document whose page has been deleted.
+    /// </summary>
+    void RemovePage(Guid tabId, int pageIndex);
+
+    PageOverlayDocument? GetOverlayDocument(Guid tabId);
+}
+
 public sealed class AnnotationStore : IAnnotationStore
 {
-    private readonly IUserSettingsService _settingsService;
     private readonly Dictionary<Guid, PageOverlayDocument> _documents = [];
     private readonly HashSet<Guid> _dirtyTabs = [];
-    private readonly Dictionary<Guid, CancellationTokenSource> _saveTimers = [];
-
-    public AnnotationStore(IUserSettingsService settingsService)
-    {
-        _settingsService = settingsService;
-    }
-
-    private static string GetCompanionPath(string pdfPath) => pdfPath + ".ellie.json";
 
     public PageOverlayState GetPageOverlay(Guid tabId, int pageIndex)
     {
@@ -46,120 +70,54 @@ public sealed class AnnotationStore : IAnnotationStore
         _dirtyTabs.Add(tabId);
     }
 
+    public void SetOverlayDocument(Guid tabId, PageOverlayDocument document)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+
+        _documents[tabId] = document;
+
+        // Loading what is already in the file is not an unsaved change.
+        _dirtyTabs.Remove(tabId);
+    }
+
     public bool IsTabDirty(Guid tabId) => _dirtyTabs.Contains(tabId);
 
     public void MarkTabClean(Guid tabId) => _dirtyTabs.Remove(tabId);
 
     public void RemoveTab(Guid tabId)
     {
-        if (_saveTimers.Remove(tabId, out var timer))
-        {
-            timer.Cancel();
-            timer.Dispose();
-        }
-
         _documents.Remove(tabId);
         _dirtyTabs.Remove(tabId);
     }
 
-    public PageOverlayDocument? GetOverlayDocument(Guid tabId) =>
-        _documents.TryGetValue(tabId, out var document) ? document : null;
-
-    public void DeleteCompanion(string pdfPath)
+    public void ClearOverlays(Guid tabId)
     {
-        var companionPath = GetCompanionPath(pdfPath);
-        if (File.Exists(companionPath))
-        {
-            File.Delete(companionPath);
-        }
-    }
-
-    public async Task LoadCompanionAsync(Guid tabId, string pdfPath, CancellationToken cancellationToken = default)
-    {
-        var companionPath = GetCompanionPath(pdfPath);
-        if (!File.Exists(companionPath))
-        {
-            _documents[tabId] = new PageOverlayDocument();
-            return;
-        }
-
-        await using var stream = File.OpenRead(companionPath);
-        var document = await JsonSerializer.DeserializeAsync(
-            stream,
-            ElliePdfJsonContext.Default.PageOverlayDocument,
-            cancellationToken)
-            ?? new PageOverlayDocument();
-        _documents[tabId] = document;
+        _documents[tabId] = new PageOverlayDocument();
         _dirtyTabs.Remove(tabId);
     }
 
-    public async Task SaveCompanionAsync(Guid tabId, string pdfPath, CancellationToken cancellationToken = default)
+    public void RemovePage(Guid tabId, int pageIndex)
     {
         if (!_documents.TryGetValue(tabId, out var document))
         {
             return;
         }
 
-        var companionPath = GetCompanionPath(pdfPath);
-        await using var stream = File.Create(companionPath);
-        await JsonSerializer.SerializeAsync(
-            stream,
-            document,
-            ElliePdfJsonContext.Default.PageOverlayDocument,
-            cancellationToken);
-        MarkTabClean(tabId);
+        var shifted = new Dictionary<int, PageOverlayState>();
+
+        foreach (var (page, state) in document.Pages)
+        {
+            if (page == pageIndex)
+            {
+                continue;
+            }
+
+            shifted[page > pageIndex ? page - 1 : page] = state;
+        }
+
+        document.Pages = shifted;
     }
 
-    public void ScheduleCompanionSave(Guid tabId, string pdfPath)
-    {
-        if (!_settingsService.Settings.AutoSaveCompanion)
-        {
-            return;
-        }
-
-        if (_saveTimers.Remove(tabId, out var existing))
-        {
-            existing.Cancel();
-            existing.Dispose();
-        }
-
-        var cts = new CancellationTokenSource();
-        _saveTimers[tabId] = cts;
-
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await Task.Delay(800, cts.Token);
-                await SaveCompanionAsync(tabId, pdfPath, cts.Token);
-            }
-            catch (OperationCanceledException)
-            {
-            }
-            finally
-            {
-                if (_saveTimers.TryGetValue(tabId, out var current) && ReferenceEquals(current, cts))
-                {
-                    _saveTimers.Remove(tabId);
-                }
-
-                cts.Dispose();
-            }
-        });
-    }
-
-    public async Task FlushPendingSavesAsync(CancellationToken cancellationToken = default)
-    {
-        foreach (var (tabId, timer) in _saveTimers.ToArray())
-        {
-            timer.Cancel();
-            timer.Dispose();
-            _saveTimers.Remove(tabId);
-        }
-
-        foreach (var tabId in _dirtyTabs.ToArray())
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-        }
-    }
+    public PageOverlayDocument? GetOverlayDocument(Guid tabId) =>
+        _documents.TryGetValue(tabId, out var document) ? document : null;
 }
