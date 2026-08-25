@@ -183,39 +183,6 @@
                         VerticalAlignment="Center" />
                 </Grid>
             </Border>
-            <Border Style="{StaticResource EllieSettingsCardStyle}">
-                <Grid ColumnSpacing="14">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <Border Style="{StaticResource EllieIconWellStyle}" VerticalAlignment="Center">
-                        <FontIcon
-                            FontSize="16"
-                            Foreground="{ThemeResource EllieAccentStrongBrush}"
-                            Glyph="&#xE70F;" />
-                    </Border>
-                    <StackPanel
-                        Grid.Column="1"
-                        Spacing="2"
-                        VerticalAlignment="Center">
-                        <TextBlock Style="{StaticResource BodyTextBlockStyle}" Text="Auto-save edit overlays" />
-                        <TextBlock
-                            Opacity="0.6"
-                            Style="{StaticResource CaptionTextBlockStyle}"
-                            Text="Keep companion files (.ellie.json) up to date automatically" />
-                    </StackPanel>
-                    <ToggleSwitch
-                        Grid.Column="2"
-                        MinWidth="0"
-                        IsOn="{x:Bind ViewModel.AutoSaveCompanion, Mode=TwoWay}"
-                        OffContent=""
-                        OnContent=""
-                        VerticalAlignment="Center" />
-                </Grid>
-            </Border>
-
             <!--  About  -->
             <TextBlock Style="{StaticResource EllieSectionHeaderStyle}" Text="About" />
             <Border Style="{StaticResource EllieSettingsCardStyle}">

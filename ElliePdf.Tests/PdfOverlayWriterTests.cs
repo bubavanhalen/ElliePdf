@@ -108,7 +108,7 @@ public sealed class PdfOverlayWriterTests : IDisposable
 
         Inspect(output, document =>
         {
-            var render = PdfTestHarness.Render(document, 0);
+            var render = PdfTestHarness.Render(document, 0, renderAnnotations: true);
 
             // The stroke spans x 40..360 at y 200 in display space.
             var onStroke = PdfTestHarness.PixelAt(render, 200, 200);
@@ -125,7 +125,7 @@ public sealed class PdfOverlayWriterTests : IDisposable
     }
 
     [Fact]
-    public void Text_overlay_is_written_as_real_selectable_text()
+    public void Text_overlay_is_written_as_real_text_a_viewer_can_read()
     {
         var source = PdfTestHarness.CreateTextPdf(At("source.pdf"), SourceText);
         var overlay = new PageOverlayState
@@ -145,9 +145,18 @@ public sealed class PdfOverlayWriterTests : IDisposable
             }
         };
 
-        var extracted = Inspect(Embed(source, overlay, "texted.pdf"), d => PdfTestHarness.ExtractText(d, 0));
-        Assert.Contains("Annotated", extracted);
-        Assert.Contains("Hello searchable", extracted);
+        var output = Embed(source, overlay, "texted.pdf");
+
+        Inspect(output, document =>
+        {
+            // Annotation text lives in /Contents, which is where viewers look when searching or
+            // listing comments.
+            Assert.Contains("Annotated", PdfTestHarness.AnnotationContents(document, 0));
+
+            // The page's own text layer is untouched.
+            Assert.Contains("Hello searchable", PdfTestHarness.ExtractText(document, 0));
+            return true;
+        });
     }
 
     [Fact]
@@ -172,11 +181,16 @@ public sealed class PdfOverlayWriterTests : IDisposable
 
         Inspect(Embed(source, overlay, "placed.pdf"), document =>
         {
-            var box = PdfTestHarness.CharBoxOf(document, 0, "Placed");
+            var render = PdfTestHarness.Render(document, 0, renderAnnotations: true);
 
-            // PDF space is Y-up; display Y 150 is PDF Y 150 from the top of a 300pt page.
-            Assert.InRange(box.Left, 95, 115);
-            Assert.InRange(PageHeight - box.Top, 145, 175);
+            // Search below the page's own text so only the annotation's glyphs are measured.
+            var ink = PdfTestHarness.InkBoundsInRegion(render, 0, 120, (int)PageWidth, 120);
+
+            Assert.NotNull(ink);
+
+            // Placed at x = 100, y = 150 in display space, plus the text box's small padding.
+            Assert.InRange(ink!.Value.Left, 95, 125);
+            Assert.InRange(ink.Value.Top, 145, 180);
             return true;
         });
     }
@@ -201,7 +215,7 @@ public sealed class PdfOverlayWriterTests : IDisposable
             }
         };
 
-        var extracted = Inspect(Embed(source, overlay, "wrapped.pdf"), d => PdfTestHarness.ExtractText(d, 0));
+        var extracted = Inspect(Embed(source, overlay, "wrapped.pdf"), d => PdfTestHarness.AnnotationContents(d, 0));
         foreach (var word in new[] { "wrapping", "across", "several", "lines", "output" })
         {
             Assert.Contains(word, extracted);
@@ -231,7 +245,7 @@ public sealed class PdfOverlayWriterTests : IDisposable
             }
         };
 
-        var extracted = Inspect(Embed(source, overlay, "unicode.pdf"), d => PdfTestHarness.ExtractText(d, 0));
+        var extracted = Inspect(Embed(source, overlay, "unicode.pdf"), d => PdfTestHarness.AnnotationContents(d, 0));
         Assert.Contains("Привет", extracted);
         Assert.Contains("你好", extracted);
     }
@@ -265,7 +279,7 @@ public sealed class PdfOverlayWriterTests : IDisposable
 
         Inspect(Embed(source, overlay, "signed.pdf"), document =>
         {
-            var render = PdfTestHarness.Render(document, 0);
+            var render = PdfTestHarness.Render(document, 0, renderAnnotations: true);
 
             // The signature's top edge runs along display y = 60, inside x 120..280.
             var inside = PdfTestHarness.DarkestInRegion(render, 120, 60, 160, 80);
@@ -297,7 +311,7 @@ public sealed class PdfOverlayWriterTests : IDisposable
 
         Inspect(output, document =>
         {
-            var render = PdfTestHarness.Render(document, 0);
+            var render = PdfTestHarness.Render(document, 0, renderAnnotations: true);
 
             // Overlay coordinates are in display space, so the stroke must appear at the same
             // on-screen spot no matter how the page is rotated.
@@ -334,7 +348,7 @@ public sealed class PdfOverlayWriterTests : IDisposable
 
         Inspect(Embed(source, overlay, $"shape-{kind}.pdf"), document =>
         {
-            var render = PdfTestHarness.Render(document, 0);
+            var render = PdfTestHarness.Render(document, 0, renderAnnotations: true);
 
             // Something red must have been drawn inside the shape's box.
             var darkest = PdfTestHarness.DarkestInRegion(render, 55, 115, 290, 150);
@@ -368,7 +382,7 @@ public sealed class PdfOverlayWriterTests : IDisposable
 
         Inspect(Embed(source, overlay, "filled.pdf"), document =>
         {
-            var render = PdfTestHarness.Render(document, 0);
+            var render = PdfTestHarness.Render(document, 0, renderAnnotations: true);
 
             // Well inside the rectangle, away from its outline.
             var centre = PdfTestHarness.PixelAt(render, 200, 195);
@@ -403,7 +417,7 @@ public sealed class PdfOverlayWriterTests : IDisposable
 
         Inspect(Embed(source, overlay, "pressure.pdf"), document =>
         {
-            var render = PdfTestHarness.Render(document, 0);
+            var render = PdfTestHarness.Render(document, 0, renderAnnotations: true);
 
             var thickEnd = CountInkInColumn(render, x: 60);
             var thinEnd = CountInkInColumn(render, x: 320);
@@ -430,6 +444,49 @@ public sealed class PdfOverlayWriterTests : IDisposable
 
             return count;
         }
+    }
+
+    [Theory]
+    [InlineData(0, 100)]
+    [InlineData(100, 0)]
+    public void A_straight_arrows_head_is_not_clipped_by_its_annotation_box(double dx, double dy)
+    {
+        // A horizontal or vertical arrow has zero extent on one axis, so a rect derived from the
+        // endpoints alone would slice the barbs off in every other viewer.
+        var source = PdfTestHarness.CreateTextPdf(At("source.pdf"), SourceText);
+        var overlay = new PageOverlayState
+        {
+            Shapes =
+            {
+                new ShapeOverlay
+                {
+                    Kind = ShapeKind.Arrow,
+                    Start = new PointOverlay { X = 150, Y = 150 },
+                    End = new PointOverlay { X = 150 + dx, Y = 150 + dy },
+                    ColorHex = "#FF0000",
+                    Thickness = 9
+                }
+            }
+        };
+
+        Inspect(Embed(source, overlay, $"arrow-{dx}-{dy}.pdf"), document =>
+        {
+            var render = PdfTestHarness.Render(document, 0, renderAnnotations: true);
+            var tipX = (int)(150 + dx);
+            var tipY = (int)(150 + dy);
+
+            // The barbs sit perpendicular to the shaft, back from the tip.
+            var ink = PdfTestHarness.InkBoundsInRegion(render, tipX - 40, tipY - 40, 80, 80);
+            Assert.NotNull(ink);
+
+            var across = dx == 0
+                ? ink!.Value.Right - ink.Value.Left
+                : ink!.Value.Bottom - ink.Value.Top;
+
+            // A full head is ~36pt across at this thickness; a clipped one collapses to the shaft.
+            Assert.True(across > 20, $"the arrowhead looks clipped: only {across}pt across");
+            return true;
+        });
     }
 
     [Fact]

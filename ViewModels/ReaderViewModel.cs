@@ -639,11 +639,10 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
 
         _annotationStore.SetPageOverlay(tab.Id, _tabService.CurrentPageIndex, overlay);
         tab.IsDirty = true;
-        _annotationStore.ScheduleCompanionSave(tab.Id, tab.FilePath);
     }
 
     [RelayCommand]
-    private async Task EnterEditModeAsync()
+    private void EnterEditMode()
     {
         var tab = _tabService.ActiveTab;
         if (tab is null)
@@ -652,7 +651,7 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
             return;
         }
 
-        await _annotationStore.LoadCompanionAsync(tab.Id, tab.FilePath);
+        // Annotations were already read out of the PDF when the document opened.
         ClosePanels();
         ActiveEditTool = ReaderEditTool.Select;
         IsInkModeEnabled = false;
@@ -772,7 +771,6 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
 
         _annotationStore.SetPageOverlay(tab.Id, snapshot.PageIndex, snapshot.State);
         tab.IsDirty = true;
-        _annotationStore.ScheduleCompanionSave(tab.Id, tab.FilePath);
 
         // Undo has to take the user back to where the edit happened.
         if (_tabService.CurrentPageIndex != snapshot.PageIndex)

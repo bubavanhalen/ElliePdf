@@ -1,21 +1,35 @@
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using ElliePdf.Helpers;
 using ElliePdf.Models;
 
 namespace ElliePdf.Services;
 
 /// <summary>
-/// Writes overlay annotations into a PDF page as native page objects: ink becomes stroked vector
-/// paths, text becomes real selectable text objects, and signatures become image stamps.
+/// Writes overlay annotations into a PDF as standard annotation objects: ink strokes become
+/// <c>/Ink</c> annotations and everything else a <c>/Stamp</c>, each carrying an appearance stream
+/// built from real vector paths, text objects and images.
 /// </summary>
 /// <remarks>
+/// <para>
+/// Annotations rather than page content means a shared PDF is self-contained and still editable:
+/// any other viewer can display, move or delete them, and nothing lives in a companion file.
+/// Each annotation also carries the originating overlay item under a private key so ElliePdf can
+/// reload it exactly, including detail such as pen pressure that the appearance stream alone does
+/// not preserve.
+/// </para>
+/// <para>
 /// Overlay coordinates are stored in "display page points": origin top-left, Y growing downwards,
 /// sized to the rotation-aware page box the reader shows. PDF user space is origin bottom-left with
 /// Y growing upwards, relative to the crop box, and ignores <c>/Rotate</c>. Everything here funnels
 /// through <see cref="BuildDisplayToPdfMatrix"/> so rotated and offset pages land correctly.
+/// </para>
 /// </remarks>
 internal static class PdfOverlayWriter
 {
+    /// <summary>Private annotation key holding the ElliePdf overlay item as JSON.</summary>
+    internal const string PayloadKey = "ElliePdfItem";
+
     private const float TextPadding = 2f;
 
     /// <summary>PDFium's non-zero winding fill mode.</summary>
@@ -39,14 +53,12 @@ internal static class PdfOverlayWriter
          overlay.Signatures.Any(signature => !string.IsNullOrWhiteSpace(signature.ImageBase64)));
 
     /// <summary>
-    /// Embeds every page overlay into <paramref name="document"/>. This is the real save path:
-    /// objects are appended to the live document so its outline, links, form fields and text layer
-    /// all survive.
+    /// Adds every page overlay to <paramref name="document"/> as annotations. Page content is left
+    /// untouched, so the outline, links, form fields and text layer are unaffected.
     /// </summary>
     /// <remarks>
-    /// The mutation cannot be undone, so the caller must discard the document afterwards and reopen
-    /// from disk. It is deliberately not cancellable: abandoning it half-way would leave some pages
-    /// annotated and others not, with the overlays still pending in the annotation store.
+    /// It is deliberately not cancellable: abandoning half-way would leave some pages annotated and
+    /// others not, with the overlays still pending in memory.
     /// </remarks>
     public static void WriteDocument(IntPtr document, PageOverlayDocument overlays, int pageCount)
     {
@@ -75,11 +87,6 @@ internal static class PdfOverlayWriter
             try
             {
                 Write(document, page, overlay, fonts);
-
-                if (PdfiumNative.FPDFPage_GenerateContent(page) == 0)
-                {
-                    throw new InvalidOperationException($"PDFium could not update page {pageIndex + 1}.");
-                }
             }
             finally
             {
@@ -88,7 +95,7 @@ internal static class PdfOverlayWriter
         }
     }
 
-    /// <summary>Appends <paramref name="overlay"/> to an already-loaded page. Does not generate content.</summary>
+    /// <summary>Adds <paramref name="overlay"/> to an already-loaded page as annotations.</summary>
     public static void Write(IntPtr document, IntPtr page, PageOverlayState overlay, OverlayFontProvider? fonts = null)
     {
         var ownedFonts = fonts is null ? new OverlayFontProvider(document) : null;
@@ -129,6 +136,104 @@ internal static class PdfOverlayWriter
         }
     }
 
+    // ═══════════ Annotation plumbing ═══════════
+
+    /// <summary>
+    /// Creates an annotation, gives it an appearance stream built from <paramref name="objects"/>
+    /// and records the overlay item that produced it.
+    /// </summary>
+    /// <remarks>
+    /// The rectangle is measured from the geometry actually emitted rather than from the overlay's
+    /// control points, because decorations such as arrowheads extend well beyond them. It must also
+    /// be set before appending: PDFium fixes the appearance stream's bounding box from it, and
+    /// anything outside would be clipped away in every other viewer. (Measuring the page objects
+    /// instead is not an option — their bounds read as zero until they belong to a page or form.)
+    /// </remarks>
+    private static void EmitAnnotation(
+        IntPtr page,
+        int subtype,
+        IReadOnlyList<(double X, double Y)> extent,
+        double strokeWidth,
+        Matrix2D matrix,
+        AnnotationPayload payload,
+        IReadOnlyList<IntPtr> objects)
+    {
+        if (objects.Count == 0 || extent.Count == 0)
+        {
+            DestroyAll(objects);
+            return;
+        }
+
+        var annotation = PdfiumNative.FPDFPage_CreateAnnot(page, subtype);
+        if (annotation == IntPtr.Zero)
+        {
+            DestroyAll(objects);
+            return;
+        }
+
+        try
+        {
+            var rect = MeasureBounds(extent, strokeWidth, matrix);
+            PdfiumNative.FPDFAnnot_SetRect(annotation, ref rect);
+
+            // Without the print flag the annotation shows on screen but vanishes on paper.
+            PdfiumNative.FPDFAnnot_SetFlags(annotation, PdfiumNative.AnnotFlagPrint);
+
+            foreach (var pageObject in objects)
+            {
+                if (!PdfiumNative.FPDFAnnot_AppendObject(annotation, pageObject))
+                {
+                    PdfiumNative.FPDFPageObj_Destroy(pageObject);
+                }
+            }
+
+            var json = JsonSerializer.Serialize(payload, ElliePdfJsonContext.Default.AnnotationPayload);
+            PdfiumNative.FPDFAnnot_SetStringValue(annotation, PayloadKey, ToWideString(json));
+
+            // /Contents is the standard place for an annotation's text, and is what viewers show in
+            // a comment list and include when searching annotations.
+            if (payload.Text?.Text is { Length: > 0 } contents)
+            {
+                PdfiumNative.FPDFAnnot_SetStringValue(annotation, "Contents", ToWideString(contents));
+            }
+        }
+        finally
+        {
+            PdfiumNative.FPDFPage_CloseAnnot(annotation);
+        }
+    }
+
+    /// <summary>
+    /// Bounding rectangle in PDF space of the given display-space points, grown by half the stroke
+    /// width because a stroke lays ink either side of the path it follows.
+    /// </summary>
+    private static FsRectF MeasureBounds(
+        IReadOnlyList<(double X, double Y)> extent,
+        double strokeWidth,
+        Matrix2D matrix)
+    {
+        var transformed = extent.Select(point => matrix.Transform(point.X, point.Y)).ToList();
+
+        // A little slack on top of the stroke keeps antialiased edges and joins inside the box.
+        var padding = (Math.Max(0, strokeWidth) / 2) + 2;
+
+        return new FsRectF
+        {
+            left = (float)(transformed.Min(point => point.X) - padding),
+            bottom = (float)(transformed.Min(point => point.Y) - padding),
+            right = (float)(transformed.Max(point => point.X) + padding),
+            top = (float)(transformed.Max(point => point.Y) + padding)
+        };
+    }
+
+    private static void DestroyAll(IReadOnlyList<IntPtr> objects)
+    {
+        foreach (var pageObject in objects)
+        {
+            PdfiumNative.FPDFPageObj_Destroy(pageObject);
+        }
+    }
+
     // ═══════════ Ink ═══════════
 
     /// <summary>
@@ -143,72 +248,103 @@ internal static class PdfOverlayWriter
             return;
         }
 
-        var (r, g, b) = ParseColor(stroke.ColorHex);
+        var color = ParseColor(stroke.ColorHex);
+        var objects = new List<IntPtr>();
+        List<(double X, double Y)> extent;
+        double strokeWidth;
 
-        if (!InkGeometry.HasUniformPressure(stroke.Points))
+        if (InkGeometry.HasUniformPressure(stroke.Points))
         {
-            var outline = InkGeometry.BuildOutline(stroke.Points, stroke.Thickness);
-            if (outline.Count >= 3)
+            var width = InkGeometry.WidthAt(stroke.Thickness, stroke.Points[0].Pressure);
+            var path = BuildPolyline(stroke.Points.Select(point => (point.X, point.Y)), matrix);
+
+            if (path == IntPtr.Zero)
             {
-                WriteFilledPolygon(page, outline.Select(v => (v.X, v.Y)), (r, g, b), matrix);
+                return;
             }
 
-            return;
+            PdfiumNative.FPDFPageObj_SetStrokeColor(path, color.R, color.G, color.B, 255);
+            // The display->PDF matrix is a rotation plus a flip, so widths carry over unscaled.
+            PdfiumNative.FPDFPageObj_SetStrokeWidth(path, (float)Math.Max(0.1, width));
+            PdfiumNative.FPDFPageObj_SetLineCap(path, 1);
+            PdfiumNative.FPDFPageObj_SetLineJoin(path, 1);
+            PdfiumNative.FPDFPath_SetDrawMode(path, 0, 1);
+
+            objects.Add(path);
+            extent = stroke.Points.Select(point => (point.X, point.Y)).ToList();
+            strokeWidth = width;
+        }
+        else
+        {
+            var outline = InkGeometry.BuildOutline(stroke.Points, stroke.Thickness);
+            if (outline.Count < 3)
+            {
+                return;
+            }
+
+            var path = BuildFilledPolygon(outline.Select(vertex => (vertex.X, vertex.Y)), color, matrix);
+            if (path == IntPtr.Zero)
+            {
+                return;
+            }
+
+            objects.Add(path);
+
+            // The outline already spans the full width, so it needs no stroke allowance.
+            extent = outline.Select(vertex => (vertex.X, vertex.Y)).ToList();
+            strokeWidth = 0;
         }
 
-        var start = matrix.Transform(stroke.Points[0].X, stroke.Points[0].Y);
+        EmitAnnotation(
+            page,
+            PdfiumNative.AnnotInk,
+            extent,
+            strokeWidth,
+            matrix,
+            new AnnotationPayload { Ink = stroke },
+            objects);
+    }
+
+    private static IntPtr BuildPolyline(IEnumerable<(double X, double Y)> points, Matrix2D matrix)
+    {
+        var ordered = points.ToList();
+        if (ordered.Count < 2)
+        {
+            return IntPtr.Zero;
+        }
+
+        var start = matrix.Transform(ordered[0].X, ordered[0].Y);
         var path = PdfiumNative.FPDFPageObj_CreateNewPath((float)start.X, (float)start.Y);
         if (path == IntPtr.Zero)
         {
-            return;
+            return IntPtr.Zero;
         }
 
-        for (var index = 1; index < stroke.Points.Count; index++)
+        for (var index = 1; index < ordered.Count; index++)
         {
-            var point = matrix.Transform(stroke.Points[index].X, stroke.Points[index].Y);
+            var point = matrix.Transform(ordered[index].X, ordered[index].Y);
             PdfiumNative.FPDFPath_LineTo(path, (float)point.X, (float)point.Y);
         }
 
-        var width = InkGeometry.WidthAt(stroke.Thickness, stroke.Points[0].Pressure);
-        PdfiumNative.FPDFPageObj_SetStrokeColor(path, r, g, b, 255);
-        // The display->PDF matrix is a rotation plus a flip, so widths carry over unscaled.
-        PdfiumNative.FPDFPageObj_SetStrokeWidth(path, (float)Math.Max(0.1, width));
-        PdfiumNative.FPDFPageObj_SetLineCap(path, 1);
-        PdfiumNative.FPDFPageObj_SetLineJoin(path, 1);
-        PdfiumNative.FPDFPath_SetDrawMode(path, 0, 1);
-        PdfiumNative.FPDFPage_InsertObject(page, path);
+        return path;
     }
 
-    /// <summary>Writes a closed, filled polygon in display coordinates.</summary>
-    private static void WriteFilledPolygon(
-        IntPtr page,
+    /// <summary>Builds a closed, filled polygon in display coordinates.</summary>
+    private static IntPtr BuildFilledPolygon(
         IEnumerable<(double X, double Y)> vertices,
         (uint R, uint G, uint B) color,
         Matrix2D matrix)
     {
-        var points = vertices.ToList();
-        if (points.Count < 3)
-        {
-            return;
-        }
-
-        var start = matrix.Transform(points[0].X, points[0].Y);
-        var path = PdfiumNative.FPDFPageObj_CreateNewPath((float)start.X, (float)start.Y);
+        var path = BuildPolyline(vertices, matrix);
         if (path == IntPtr.Zero)
         {
-            return;
-        }
-
-        for (var index = 1; index < points.Count; index++)
-        {
-            var point = matrix.Transform(points[index].X, points[index].Y);
-            PdfiumNative.FPDFPath_LineTo(path, (float)point.X, (float)point.Y);
+            return IntPtr.Zero;
         }
 
         PdfiumNative.FPDFPath_Close(path);
         PdfiumNative.FPDFPageObj_SetFillColor(path, color.R, color.G, color.B, 255);
         PdfiumNative.FPDFPath_SetDrawMode(path, FillModeWinding, 0);
-        PdfiumNative.FPDFPage_InsertObject(page, path);
+        return path;
     }
 
     // ═══════════ Shapes ═══════════
@@ -216,28 +352,27 @@ internal static class PdfOverlayWriter
     private static void WriteShape(IntPtr page, ShapeOverlay shape, Matrix2D matrix)
     {
         var stroke = ParseColor(shape.ColorHex);
-        var fill = shape.FillColorHex is null ? ((uint, uint, uint)?)null : ParseColor(shape.FillColorHex);
+        var fill = shape.FillColorHex is null ? ((uint R, uint G, uint B)?)null : ParseColor(shape.FillColorHex);
+        var objects = new List<IntPtr>();
+        var extent = new List<(double X, double Y)>();
 
         switch (shape.Kind)
         {
             case ShapeKind.Rectangle:
             {
-                var corners = ShapeGeometry.RectangleCorners(shape);
-                var start = matrix.Transform(corners[0].X, corners[0].Y);
-                var path = PdfiumNative.FPDFPageObj_CreateNewPath((float)start.X, (float)start.Y);
+                var path = BuildPolyline(
+                    ShapeGeometry.RectangleCorners(shape).Select(corner => (corner.X, corner.Y)),
+                    matrix);
+
                 if (path == IntPtr.Zero)
                 {
                     return;
                 }
 
-                for (var index = 1; index < corners.Count; index++)
-                {
-                    var point = matrix.Transform(corners[index].X, corners[index].Y);
-                    PdfiumNative.FPDFPath_LineTo(path, (float)point.X, (float)point.Y);
-                }
-
                 PdfiumNative.FPDFPath_Close(path);
-                FinishShapePath(page, path, shape, stroke, fill);
+                StyleShapePath(path, shape, stroke, fill);
+                objects.Add(path);
+                extent.AddRange(ShapeGeometry.RectangleCorners(shape).Select(corner => (corner.X, corner.Y)));
                 break;
             }
 
@@ -264,31 +399,75 @@ internal static class PdfOverlayWriter
                 }
 
                 PdfiumNative.FPDFPath_Close(path);
-                FinishShapePath(page, path, shape, stroke, fill);
+                StyleShapePath(path, shape, stroke, fill);
+                objects.Add(path);
+
+                // The control polygon of a cubic always contains the curve it describes.
+                extent.Add((origin.X, origin.Y));
+                foreach (var segment in segments)
+                {
+                    extent.Add((segment.Control1.X, segment.Control1.Y));
+                    extent.Add((segment.Control2.X, segment.Control2.Y));
+                    extent.Add((segment.End.X, segment.End.Y));
+                }
+
                 break;
             }
 
             case ShapeKind.Line:
-                WriteSegment(page, shape, shape.Start.X, shape.Start.Y, shape.End.X, shape.End.Y, stroke, matrix);
+            {
+                var path = BuildSegment(shape, shape.Start.X, shape.Start.Y, shape.End.X, shape.End.Y, stroke, matrix);
+                if (path == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                objects.Add(path);
+                extent.Add((shape.Start.X, shape.Start.Y));
+                extent.Add((shape.End.X, shape.End.Y));
                 break;
+            }
 
             default:
             {
                 var shaftEnd = ShapeGeometry.ArrowShaftEnd(shape);
-                WriteSegment(page, shape, shape.Start.X, shape.Start.Y, shaftEnd.X, shaftEnd.Y, stroke, matrix);
+                var shaft = BuildSegment(shape, shape.Start.X, shape.Start.Y, shaftEnd.X, shaftEnd.Y, stroke, matrix);
+                if (shaft == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                objects.Add(shaft);
+                extent.Add((shape.Start.X, shape.Start.Y));
+                extent.Add((shape.End.X, shape.End.Y));
 
                 if (ShapeGeometry.ArrowHead(shape) is { } head)
                 {
-                    WriteFilledPolygon(page, head.Select(v => (v.X, v.Y)), stroke, matrix);
+                    var headPath = BuildFilledPolygon(head.Select(vertex => (vertex.X, vertex.Y)), stroke, matrix);
+                    if (headPath != IntPtr.Zero)
+                    {
+                        objects.Add(headPath);
+                    }
+
+                    // The barbs reach well outside the shaft, especially on a straight arrow.
+                    extent.AddRange(head.Select(vertex => (vertex.X, vertex.Y)));
                 }
 
                 break;
             }
         }
+
+        EmitAnnotation(
+            page,
+            PdfiumNative.AnnotStamp,
+            extent,
+            shape.Thickness,
+            matrix,
+            new AnnotationPayload { Shape = shape },
+            objects);
     }
 
-    private static void WriteSegment(
-        IntPtr page,
+    private static IntPtr BuildSegment(
         ShapeOverlay shape,
         double x1,
         double y1,
@@ -297,26 +476,21 @@ internal static class PdfOverlayWriter
         (uint R, uint G, uint B) color,
         Matrix2D matrix)
     {
-        var start = matrix.Transform(x1, y1);
-        var path = PdfiumNative.FPDFPageObj_CreateNewPath((float)start.X, (float)start.Y);
+        var path = BuildPolyline([(x1, y1), (x2, y2)], matrix);
         if (path == IntPtr.Zero)
         {
-            return;
+            return IntPtr.Zero;
         }
-
-        var end = matrix.Transform(x2, y2);
-        PdfiumNative.FPDFPath_LineTo(path, (float)end.X, (float)end.Y);
 
         PdfiumNative.FPDFPageObj_SetStrokeColor(path, color.R, color.G, color.B, 255);
         PdfiumNative.FPDFPageObj_SetStrokeWidth(path, (float)Math.Max(0.1, shape.Thickness));
         PdfiumNative.FPDFPageObj_SetLineCap(path, 1);
         PdfiumNative.FPDFPageObj_SetLineJoin(path, 1);
         PdfiumNative.FPDFPath_SetDrawMode(path, 0, 1);
-        PdfiumNative.FPDFPage_InsertObject(page, path);
+        return path;
     }
 
-    private static void FinishShapePath(
-        IntPtr page,
+    private static void StyleShapePath(
         IntPtr path,
         ShapeOverlay shape,
         (uint R, uint G, uint B) stroke,
@@ -331,7 +505,6 @@ internal static class PdfOverlayWriter
         PdfiumNative.FPDFPageObj_SetStrokeWidth(path, (float)Math.Max(0.1, shape.Thickness));
         PdfiumNative.FPDFPageObj_SetLineJoin(path, 1);
         PdfiumNative.FPDFPath_SetDrawMode(path, fill is null ? 0 : FillModeWinding, 1);
-        PdfiumNative.FPDFPage_InsertObject(page, path);
     }
 
     // ═══════════ Signature ═══════════
@@ -392,7 +565,18 @@ internal static class PdfOverlayWriter
 
         var final = placement.Concat(matrix).ToFsMatrix();
         PdfiumNative.FPDFPageObj_SetMatrix(imageObject, ref final);
-        PdfiumNative.FPDFPage_InsertObject(page, imageObject);
+
+        EmitAnnotation(
+            page,
+            PdfiumNative.AnnotStamp,
+            [
+                (signature.X, signature.Y),
+                (signature.X + signature.Width, signature.Y + signature.Height)
+            ],
+            strokeWidth: 0,
+            matrix,
+            new AnnotationPayload { Signature = signature },
+            [imageObject]);
     }
 
     private static void CopyRows(byte[] pixels, IntPtr bitmap, int width, int height)
@@ -427,6 +611,7 @@ internal static class PdfOverlayWriter
 
         var originX = text.X + TextPadding;
         var firstBaseline = text.Y + TextPadding + (text.FontSize * BaselineFactor);
+        var objects = new List<IntPtr>();
 
         for (var index = 0; index < lines.Count; index++)
         {
@@ -438,7 +623,7 @@ internal static class PdfOverlayWriter
             var textObject = fonts.CreateTextObject(text.IsBold, text.IsItalic, needsCjk, fontSize);
             if (textObject == IntPtr.Zero)
             {
-                return;
+                break;
             }
 
             if (PdfiumNative.FPDFText_SetText(textObject, ToWideString(lines[index])) == 0)
@@ -459,8 +644,29 @@ internal static class PdfOverlayWriter
                 baseline.X,
                 baseline.Y);
 
-            PdfiumNative.FPDFPage_InsertObject(page, textObject);
+            objects.Add(textObject);
         }
+
+        // Wrapped text can run past the box it was typed into, and a single unbreakable word can
+        // run past it sideways, so size the annotation to the lines actually laid out.
+        var contentHeight = Math.Max(text.Height, (lines.Count * lineHeight) + (TextPadding * 2));
+        var widest = lines.Count == 0
+            ? available
+            : lines.Max(line => line.Length == 0
+                ? 0
+                : MeasureWidth(fonts, text.IsBold, text.IsItalic, needsCjk, fontSize, line));
+
+        EmitAnnotation(
+            page,
+            PdfiumNative.AnnotStamp,
+            [
+                (text.X, text.Y),
+                (text.X + Math.Max(text.Width, widest + (TextPadding * 2)), text.Y + contentHeight)
+            ],
+            strokeWidth: 0,
+            matrix,
+            new AnnotationPayload { Text = text },
+            objects);
     }
 
     private static List<string> WrapParagraphs(
@@ -556,7 +762,7 @@ internal static class PdfOverlayWriter
 
     private static double EstimateWidth(float fontSize, string value) => value.Length * fontSize * 0.5;
 
-    private static ushort[] ToWideString(string value)
+    internal static ushort[] ToWideString(string value)
     {
         var buffer = new ushort[value.Length + 1];
         for (var index = 0; index < value.Length; index++)
@@ -579,7 +785,7 @@ internal static class PdfOverlayWriter
 
     // ═══════════ Geometry ═══════════
 
-    private static Matrix2D BuildDisplayToPdfMatrix(IntPtr page)
+    internal static Matrix2D BuildDisplayToPdfMatrix(IntPtr page)
     {
         if (PdfiumNative.FPDFPage_GetCropBox(page, out var left, out var bottom, out var right, out var top) == 0 &&
             PdfiumNative.FPDFPage_GetMediaBox(page, out left, out bottom, out right, out top) == 0)
@@ -631,7 +837,7 @@ internal static class PdfOverlayWriter
     }
 
     /// <summary>An affine transform in PDF component order: x' = ax + cy + e, y' = bx + dy + f.</summary>
-    private readonly record struct Matrix2D(
+    internal readonly record struct Matrix2D(
         double A,
         double B,
         double C,

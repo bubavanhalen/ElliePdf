@@ -302,6 +302,90 @@ internal static partial class PdfiumNative
 
     [LibraryImport("pdfium.dll")]
     public static partial int FPDFDest_GetDestPageIndex(IntPtr document, IntPtr dest);
+
+    // ═══════════ Annotations ═══════════
+
+    public const int AnnotFreeText = 3;
+    public const int AnnotSquare = 5;
+    public const int AnnotCircle = 6;
+    public const int AnnotStamp = 13;
+    public const int AnnotInk = 15;
+
+    /// <summary>Annotation flag: print the annotation as well as displaying it.</summary>
+    public const int AnnotFlagPrint = 4;
+
+    [LibraryImport("pdfium.dll")]
+    public static partial IntPtr FPDFPage_CreateAnnot(IntPtr page, int subtype);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial int FPDFPage_GetAnnotCount(IntPtr page);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial IntPtr FPDFPage_GetAnnot(IntPtr page, int index);
+
+    [LibraryImport("pdfium.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool FPDFPage_RemoveAnnot(IntPtr page, int index);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial void FPDFPage_CloseAnnot(IntPtr annot);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial int FPDFAnnot_GetSubtype(IntPtr annot);
+
+    [LibraryImport("pdfium.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool FPDFAnnot_SetRect(IntPtr annot, ref FsRectF rect);
+
+    [LibraryImport("pdfium.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool FPDFAnnot_SetFlags(IntPtr annot, int flags);
+
+    /// <param name="type">0 = stroke colour, 1 = interior colour.</param>
+    [LibraryImport("pdfium.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool FPDFAnnot_SetColor(IntPtr annot, int type, uint R, uint G, uint B, uint A);
+
+    [LibraryImport("pdfium.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool FPDFAnnot_SetBorder(
+        IntPtr annot,
+        float horizontal_radius,
+        float vertical_radius,
+        float border_width);
+
+    [LibraryImport("pdfium.dll", StringMarshalling = StringMarshalling.Utf8)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool FPDFAnnot_SetStringValue(
+        IntPtr annot,
+        string key,
+        [MarshalAs(UnmanagedType.LPArray)] ushort[] value);
+
+    [LibraryImport("pdfium.dll", StringMarshalling = StringMarshalling.Utf8)]
+    public static partial uint FPDFAnnot_GetStringValue(
+        IntPtr annot,
+        string key,
+        [MarshalAs(UnmanagedType.LPArray)] byte[]? buffer,
+        uint buflen);
+
+    [LibraryImport("pdfium.dll", StringMarshalling = StringMarshalling.Utf8)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool FPDFAnnot_HasKey(IntPtr annot, string key);
+
+    /// <summary>Appends a page object to the annotation's appearance stream.</summary>
+    [LibraryImport("pdfium.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool FPDFAnnot_AppendObject(IntPtr annot, IntPtr obj);
+}
+
+/// <summary>Mirrors PDFium's <c>FS_RECTF</c>.</summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct FsRectF
+{
+    public float left;
+    public float top;
+    public float right;
+    public float bottom;
 }
 
 [StructLayout(LayoutKind.Sequential)]

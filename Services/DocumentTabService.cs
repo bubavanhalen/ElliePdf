@@ -7,6 +7,7 @@ public sealed class DocumentTabService : IDocumentTabService, IAsyncDisposable
     private readonly IDocumentOpenService _documentOpenService;
     private readonly IRecentFilesService _recentFilesService;
     private readonly IAnnotationStore _annotationStore;
+    private readonly IPdfService _pdfService;
     private readonly List<DocumentTab> _tabs = [];
     private Guid? _activeTabId;
 
@@ -14,11 +15,13 @@ public sealed class DocumentTabService : IDocumentTabService, IAsyncDisposable
         IDocumentOpenService documentOpenService,
         IRecentFilesService recentFilesService,
         IAnnotationStore annotationStore,
-        IDocumentSaveService saveService)
+        IDocumentSaveService saveService,
+        IPdfService pdfService)
     {
         _documentOpenService = documentOpenService;
         _recentFilesService = recentFilesService;
         _annotationStore = annotationStore;
+        _pdfService = pdfService;
         saveService.SessionReplaced += (_, args) => ReplaceSession(args.OldSession, args.NewSession);
     }
 
@@ -96,7 +99,7 @@ public sealed class DocumentTabService : IDocumentTabService, IAsyncDisposable
     {
         var session = await _documentOpenService.OpenAsync(path, cancellationToken);
         var tab = new DocumentTab(session);
-        await _annotationStore.LoadCompanionAsync(tab.Id, path, cancellationToken);
+        await LoadAnnotationsAsync(tab, cancellationToken);
         await _recentFilesService.RecordOpenedAsync(path, cancellationToken);
         _tabs.Add(tab);
 
@@ -108,6 +111,28 @@ public sealed class DocumentTabService : IDocumentTabService, IAsyncDisposable
         TabsChanged?.Invoke(this, EventArgs.Empty);
         StateChanged?.Invoke(this, EventArgs.Empty);
         return tab;
+    }
+
+    /// <summary>
+    /// Pulls ElliePdf's annotations out of the document so they can be edited, and imports any
+    /// companion file left behind by an older build before deleting it.
+    /// </summary>
+    private async Task LoadAnnotationsAsync(DocumentTab tab, CancellationToken cancellationToken)
+    {
+        var overlays = await _pdfService.ExtractOverlaysAsync(tab.Session, cancellationToken);
+        var migrated = LegacyCompanionMigration.TryImport(tab.FilePath, overlays);
+
+        _annotationStore.SetOverlayDocument(tab.Id, overlays);
+
+        if (migrated)
+        {
+            // Imported annotations are not in the PDF yet, so the tab genuinely has unsaved work.
+            _annotationStore.SetPageOverlay(
+                tab.Id,
+                overlays.Pages.Keys.First(),
+                overlays.Pages.Values.First());
+            tab.IsDirty = true;
+        }
     }
 
     public async Task<DocumentTab> OpenOrActivateTabAsync(string path, CancellationToken cancellationToken = default)
@@ -205,7 +230,7 @@ public sealed class DocumentTabService : IDocumentTabService, IAsyncDisposable
         }
 
         var tab = new DocumentTab(session);
-        await _annotationStore.LoadCompanionAsync(tab.Id, tab.FilePath, cancellationToken);
+        await LoadAnnotationsAsync(tab, cancellationToken);
         _tabs.Add(tab);
         _activeTabId = tab.Id;
         TabsChanged?.Invoke(this, EventArgs.Empty);

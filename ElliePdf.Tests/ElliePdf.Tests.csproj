@@ -29,6 +29,12 @@
     <Compile Include="..\Services\InkGeometry.cs" Link="Linked\InkGeometry.cs" />
     <Compile Include="..\Services\ShapeGeometry.cs" Link="Linked\ShapeGeometry.cs" />
     <Compile Include="..\Services\OverlayHistory.cs" Link="Linked\OverlayHistory.cs" />
+    <Compile Include="..\Services\AnnotationPayload.cs" Link="Linked\AnnotationPayload.cs" />
+    <Compile Include="..\Services\PdfAnnotationReader.cs" Link="Linked\PdfAnnotationReader.cs" />
+    <Compile Include="..\Services\LegacyCompanionMigration.cs" Link="Linked\LegacyCompanionMigration.cs" />
+    <Compile Include="..\Services\AnnotationStore.cs" Link="Linked\AnnotationStore.cs" />
+    <Compile Include="..\Services\ElliePdfJsonContext.cs" Link="Linked\ElliePdfJsonContext.cs" />
+    <Compile Include="..\Services\UserSettings.cs" Link="Linked\UserSettings.cs" />
     <Compile Include="..\Helpers\SignatureRenderer.cs" Link="Linked\SignatureRenderer.cs" />
     <Compile Include="..\Models\PageOverlayDocument.cs" Link="Linked\PageOverlayDocument.cs" />
   </ItemGroup>
@@ -44,5 +50,9 @@
     <ProjectReference Include="..\ElliePdf.Core\ElliePdf.Core.csproj" />
   </ItemGroup>
 </Project>
+
+
+
+
 
 

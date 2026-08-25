@@ -13,6 +13,7 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
     private readonly IDocumentTabService _tabService;
     private readonly IUserSettingsService _settingsService;
     private readonly IDocumentSaveService _saveService;
+    private readonly IAnnotationStore _annotationStore;
     private readonly List<PdfDocumentSession> _sourceDocuments = [];
     private ObservableCollection<DocumentItemViewModel> _pages = [];
     private bool _isBusy;
@@ -26,14 +27,26 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
         IDocumentOpenService documentOpenService,
         IDocumentTabService tabService,
         IUserSettingsService settingsService,
-        IDocumentSaveService saveService)
+        IDocumentSaveService saveService,
+        IAnnotationStore annotationStore)
     {
         _pdfService = pdfService;
         _documentOpenService = documentOpenService;
         _tabService = tabService;
         _settingsService = settingsService;
         _saveService = saveService;
+        _annotationStore = annotationStore;
         _saveService.SessionReplaced += (_, args) => RemapSession(args.OldSession, args.NewSession);
+    }
+
+    /// <summary>
+    /// Annotations are held out of the document while a reader tab has it open, so a save started
+    /// from Organize has to put that tab's annotations back or they would be dropped.
+    /// </summary>
+    private Models.PageOverlayDocument? OverlaysFor(PdfDocumentSession session)
+    {
+        var tab = _tabService.Tabs.FirstOrDefault(item => ReferenceEquals(item.Session, session));
+        return tab is null ? null : _annotationStore.GetOverlayDocument(tab.Id);
     }
 
     public ObservableCollection<DocumentItemViewModel> Pages
@@ -164,6 +177,12 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
         {
             await _pdfService.DeletePageAsync(item.Document, item.PageIndex, cancellationToken);
 
+            // Keep any reader tab's annotations aligned with the pages that remain.
+            foreach (var tab in _tabService.Tabs.Where(tab => ReferenceEquals(tab.Session, item.Document)))
+            {
+                _annotationStore.RemovePage(tab.Id, item.PageIndex);
+            }
+
             var itemsInDocument = Pages
                 .Where(page => ReferenceEquals(page.Document, item.Document))
                 .OrderBy(page => page.PageIndex)
@@ -225,7 +244,11 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var sourcePath = document.SourcePath;
-                var result = await _saveService.SaveAsync(document, null, document.SourcePath, cancellationToken);
+                var result = await _saveService.SaveAsync(
+                    document,
+                    OverlaysFor(document),
+                    document.SourcePath,
+                    cancellationToken);
 
                 if (result.Session is null)
                 {
@@ -311,6 +334,10 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
 
         try
         {
+            // Sessions shared with a reader tab have had their annotations detached for editing, so
+            // put them back before exporting or the merged file would lose them.
+            await RestoreOverlaysForExportAsync(cancellationToken);
+
             var orderedPages = Pages
                 .Select(page => (page.Document, page.PageIndex))
                 .ToList();
@@ -340,7 +367,34 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
         }
         finally
         {
+            // Detach them again so the reader keeps editing them rather than seeing them twice.
+            await DetachOverlaysAfterExportAsync(cancellationToken);
             IsBusy = false;
+        }
+    }
+
+    /// <summary>Temporarily writes each tab's annotations back into its shared session.</summary>
+    private async Task RestoreOverlaysForExportAsync(CancellationToken cancellationToken)
+    {
+        foreach (var document in _sourceDocuments.ToArray())
+        {
+            if (OverlaysFor(document) is { } overlays)
+            {
+                await _pdfService.ApplyOverlaysAsync(document, overlays, cancellationToken);
+            }
+        }
+    }
+
+    private async Task DetachOverlaysAfterExportAsync(CancellationToken cancellationToken)
+    {
+        foreach (var document in _sourceDocuments.ToArray())
+        {
+            if (document.IsClosed || OverlaysFor(document) is null)
+            {
+                continue;
+            }
+
+            await _pdfService.ExtractOverlaysAsync(document, cancellationToken);
         }
     }
 

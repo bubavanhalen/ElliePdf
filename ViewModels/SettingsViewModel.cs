@@ -41,9 +41,6 @@ public sealed partial class SettingsViewModel : ObservableObject
     public partial bool ConfirmOrganizeSave { get; set; }
 
     [ObservableProperty]
-    public partial bool AutoSaveCompanion { get; set; }
-
-    [ObservableProperty]
     public partial int RecentFilesMaxCount { get; set; }
 
     public List<string> ThemeOptions { get; } = ["Use system setting", "Light", "Dark"];
@@ -68,8 +65,6 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     partial void OnConfirmOrganizeSaveChanged(bool value) => ApplyAndSave();
 
-    partial void OnAutoSaveCompanionChanged(bool value) => ApplyAndSave();
-
     partial void OnRecentFilesMaxCountChanged(int value) => ApplyAndSave();
 
     private void ApplyAndSave()
@@ -84,7 +79,6 @@ public sealed partial class SettingsViewModel : ObservableObject
         settings.DefaultZoomMode = ZoomModes[Math.Clamp(DefaultZoomModeIndex, 0, ZoomModes.Length - 1)];
         settings.ConfirmOverwriteSave = ConfirmOverwriteSave;
         settings.ConfirmOrganizeSave = ConfirmOrganizeSave;
-        settings.AutoSaveCompanion = AutoSaveCompanion;
         settings.RecentFilesMaxCount = Math.Clamp(RecentFilesMaxCount, 1, 50);
 
         _ = _settingsService.SaveAsync();
@@ -114,7 +108,6 @@ public sealed partial class SettingsViewModel : ObservableObject
             DefaultZoomModeIndex = Math.Max(0, Array.IndexOf(ZoomModes, settings.DefaultZoomMode));
             ConfirmOverwriteSave = settings.ConfirmOverwriteSave;
             ConfirmOrganizeSave = settings.ConfirmOrganizeSave;
-            AutoSaveCompanion = settings.AutoSaveCompanion;
             RecentFilesMaxCount = settings.RecentFilesMaxCount;
         }
         finally

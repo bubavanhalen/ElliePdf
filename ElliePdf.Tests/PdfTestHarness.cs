@@ -141,7 +141,11 @@ internal static class PdfTestHarness
     }
 
     /// <summary>Renders a page and returns BGRA pixels alongside the rendered dimensions.</summary>
-    public static (byte[] Pixels, int Width, int Height) Render(IntPtr document, int pageIndex, double scale = 1.0)
+    public static (byte[] Pixels, int Width, int Height) Render(
+        IntPtr document,
+        int pageIndex,
+        double scale = 1.0,
+        bool renderAnnotations = false)
     {
         var page = FPDF_LoadPage(document, pageIndex);
         Assert.NotEqual(IntPtr.Zero, page);
@@ -156,7 +160,7 @@ internal static class PdfTestHarness
             try
             {
                 FPDFBitmap_FillRect(bitmap, 0, 0, width, height, 0xFFFFFFFF);
-                FPDF_RenderPageBitmap(bitmap, page, 0, 0, width, height, 0, 0);
+                FPDF_RenderPageBitmap(bitmap, page, 0, 0, width, height, 0, renderAnnotations ? 1 : 0);
 
                 var stride = FPDFBitmap_GetStride(bitmap);
                 var buffer = FPDFBitmap_GetBuffer(bitmap);
@@ -173,6 +177,104 @@ internal static class PdfTestHarness
             {
                 FPDFBitmap_Destroy(bitmap);
             }
+        }
+        finally
+        {
+            FPDF_ClosePage(page);
+        }
+    }
+
+    /// <summary>
+    /// Bounding box of drawn (non-white) pixels within a region, as (left, top, right, bottom).
+    /// Returns <c>null</c> when the region is blank.
+    /// </summary>
+    public static (int Left, int Top, int Right, int Bottom)? InkBoundsInRegion(
+        (byte[] Pixels, int Width, int Height) render,
+        int regionLeft,
+        int regionTop,
+        int regionWidth,
+        int regionHeight,
+        int threshold = 160)
+    {
+        int left = int.MaxValue, top = int.MaxValue, right = int.MinValue, bottom = int.MinValue;
+
+        for (var y = Math.Max(0, regionTop); y < Math.Min(render.Height, regionTop + regionHeight); y++)
+        {
+            for (var x = Math.Max(0, regionLeft); x < Math.Min(render.Width, regionLeft + regionWidth); x++)
+            {
+                var pixel = PixelAt(render, x, y);
+                if (pixel.R >= threshold && pixel.G >= threshold && pixel.B >= threshold)
+                {
+                    continue;
+                }
+
+                left = Math.Min(left, x);
+                top = Math.Min(top, y);
+                right = Math.Max(right, x);
+                bottom = Math.Max(bottom, y);
+            }
+        }
+
+        return left == int.MaxValue ? null : (left, top, right, bottom);
+    }
+
+    /// <summary>Concatenated <c>/Contents</c> of every annotation on a page.</summary>
+    public static string AnnotationContents(IntPtr document, int pageIndex)
+    {
+        var page = FPDF_LoadPage(document, pageIndex);
+        Assert.NotEqual(IntPtr.Zero, page);
+
+        try
+        {
+            var builder = new StringBuilder();
+
+            for (var index = 0; index < FPDFPage_GetAnnotCount(page); index++)
+            {
+                var annotation = FPDFPage_GetAnnot(page, index);
+                if (annotation == IntPtr.Zero)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var length = FPDFAnnot_GetStringValue(annotation, "Contents", null, 0);
+                    if (length < 4)
+                    {
+                        continue;
+                    }
+
+                    var buffer = new byte[length];
+                    var written = FPDFAnnot_GetStringValue(annotation, "Contents", buffer, length);
+                    if (written > 0)
+                    {
+                        builder.Append(Encoding.Unicode.GetString(buffer, 0, (int)written).TrimEnd('\0'));
+                        builder.Append('\n');
+                    }
+                }
+                finally
+                {
+                    FPDFPage_CloseAnnot(annotation);
+                }
+            }
+
+            return builder.ToString();
+        }
+        finally
+        {
+            FPDF_ClosePage(page);
+        }
+    }
+
+    /// <summary>Number of annotations on a page.</summary>
+    public static int AnnotationCount(IntPtr document, int pageIndex)
+    {
+        var page = FPDF_LoadPage(document, pageIndex);
+        Assert.NotEqual(IntPtr.Zero, page);
+
+        try
+        {
+            return FPDFPage_GetAnnotCount(page);
         }
         finally
         {
@@ -335,4 +437,8 @@ internal static class PdfTestHarness
     [DllImport(Dll)] private static extern int FPDFBitmap_GetStride(IntPtr bitmap);
     [DllImport(Dll)] private static extern void FPDFBitmap_Destroy(IntPtr bitmap);
     [DllImport(Dll)] private static extern void FPDF_RenderPageBitmap(IntPtr bitmap, IntPtr page, int x, int y, int w, int h, int rotate, int flags);
+    [DllImport(Dll)] private static extern int FPDFPage_GetAnnotCount(IntPtr page);
+    [DllImport(Dll)] private static extern IntPtr FPDFPage_GetAnnot(IntPtr page, int index);
+    [DllImport(Dll)] private static extern void FPDFPage_CloseAnnot(IntPtr annot);
+    [DllImport(Dll, CharSet = CharSet.Ansi)] private static extern uint FPDFAnnot_GetStringValue(IntPtr annot, string key, byte[]? buffer, uint buflen);
 }
