@@ -12,7 +12,7 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
     private readonly IDocumentOpenService _documentOpenService;
     private readonly IDocumentTabService _tabService;
     private readonly IUserSettingsService _settingsService;
-    private readonly IInPlaceSaveService _inPlaceSaveService;
+    private readonly IDocumentSaveService _saveService;
     private readonly List<PdfDocumentSession> _sourceDocuments = [];
     private ObservableCollection<DocumentItemViewModel> _pages = [];
     private bool _isBusy;
@@ -26,14 +26,14 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
         IDocumentOpenService documentOpenService,
         IDocumentTabService tabService,
         IUserSettingsService settingsService,
-        IInPlaceSaveService inPlaceSaveService)
+        IDocumentSaveService saveService)
     {
         _pdfService = pdfService;
         _documentOpenService = documentOpenService;
         _tabService = tabService;
         _settingsService = settingsService;
-        _inPlaceSaveService = inPlaceSaveService;
-        _inPlaceSaveService.SessionReplaced += (_, args) => RemapSession(args.OldSession, args.NewSession);
+        _saveService = saveService;
+        _saveService.SessionReplaced += (_, args) => RemapSession(args.OldSession, args.NewSession);
     }
 
     public ObservableCollection<DocumentItemViewModel> Pages
@@ -225,9 +225,15 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var sourcePath = document.SourcePath;
-                var result = await _inPlaceSaveService.SaveInPlaceAsync(document, null, cancellationToken);
+                var result = await _saveService.SaveAsync(document, null, document.SourcePath, cancellationToken);
 
-                if (result.Saved)
+                if (result.Session is null)
+                {
+                    // The handle is gone, so the pages backed by it can no longer be rendered.
+                    DropDocument(document);
+                }
+
+                if (result.Saved && result.Session is not null)
                 {
                     saved++;
                 }
@@ -257,6 +263,17 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
         finally
         {
             IsBusy = false;
+        }
+    }
+
+    /// <summary>Removes a document whose handle is no longer usable, along with its pages.</summary>
+    private void DropDocument(PdfDocumentSession document)
+    {
+        _sourceDocuments.RemoveAll(item => ReferenceEquals(item, document));
+
+        foreach (var page in Pages.Where(page => ReferenceEquals(page.Document, document)).ToArray())
+        {
+            Pages.Remove(page);
         }
     }
 

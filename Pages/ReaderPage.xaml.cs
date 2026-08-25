@@ -432,7 +432,13 @@ public sealed partial class ReaderPage : Page
     private void SignatureDialog_PrimaryButtonClick(ContentDialog sender, ContentDialogButtonClickEventArgs args)
     {
         // Rasterize while the strokes are still in hand; the canvas leaves the tree as the dialog closes.
-        if (!Helpers.SignatureRenderer.TryRender(_signatureStrokes, out var pngBytes, out var aspectRatio))
+        var strokes = _signatureStrokes
+            .Select(stroke => (IReadOnlyList<Helpers.StrokePoint>)stroke
+                .Select(point => new Helpers.StrokePoint(point.X, point.Y))
+                .ToList())
+            .ToList();
+
+        if (!Helpers.SignatureRenderer.TryRender(strokes, out var pngBytes, out var aspectRatio))
         {
             args.Cancel = true;
             return;

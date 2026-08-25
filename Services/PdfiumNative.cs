@@ -107,6 +107,97 @@ internal static partial class PdfiumNative
     public static partial IntPtr FPDFPageObj_NewImageObj(IntPtr document);
 
     [LibraryImport("pdfium.dll")]
+    public static partial IntPtr FPDFPageObj_CreateNewPath(float x, float y);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial int FPDFPath_MoveTo(IntPtr path, float x, float y);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial int FPDFPath_LineTo(IntPtr path, float x, float y);
+
+    /// <param name="fillmode">0 = none, 1 = alternate, 2 = winding.</param>
+    [LibraryImport("pdfium.dll")]
+    public static partial int FPDFPath_SetDrawMode(IntPtr path, int fillmode, int stroke);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial int FPDFPageObj_SetStrokeColor(IntPtr page_object, uint R, uint G, uint B, uint A);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial int FPDFPageObj_SetFillColor(IntPtr page_object, uint R, uint G, uint B, uint A);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial int FPDFPageObj_SetStrokeWidth(IntPtr page_object, float width);
+
+    /// <param name="line_cap">0 = butt, 1 = round, 2 = projecting square.</param>
+    [LibraryImport("pdfium.dll")]
+    public static partial int FPDFPageObj_SetLineCap(IntPtr page_object, int line_cap);
+
+    /// <param name="line_join">0 = miter, 1 = round, 2 = bevel.</param>
+    [LibraryImport("pdfium.dll")]
+    public static partial int FPDFPageObj_SetLineJoin(IntPtr page_object, int line_join);
+
+    [LibraryImport("pdfium.dll", StringMarshalling = StringMarshalling.Utf8)]
+    public static partial IntPtr FPDFPageObj_NewTextObj(IntPtr document, string font, float font_size);
+
+    /// <param name="font_type">1 = Type1, 2 = TrueType.</param>
+    /// <param name="cid">Non-zero embeds as a CID font with Identity-H, which supports full Unicode.</param>
+    [LibraryImport("pdfium.dll")]
+    public static partial IntPtr FPDFText_LoadFont(
+        IntPtr document,
+        [MarshalAs(UnmanagedType.LPArray)] byte[] data,
+        uint size,
+        int font_type,
+        int cid);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial IntPtr FPDFPageObj_CreateTextObj(IntPtr document, IntPtr font, float font_size);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial void FPDFFont_Close(IntPtr font);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial int FPDFText_SetText(
+        IntPtr text_object,
+        [MarshalAs(UnmanagedType.LPArray)] ushort[] text);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial void FPDFPageObj_Transform(
+        IntPtr page_object,
+        double a,
+        double b,
+        double c,
+        double d,
+        double e,
+        double f);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial int FPDFPageObj_GetBounds(
+        IntPtr page_object,
+        out float left,
+        out float bottom,
+        out float right,
+        out float top);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial void FPDFPageObj_Destroy(IntPtr page_object);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial int FPDFPage_GetCropBox(
+        IntPtr page,
+        out float left,
+        out float bottom,
+        out float right,
+        out float top);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial int FPDFPage_GetMediaBox(
+        IntPtr page,
+        out float left,
+        out float bottom,
+        out float right,
+        out float top);
+
+    [LibraryImport("pdfium.dll")]
     public static unsafe partial int FPDFImageObj_SetBitmap(
         IntPtr* pages,
         int count,

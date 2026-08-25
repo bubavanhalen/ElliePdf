@@ -22,6 +22,12 @@ public sealed partial class PdfEditSurface : Canvas
     private const string TextTagKind = "text";
     private const string SignatureTagKind = "signature";
 
+    /// <summary>Metrically compatible with the PDF standard Helvetica used when embedding text.</summary>
+    private static readonly FontFamily OverlayFontFamily = new("Arial");
+
+    /// <summary>Kept in sync with <c>PdfOverlayWriter.TextPadding</c>, in page units.</summary>
+    private const double TextPadding = 2;
+
     private enum SelectionKind
     {
         None,
@@ -379,6 +385,7 @@ public sealed partial class PdfEditSurface : Canvas
         {
             Text = text.Text,
             PlaceholderText = "Type here",
+            FontFamily = OverlayFontFamily,
             FontSize = Math.Max(6, text.FontSize * DisplayScale),
             Width = Math.Max(24, text.Width * DisplayScale),
             Height = Math.Max(16, text.Height * DisplayScale),
@@ -387,7 +394,7 @@ public sealed partial class PdfEditSurface : Canvas
             FontStyle = text.IsItalic ? TextFontStyle.Italic : TextFontStyle.Normal,
             Background = new SolidColorBrush(Colors.Transparent),
             BorderThickness = new Thickness(0),
-            Padding = new Thickness(2),
+            Padding = new Thickness(TextPadding * DisplayScale),
             TextWrapping = TextWrapping.Wrap,
             AcceptsReturn = true,
             Tag = new OverlayTag(TextTagKind, text.Id)

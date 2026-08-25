@@ -14,12 +14,12 @@ public sealed class DocumentTabService : IDocumentTabService, IAsyncDisposable
         IDocumentOpenService documentOpenService,
         IRecentFilesService recentFilesService,
         IAnnotationStore annotationStore,
-        IInPlaceSaveService inPlaceSaveService)
+        IDocumentSaveService saveService)
     {
         _documentOpenService = documentOpenService;
         _recentFilesService = recentFilesService;
         _annotationStore = annotationStore;
-        inPlaceSaveService.SessionReplaced += (_, args) => ReplaceSession(args.OldSession, args.NewSession);
+        saveService.SessionReplaced += (_, args) => ReplaceSession(args.OldSession, args.NewSession);
     }
 
     public IReadOnlyList<DocumentTab> Tabs => _tabs;

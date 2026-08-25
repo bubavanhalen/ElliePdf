@@ -454,6 +454,15 @@ public sealed class PdfService : IPdfService, IDisposable
         return ExecutePdfiumCallAsync(() => SaveDocumentCore(document.Handle, outputPath), cancellationToken);
     }
 
+    /// <summary>
+    /// Writes <paramref name="overlays"/> into the open document as native page objects and saves it.
+    /// </summary>
+    /// <remarks>
+    /// The overlays are appended to the live in-memory document rather than copied into a fresh one,
+    /// so the outline, links, form fields, metadata and the searchable text layer all survive. That
+    /// mutation is not undoable, so callers must discard this session afterwards and reopen from disk
+    /// — <see cref="IInPlaceSaveService"/> does exactly that.
+    /// </remarks>
     public Task SaveDocumentWithOverlaysAsync(
         PdfDocumentSession document,
         PageOverlayDocument? overlays,
@@ -464,73 +473,19 @@ public sealed class PdfService : IPdfService, IDisposable
         ObjectDisposedException.ThrowIf(document.IsClosed, document);
         ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
 
-        var hasOverlays = overlays?.Pages.Values.Any(OverlayCompositor.HasContent) == true;
-        if (!hasOverlays)
+        var hasContent = overlays?.Pages.Values.Any(PdfOverlayWriter.HasContent) == true;
+        if (!hasContent)
         {
             return SaveDocumentAsync(document, outputPath, cancellationToken);
         }
 
         return ExecutePdfiumCallAsync(() =>
         {
-            var destination = PdfiumNative.FPDF_CreateNewDocument();
-            if (destination == IntPtr.Zero)
-            {
-                throw CreatePdfiumException("PDFium could not allocate a destination document for saving.");
-            }
-
-            try
-            {
-                PdfiumNative.FPDF_CopyViewerPreferences(destination, document.Handle);
-                const double renderScale = 2.0;
-
-                for (var pageIndex = 0; pageIndex < document.PageCount; pageIndex++)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    overlays!.Pages.TryGetValue(pageIndex, out var pageOverlay);
-
-                    if (!OverlayCompositor.HasContent(pageOverlay))
-                    {
-                        var indices = new[] { pageIndex };
-                        var imported = PdfiumNative.FPDF_ImportPagesByIndex(
-                            destination,
-                            document.Handle,
-                            indices,
-                            1,
-                            pageIndex);
-
-                        if (imported == 0)
-                        {
-                            throw CreatePdfiumException($"PDFium could not import page {pageIndex + 1}.");
-                        }
-                    }
-                    else
-                    {
-                        var rendered = RenderPageToPackedBgra(document.Handle, document.FormFill?.FormHandle ?? IntPtr.Zero, pageIndex, renderScale);
-                        var composited = OverlayCompositor.Composite(
-                            rendered.Pixels,
-                            rendered.Width,
-                            rendered.Height,
-                            pageOverlay!,
-                            rendered.PageWidthPoints,
-                            rendered.PageHeightPoints);
-
-                        CreateImagePage(
-                            destination,
-                            pageIndex,
-                            rendered.PageWidthPoints,
-                            rendered.PageHeightPoints,
-                            composited,
-                            rendered.Width,
-                            rendered.Height);
-                    }
-                }
-
-                SaveDocumentCore(destination, outputPath);
-            }
-            finally
-            {
-                PdfiumNative.FPDF_CloseDocument(destination);
-            }
+            // Deliberately not cancellable once started: a half-embedded document would leave some
+            // pages annotated while the overlays are still pending in the annotation store.
+            PdfOverlayWriter.WriteDocument(document.Handle, overlays!, document.PageCount);
+            _renderCache.InvalidateDocument(document);
+            SaveDocumentCore(document.Handle, outputPath);
         }, cancellationToken);
     }
 
@@ -546,6 +501,7 @@ public sealed class PdfService : IPdfService, IDisposable
             }
 
             _renderCache.InvalidateDocument(document);
+            document.ReleaseFormFill();
             PdfiumNative.FPDF_CloseDocument(document.Handle);
             document.MarkClosed();
         }, cancellationToken);
@@ -931,13 +887,6 @@ public sealed class PdfService : IPdfService, IDisposable
         }
     }
 
-    private sealed record PackedPageRender(
-        byte[] Pixels,
-        int Width,
-        int Height,
-        float PageWidthPoints,
-        float PageHeightPoints);
-
     private static void RenderPageBitmap(
         IntPtr formHandle,
         IntPtr page,
@@ -985,131 +934,6 @@ public sealed class PdfService : IPdfService, IDisposable
             {
                 PdfiumNative.FORM_OnBeforeClosePage(page, formHandle);
             }
-        }
-    }
-
-    private static PackedPageRender RenderPageToPackedBgra(IntPtr documentHandle, IntPtr formHandle, int pageIndex, double scale)
-    {
-        var page = PdfiumNative.FPDF_LoadPage(documentHandle, pageIndex);
-        if (page == IntPtr.Zero)
-        {
-            throw CreatePdfiumException($"Unable to load page {pageIndex + 1} for saving.");
-        }
-
-        IntPtr bitmap = IntPtr.Zero;
-
-        try
-        {
-            var pageWidth = Math.Max(1f, PdfiumNative.FPDF_GetPageWidthF(page));
-            var pageHeight = Math.Max(1f, PdfiumNative.FPDF_GetPageHeightF(page));
-            var renderWidth = Math.Max(1, (int)Math.Ceiling(pageWidth * scale));
-            var renderHeight = Math.Max(1, (int)Math.Ceiling(pageHeight * scale));
-
-            bitmap = PdfiumNative.FPDFBitmap_Create(renderWidth, renderHeight, 1);
-            if (bitmap == IntPtr.Zero)
-            {
-                throw new InvalidOperationException("PDFium failed to allocate a render bitmap.");
-            }
-
-            PdfiumNative.FPDFBitmap_FillRect(bitmap, 0, 0, renderWidth, renderHeight, PdfiumNative.WhiteArgb);
-            RenderPageBitmap(formHandle, page, bitmap, renderWidth, renderHeight);
-
-            var stride = PdfiumNative.FPDFBitmap_GetStride(bitmap);
-            var sourceLength = stride * renderHeight;
-            var sourcePixels = new byte[sourceLength];
-            Marshal.Copy(PdfiumNative.FPDFBitmap_GetBuffer(bitmap), sourcePixels, 0, sourceLength);
-            var packedPixels = PackBitmapRows(sourcePixels, stride, renderWidth, renderHeight);
-
-            return new PackedPageRender(packedPixels, renderWidth, renderHeight, pageWidth, pageHeight);
-        }
-        finally
-        {
-            if (bitmap != IntPtr.Zero)
-            {
-                PdfiumNative.FPDFBitmap_Destroy(bitmap);
-            }
-
-            PdfiumNative.FPDF_ClosePage(page);
-        }
-    }
-
-    private static unsafe void CreateImagePage(
-        IntPtr destinationDocument,
-        int pageIndex,
-        float pageWidthPoints,
-        float pageHeightPoints,
-        byte[] packedBgra,
-        int renderWidth,
-        int renderHeight)
-    {
-        var page = PdfiumNative.FPDFPage_New(destinationDocument, pageIndex, pageWidthPoints, pageHeightPoints);
-        if (page == IntPtr.Zero)
-        {
-            throw CreatePdfiumException($"PDFium could not create page {pageIndex + 1}.");
-        }
-
-        IntPtr bitmap = IntPtr.Zero;
-        IntPtr imageObject = IntPtr.Zero;
-
-        try
-        {
-            bitmap = PdfiumNative.FPDFBitmap_Create(renderWidth, renderHeight, 1);
-            if (bitmap == IntPtr.Zero)
-            {
-                throw new InvalidOperationException("PDFium failed to allocate an image bitmap.");
-            }
-
-            var stride = PdfiumNative.FPDFBitmap_GetStride(bitmap);
-            var expectedStride = renderWidth * 4;
-            var buffer = PdfiumNative.FPDFBitmap_GetBuffer(bitmap);
-
-            for (var row = 0; row < renderHeight; row++)
-            {
-                Marshal.Copy(
-                    packedBgra,
-                    row * expectedStride,
-                    buffer + (row * stride),
-                    expectedStride);
-            }
-
-            imageObject = PdfiumNative.FPDFPageObj_NewImageObj(destinationDocument);
-            if (imageObject == IntPtr.Zero)
-            {
-                throw CreatePdfiumException("PDFium could not create an image object.");
-            }
-
-            var matrix = new FsMatrix
-            {
-                a = pageWidthPoints,
-                b = 0,
-                c = 0,
-                d = pageHeightPoints,
-                e = 0,
-                f = 0
-            };
-
-            PdfiumNative.FPDFPageObj_SetMatrix(imageObject, ref matrix);
-            var pagePtr = page;
-            if (PdfiumNative.FPDFImageObj_SetBitmap(&pagePtr, 1, imageObject, bitmap) == 0)
-            {
-                throw CreatePdfiumException("PDFium could not attach the flattened image to the page.");
-            }
-
-            PdfiumNative.FPDFPage_InsertObject(page, imageObject);
-
-            if (PdfiumNative.FPDFPage_GenerateContent(page) == 0)
-            {
-                throw CreatePdfiumException($"PDFium could not generate content for page {pageIndex + 1}.");
-            }
-        }
-        finally
-        {
-            if (bitmap != IntPtr.Zero)
-            {
-                PdfiumNative.FPDFBitmap_Destroy(bitmap);
-            }
-
-            PdfiumNative.FPDF_ClosePage(page);
         }
     }
 

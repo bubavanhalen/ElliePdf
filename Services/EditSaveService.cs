@@ -1,5 +1,3 @@
-using ElliePdf.Models;
-
 namespace ElliePdf.Services;
 
 public interface IEditSaveService
@@ -9,18 +7,13 @@ public interface IEditSaveService
 
 public sealed class EditSaveService : IEditSaveService
 {
-    private readonly IPdfService _pdfService;
     private readonly IAnnotationStore _annotationStore;
-    private readonly IInPlaceSaveService _inPlaceSaveService;
+    private readonly IDocumentSaveService _saveService;
 
-    public EditSaveService(
-        IPdfService pdfService,
-        IAnnotationStore annotationStore,
-        IInPlaceSaveService inPlaceSaveService)
+    public EditSaveService(IAnnotationStore annotationStore, IDocumentSaveService saveService)
     {
-        _pdfService = pdfService;
         _annotationStore = annotationStore;
-        _inPlaceSaveService = inPlaceSaveService;
+        _saveService = saveService;
     }
 
     public async Task SaveTabAsync(DocumentTab tab, string outputPath, CancellationToken cancellationToken = default)
@@ -28,32 +21,35 @@ public sealed class EditSaveService : IEditSaveService
         ArgumentNullException.ThrowIfNull(tab);
         ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
 
-        PageOverlayDocument? overlays = _annotationStore.GetOverlayDocument(tab.Id);
+        var overlays = _annotationStore.GetOverlayDocument(tab.Id);
         var isInPlace = string.Equals(
             Path.GetFullPath(outputPath),
             Path.GetFullPath(tab.FilePath),
             StringComparison.OrdinalIgnoreCase);
 
-        if (!isInPlace)
+        var result = await _saveService.SaveAsync(tab.Session, overlays, outputPath, cancellationToken);
+
+        if (result.Session is not null)
         {
-            // The original file keeps its pending overlays, so the tab stays dirty on purpose.
-            await _pdfService.SaveDocumentWithOverlaysAsync(tab.Session, overlays, outputPath, cancellationToken);
-            _annotationStore.DeleteCompanion(outputPath);
-            return;
+            tab.Session = result.Session;
         }
 
-        var result = await _inPlaceSaveService.SaveInPlaceAsync(tab.Session, overlays, cancellationToken);
-        tab.Session = result.Session;
+        if (result.Saved)
+        {
+            _annotationStore.DeleteCompanion(outputPath);
 
-        if (!result.Saved)
+            if (isInPlace)
+            {
+                // The overlays are now part of the page content; keeping them would draw them twice.
+                _annotationStore.ClearOverlays(tab.Id);
+                tab.IsDirty = false;
+            }
+        }
+
+        if (!result.Saved || result.Session is null)
         {
             throw new InvalidOperationException(
                 $"Could not save '{Path.GetFileName(outputPath)}': {result.ErrorMessage}");
         }
-
-        // The overlays are now part of the page content; keeping them would draw them twice.
-        _annotationStore.ClearOverlays(tab.Id);
-        _annotationStore.DeleteCompanion(outputPath);
-        tab.IsDirty = false;
     }
 }

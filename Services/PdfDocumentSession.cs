@@ -44,6 +44,15 @@ public sealed class PdfDocumentSession : IAsyncDisposable
     internal void MarkClosed()
     {
         Handle = IntPtr.Zero;
+        FormFill = null;
+    }
+
+    /// <summary>
+    /// Releases the form-fill environment. It must go before <c>FPDF_CloseDocument</c>, because
+    /// tearing it down dereferences the document and its page views.
+    /// </summary>
+    internal void ReleaseFormFill()
+    {
         FormFill?.Dispose();
         FormFill = null;
     }

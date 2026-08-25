@@ -30,7 +30,7 @@ public partial class App : Application
         services.AddSingleton<IDocumentOpenService, DocumentOpenService>();
         services.AddSingleton<IRecentFilesService, RecentFilesService>();
         services.AddSingleton<IAnnotationStore, AnnotationStore>();
-        services.AddSingleton<IInPlaceSaveService, InPlaceSaveService>();
+        services.AddSingleton<IDocumentSaveService, DocumentSaveService>();
         services.AddSingleton<IEditSaveService, EditSaveService>();
         services.AddSingleton<ITabCloseService, TabCloseService>();
         services.AddSingleton<IDocumentTabService, DocumentTabService>();

@@ -4,10 +4,12 @@ using System.Drawing.Imaging;
 
 namespace ElliePdf.Helpers;
 
+/// <summary>A captured pen sample, kept free of UI types so this helper stays testable.</summary>
+internal readonly record struct StrokePoint(double X, double Y);
+
 /// <summary>
-/// Rasterizes captured signature strokes into a transparent PNG cropped to the drawn content.
-/// Rendering from the raw points (instead of the live XAML canvas) keeps capture independent of
-/// dialog lifetime and produces a tight, correctly proportioned image.
+/// Rasterizes captured signature strokes into a transparent PNG cropped to the drawn content, and
+/// decodes them back for embedding as a PDF image stamp.
 /// </summary>
 internal static class SignatureRenderer
 {
@@ -16,7 +18,7 @@ internal static class SignatureRenderer
     private const float PaddingDips = 6f;
 
     public static bool TryRender(
-        IReadOnlyList<IReadOnlyList<Windows.Foundation.Point>> strokes,
+        IReadOnlyList<IReadOnlyList<StrokePoint>> strokes,
         out byte[] pngBytes,
         out double aspectRatio)
     {
@@ -71,5 +73,54 @@ internal static class SignatureRenderer
         pngBytes = stream.ToArray();
         aspectRatio = (double)pixelWidth / pixelHeight;
         return true;
+    }
+
+    /// <summary>Decodes a stored signature PNG into tightly packed BGRA rows for PDFium.</summary>
+    public static bool TryDecodeBgra(string imageBase64, out byte[] pixels, out int width, out int height)
+    {
+        pixels = [];
+        width = 0;
+        height = 0;
+
+        try
+        {
+            var bytes = Convert.FromBase64String(imageBase64);
+            using var stream = new MemoryStream(bytes);
+            using var source = new Bitmap(stream);
+
+            width = source.Width;
+            height = source.Height;
+            if (width <= 0 || height <= 0)
+            {
+                return false;
+            }
+
+            var rect = new Rectangle(0, 0, width, height);
+            var data = source.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+
+            try
+            {
+                var rowBytes = width * 4;
+                pixels = new byte[rowBytes * height];
+                for (var row = 0; row < height; row++)
+                {
+                    System.Runtime.InteropServices.Marshal.Copy(
+                        data.Scan0 + (row * data.Stride),
+                        pixels,
+                        row * rowBytes,
+                        rowBytes);
+                }
+            }
+            finally
+            {
+                source.UnlockBits(data);
+            }
+
+            return true;
+        }
+        catch (Exception ex) when (ex is FormatException or ArgumentException or OutOfMemoryException)
+        {
+            return false;
+        }
     }
 }
