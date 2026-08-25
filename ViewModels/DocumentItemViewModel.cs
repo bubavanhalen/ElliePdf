@@ -21,7 +21,7 @@ public sealed class DocumentItemViewModel : ObservableObject
         DisplayName = $"Page {pageIndex + 1}";
     }
 
-    public PdfDocumentSession Document { get; }
+    public PdfDocumentSession Document { get; internal set; }
 
     public string FilePath
     {

@@ -545,6 +545,7 @@ public sealed class PdfService : IPdfService, IDisposable
                 return;
             }
 
+            _renderCache.InvalidateDocument(document);
             PdfiumNative.FPDF_CloseDocument(document.Handle);
             document.MarkClosed();
         }, cancellationToken);
@@ -847,13 +848,45 @@ public sealed class PdfService : IPdfService, IDisposable
 
     private void SaveDocumentCore(IntPtr documentHandle, string outputPath)
     {
-        var directory = Path.GetDirectoryName(outputPath);
+        var fullPath = Path.GetFullPath(outputPath);
+        var directory = Path.GetDirectoryName(fullPath);
         if (!string.IsNullOrWhiteSpace(directory))
         {
             Directory.CreateDirectory(directory);
         }
 
-        using var outputStream = new FileStream(outputPath, FileMode.Create, FileAccess.Write, FileShare.None);
+        // Never write straight to the destination: PDFium streams the source lazily, so truncating
+        // a file that is currently open would corrupt the very data being saved.
+        var stagingPath = Path.Combine(
+            string.IsNullOrWhiteSpace(directory) ? Path.GetTempPath() : directory,
+            $".{Path.GetFileNameWithoutExtension(fullPath)}.{Guid.NewGuid():N}.saving.pdf");
+
+        try
+        {
+            WriteDocument(documentHandle, stagingPath, Path.GetFileName(fullPath));
+            File.Move(stagingPath, fullPath, overwrite: true);
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(stagingPath))
+                {
+                    File.Delete(stagingPath);
+                }
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
+    }
+
+    private void WriteDocument(IntPtr documentHandle, string stagingPath, string displayName)
+    {
+        using var outputStream = new FileStream(stagingPath, FileMode.Create, FileAccess.Write, FileShare.Read);
         _activeWriteStream = outputStream;
 
         var callback = new FpdfWriteBlockCallback(WriteBlock);
@@ -868,7 +901,7 @@ public sealed class PdfService : IPdfService, IDisposable
             var saved = PdfiumNative.FPDF_SaveAsCopy(documentHandle, ref fileWrite, PdfiumNative.SaveWithoutIncremental);
             if (saved == 0)
             {
-                throw CreatePdfiumException($"PDFium was unable to save '{Path.GetFileName(outputPath)}'.");
+                throw CreatePdfiumException($"PDFium was unable to save '{displayName}'.");
             }
         }
         finally
@@ -1045,19 +1078,29 @@ public sealed class PdfService : IPdfService, IDisposable
                 throw CreatePdfiumException("PDFium could not create an image object.");
             }
 
-            PdfiumNative.FPDFPageObj_SetMatrix(imageObject, pageWidthPoints, 0, 0, pageHeightPoints, 0, 0);
+            var matrix = new FsMatrix
+            {
+                a = pageWidthPoints,
+                b = 0,
+                c = 0,
+                d = pageHeightPoints,
+                e = 0,
+                f = 0
+            };
+
+            PdfiumNative.FPDFPageObj_SetMatrix(imageObject, ref matrix);
             var pagePtr = page;
             if (PdfiumNative.FPDFImageObj_SetBitmap(&pagePtr, 1, imageObject, bitmap) == 0)
             {
                 throw CreatePdfiumException("PDFium could not attach the flattened image to the page.");
             }
 
-            if (PdfiumNative.FPDFPage_InsertObject(page, imageObject) == 0)
-            {
-                throw CreatePdfiumException("PDFium could not insert the flattened image.");
-            }
+            PdfiumNative.FPDFPage_InsertObject(page, imageObject);
 
-            PdfiumNative.FPDFPage_GenerateContent(page);
+            if (PdfiumNative.FPDFPage_GenerateContent(page) == 0)
+            {
+                throw CreatePdfiumException($"PDFium could not generate content for page {pageIndex + 1}.");
+            }
         }
         finally
         {

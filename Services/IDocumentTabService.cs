@@ -21,4 +21,7 @@ public interface IDocumentTabService : IDocumentSessionService
     DocumentTab? FindTabByPath(string path);
 
     Task<DocumentTab> OpenOrActivateTabAsync(string path, CancellationToken cancellationToken = default);
+
+    /// <summary>Re-points any tab holding <paramref name="oldSession"/> at a replacement session.</summary>
+    void ReplaceSession(PdfDocumentSession oldSession, PdfDocumentSession newSession);
 }

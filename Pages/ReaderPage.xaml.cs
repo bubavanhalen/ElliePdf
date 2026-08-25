@@ -61,6 +61,7 @@ public sealed partial class ReaderPage : Page
         SignatureCanvas.PointerMoved += SignatureCanvas_PointerMoved;
         SignatureCanvas.PointerPressed += SignatureCanvas_PointerPressed;
         SignatureCanvas.PointerReleased += SignatureCanvas_PointerReleased;
+        SignatureCanvas.PointerCaptureLost += SignatureCanvas_PointerCaptureLost;
         _chromeIdleTimer.Tick += ChromeIdleTimer_Tick;
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
@@ -106,9 +107,17 @@ public sealed partial class ReaderPage : Page
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(ReaderViewModel.PageImage)
-            or nameof(ReaderViewModel.CurrentOverlay)
-            or nameof(ReaderViewModel.IsEditMode))
+            or nameof(ReaderViewModel.CurrentOverlay))
         {
+            LoadEditSurface();
+        }
+        else if (e.PropertyName is nameof(ReaderViewModel.IsEditMode))
+        {
+            if (!ViewModel.IsEditMode)
+            {
+                PageViewer.EditSurface.CommitActiveEdits();
+            }
+
             LoadEditSurface();
         }
         else if (e.PropertyName is nameof(ReaderViewModel.ActiveEditTool)
@@ -224,11 +233,26 @@ public sealed partial class ReaderPage : Page
 
     private void EditSurface_ActiveToolChangeRequested(object? sender, ReaderEditTool tool)
     {
-        if (tool == ReaderEditTool.Select)
+        switch (tool)
         {
-            ViewModel.UseSelectToolCommand.Execute(null);
-            ApplyEditSurfaceState();
+            case ReaderEditTool.Select:
+                ViewModel.UseSelectToolCommand.Execute(null);
+                break;
+            case ReaderEditTool.Text:
+                ViewModel.UseTextToolCommand.Execute(null);
+                break;
+            case ReaderEditTool.Ink:
+                ViewModel.UseInkToolCommand.Execute(null);
+                break;
+            case ReaderEditTool.Eraser:
+                ViewModel.UseEraserToolCommand.Execute(null);
+                break;
+            case ReaderEditTool.Signature:
+                ViewModel.UseSignatureToolCommand.Execute(null);
+                break;
         }
+
+        ApplyEditSurfaceState();
     }
 
     private async void SaveButton_Click(object sender, RoutedEventArgs e)
@@ -349,7 +373,14 @@ public sealed partial class ReaderPage : Page
             return;
         }
 
-        _currentSignatureStroke.Add(e.GetCurrentPoint(SignatureCanvas).Position);
+        var point = e.GetCurrentPoint(SignatureCanvas).Position;
+        var last = _currentSignatureStroke[^1];
+        if (Math.Abs(point.X - last.X) + Math.Abs(point.Y - last.Y) < 1.0)
+        {
+            return;
+        }
+
+        _currentSignatureStroke.Add(point);
         RedrawSignatureCanvas();
         e.Handled = true;
     }
@@ -363,8 +394,12 @@ public sealed partial class ReaderPage : Page
 
         SignatureCanvas.ReleasePointerCapture(e.Pointer);
         _currentSignatureStroke = null;
+        RedrawSignatureCanvas();
         e.Handled = true;
     }
+
+    private void SignatureCanvas_PointerCaptureLost(object sender, PointerRoutedEventArgs e) =>
+        _currentSignatureStroke = null;
 
     private void RedrawSignatureCanvas()
     {
@@ -385,7 +420,7 @@ public sealed partial class ReaderPage : Page
             SignatureCanvas.Children.Add(new Polyline
             {
                 Stroke = new SolidColorBrush(Microsoft.UI.Colors.Black),
-                StrokeThickness = 2,
+                StrokeThickness = 2.4,
                 StrokeStartLineCap = PenLineCap.Round,
                 StrokeEndLineCap = PenLineCap.Round,
                 StrokeLineJoin = PenLineJoin.Round,
@@ -396,39 +431,16 @@ public sealed partial class ReaderPage : Page
 
     private void SignatureDialog_PrimaryButtonClick(ContentDialog sender, ContentDialogButtonClickEventArgs args)
     {
-        if (_signatureStrokes.All(stroke => stroke.Count < 2))
+        // Rasterize while the strokes are still in hand; the canvas leaves the tree as the dialog closes.
+        if (!Helpers.SignatureRenderer.TryRender(_signatureStrokes, out var pngBytes, out var aspectRatio))
         {
             args.Cancel = true;
             return;
         }
 
-        _ = PlaceSignatureAsync();
-    }
-
-    private async Task PlaceSignatureAsync()
-    {
-        var renderTarget = new RenderTargetBitmap();
-        await renderTarget.RenderAsync(SignatureCanvas);
-        using var stream = new InMemoryRandomAccessStream();
-        var encoder = await Windows.Graphics.Imaging.BitmapEncoder.CreateAsync(
-            Windows.Graphics.Imaging.BitmapEncoder.PngEncoderId,
-            stream);
-        encoder.SetPixelData(
-            Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8,
-            Windows.Graphics.Imaging.BitmapAlphaMode.Premultiplied,
-            (uint)renderTarget.PixelWidth,
-            (uint)renderTarget.PixelHeight,
-            96,
-            96,
-            (await renderTarget.GetPixelsAsync()).ToArray());
-        await encoder.FlushAsync();
-        stream.Seek(0);
-        using var memory = new MemoryStream();
-        await stream.AsStreamForRead().CopyToAsync(memory);
-
-        ViewModel.UseSignatureToolCommand.Execute(null);
+        ViewModel.UseSelectToolCommand.Execute(null);
         ApplyEditSurfaceState();
-        PageViewer.EditSurface.PlaceSignature(Convert.ToBase64String(memory.ToArray()));
+        PageViewer.EditSurface.PlaceSignature(Convert.ToBase64String(pngBytes), aspectRatio);
     }
 
     private async void PrintButton_Click(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)

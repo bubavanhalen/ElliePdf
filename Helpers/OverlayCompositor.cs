@@ -10,7 +10,9 @@ internal static class OverlayCompositor
 {
     public static bool HasContent(PageOverlayState? overlay) =>
         overlay is not null &&
-        (overlay.InkStrokes.Count > 0 || overlay.TextItems.Count > 0 || overlay.Signatures.Count > 0);
+        (overlay.InkStrokes.Any(stroke => stroke.Points.Count > 1) ||
+         overlay.TextItems.Any(text => !string.IsNullOrWhiteSpace(text.Text)) ||
+         overlay.Signatures.Any(signature => !string.IsNullOrWhiteSpace(signature.ImageBase64)));
 
     public static byte[] Composite(
         byte[] sourceBgra,
@@ -31,7 +33,9 @@ internal static class OverlayCompositor
 
         using var graphics = Graphics.FromImage(bitmap);
         graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+        graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        graphics.TextRenderingHint = TextRenderingHint.AntiAlias;
 
         foreach (var stroke in overlay.InkStrokes)
         {
@@ -58,6 +62,11 @@ internal static class OverlayCompositor
 
         foreach (var text in overlay.TextItems)
         {
+            if (string.IsNullOrWhiteSpace(text.Text))
+            {
+                continue;
+            }
+
             var style = FontStyle.Regular;
             if (text.IsBold)
             {
@@ -69,18 +78,27 @@ internal static class OverlayCompositor
                 style |= FontStyle.Italic;
             }
 
-            using var font = new Font("Segoe UI", (float)(text.FontSize * scaleY), style);
+            // FontSize is stored in page points; GDI+ defaults to typographic points, so render
+            // in pixels to match what the on-screen edit surface shows.
+            using var font = new Font(
+                "Segoe UI",
+                Math.Max(1f, (float)(text.FontSize * scaleY)),
+                style,
+                GraphicsUnit.Pixel);
             using var brush = new SolidBrush(ParseColor(text.ColorHex));
+            using var format = new StringFormat(StringFormatFlags.NoClip)
+            {
+                Trimming = StringTrimming.None
+            };
+
+            var originX = (float)(text.X * scaleX);
+            var originY = (float)(text.Y * scaleY);
             var layout = new RectangleF(
-                (float)(text.X * scaleX),
-                (float)(text.Y * scaleY),
+                originX,
+                originY,
                 (float)(Math.Max(24, text.Width) * scaleX),
-                (float)(Math.Max(16, text.Height) * scaleY));
-            graphics.DrawString(
-                text.Text,
-                font,
-                brush,
-                layout);
+                Math.Max(1f, height - originY));
+            graphics.DrawString(text.Text, font, brush, layout, format);
         }
 
         foreach (var signature in overlay.Signatures)
@@ -97,17 +115,22 @@ internal static class OverlayCompositor
 
     private static void TryDrawSignature(Graphics graphics, SignatureOverlay signature, double scaleX, double scaleY)
     {
+        if (string.IsNullOrWhiteSpace(signature.ImageBase64))
+        {
+            return;
+        }
+
         try
         {
             var bytes = Convert.FromBase64String(signature.ImageBase64);
             using var stream = new MemoryStream(bytes);
             using var image = Image.FromStream(stream);
-            graphics.DrawImage(
-                image,
+            var destination = new RectangleF(
                 (float)(signature.X * scaleX),
                 (float)(signature.Y * scaleY),
                 (float)(signature.Width * scaleX),
                 (float)(signature.Height * scaleY));
+            graphics.DrawImage(image, destination);
         }
         catch (Exception)
         {

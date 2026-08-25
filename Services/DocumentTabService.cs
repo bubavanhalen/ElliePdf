@@ -13,11 +13,13 @@ public sealed class DocumentTabService : IDocumentTabService, IAsyncDisposable
     public DocumentTabService(
         IDocumentOpenService documentOpenService,
         IRecentFilesService recentFilesService,
-        IAnnotationStore annotationStore)
+        IAnnotationStore annotationStore,
+        IInPlaceSaveService inPlaceSaveService)
     {
         _documentOpenService = documentOpenService;
         _recentFilesService = recentFilesService;
         _annotationStore = annotationStore;
+        inPlaceSaveService.SessionReplaced += (_, args) => ReplaceSession(args.OldSession, args.NewSession);
     }
 
     public IReadOnlyList<DocumentTab> Tabs => _tabs;
@@ -156,6 +158,30 @@ public sealed class DocumentTabService : IDocumentTabService, IAsyncDisposable
 
     public DocumentTab? FindTabByPath(string path) =>
         _tabs.FirstOrDefault(tab => string.Equals(tab.FilePath, path, StringComparison.OrdinalIgnoreCase));
+
+    public void ReplaceSession(PdfDocumentSession oldSession, PdfDocumentSession newSession)
+    {
+        ArgumentNullException.ThrowIfNull(oldSession);
+        ArgumentNullException.ThrowIfNull(newSession);
+
+        if (ReferenceEquals(oldSession, newSession))
+        {
+            return;
+        }
+
+        var affected = false;
+        foreach (var tab in _tabs.Where(tab => ReferenceEquals(tab.Session, oldSession)))
+        {
+            tab.Session = newSession;
+            tab.CurrentPageIndex = Math.Clamp(tab.CurrentPageIndex, 0, Math.Max(0, newSession.PageCount - 1));
+            affected = true;
+        }
+
+        if (affected)
+        {
+            StateChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
 
     public DocumentTab? ActiveTab =>
         _activeTabId is null ? null : _tabs.FirstOrDefault(tab => tab.Id == _activeTabId);

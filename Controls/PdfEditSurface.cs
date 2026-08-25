@@ -18,6 +18,10 @@ namespace ElliePdf.Controls;
 
 public sealed partial class PdfEditSurface : Canvas
 {
+    private const string InkTagKind = "ink";
+    private const string TextTagKind = "text";
+    private const string SignatureTagKind = "signature";
+
     private enum SelectionKind
     {
         None,
@@ -33,25 +37,32 @@ public sealed partial class PdfEditSurface : Canvas
         Resize
     }
 
-    private readonly List<List<Point>> _activeInkStrokes = [];
+    private sealed record OverlayTag(string Kind, string Id);
+
     private readonly List<PageOverlayState> _undoStack = [];
     private readonly Border _selectionAdorner;
     private readonly Border _resizeHandle;
     private readonly Border _textToolbar;
     private readonly Button _textColorButton;
+    private readonly Polyline _inkPreview;
+    private readonly ColorPicker _textColorPicker;
+
     private List<Point>? _currentStroke;
     private DragMode _dragMode;
     private Point _dragStart;
-    private double _startLeft;
-    private double _startTop;
-    private double _startWidth;
-    private double _startHeight;
+    private Rect _dragStartBounds;
+    private List<PointOverlay>? _dragStartInkPoints;
+    private bool _dragPushedUndo;
+    private bool _isErasing;
+    private bool _erasePushedUndo;
     private SelectionKind _selectionKind;
     private string? _selectedId;
     private bool _isRendering;
-    private bool _isPlacingText;
+    private bool _isSyncingColorPicker;
+    private ReaderEditTool _activeTool = ReaderEditTool.Select;
+
     private static readonly InputCursor ArrowCursor = InputSystemCursor.Create(InputSystemCursorShape.Arrow);
-    private static readonly InputCursor MoveCursor = InputSystemCursor.Create(InputSystemCursorShape.SizeAll);
+    private static readonly InputCursor DrawCursor = InputSystemCursor.Create(InputSystemCursorShape.Cross);
     private static readonly InputCursor TextCursor = InputSystemCursor.Create(InputSystemCursorShape.IBeam);
 
     public PdfEditSurface()
@@ -79,8 +90,28 @@ public sealed partial class PdfEditSurface : Canvas
         _resizeHandle.PointerMoved += ResizeHandle_PointerMoved;
         _resizeHandle.PointerReleased += ResizeHandle_PointerReleased;
 
+        _inkPreview = new Polyline
+        {
+            IsHitTestVisible = false,
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+            StrokeLineJoin = PenLineJoin.Round,
+            Visibility = Visibility.Collapsed
+        };
+
+        _textColorPicker = new ColorPicker
+        {
+            Color = Colors.Black,
+            IsAlphaEnabled = false,
+            IsAlphaSliderVisible = false,
+            IsAlphaTextInputVisible = false,
+            IsColorChannelTextInputVisible = true,
+            IsHexInputVisible = true,
+            Width = 280
+        };
+        _textColorPicker.ColorChanged += TextColorPicker_ColorChanged;
+
         _textColorButton = CreateToolbarButton(string.Empty);
-        _textColorButton.Width = 28;
         _textColorButton.Content = new Border
         {
             Width = 14,
@@ -88,7 +119,7 @@ public sealed partial class PdfEditSurface : Canvas
             CornerRadius = new CornerRadius(7),
             Background = new SolidColorBrush(Colors.Black)
         };
-        _textColorButton.Flyout = CreateColorFlyout();
+        _textColorButton.Flyout = new Flyout { Content = _textColorPicker };
 
         _textToolbar = new Border
         {
@@ -102,28 +133,60 @@ public sealed partial class PdfEditSurface : Canvas
                 Spacing = 4,
                 Children =
                 {
-                    CreateToolbarButton("N", (_, _) => ApplySelectedTextStyle(isBold: false, isItalic: false)),
-                    CreateToolbarButton("B", (_, _) => ApplySelectedTextStyle(isBold: true, isItalic: false)),
-                    CreateToolbarButton("I", (_, _) => ApplySelectedTextStyle(isBold: false, isItalic: true)),
+                    CreateToolbarButton("A-", (_, _) => ScaleSelectedFontSize(-2)),
+                    CreateToolbarButton("A+", (_, _) => ScaleSelectedFontSize(2)),
+                    CreateToolbarButton("B", (_, _) => ToggleSelectedTextBold()),
+                    CreateToolbarButton("I", (_, _) => ToggleSelectedTextItalic()),
                     _textColorButton
                 }
             }
         };
 
+        Children.Add(_inkPreview);
         Children.Add(_selectionAdorner);
         Children.Add(_resizeHandle);
         Children.Add(_textToolbar);
         PointerPressed += Surface_PointerPressed;
         PointerMoved += Surface_PointerMoved;
         PointerReleased += Surface_PointerReleased;
+        PointerCaptureLost += Surface_PointerCaptureLost;
+        DoubleTapped += Surface_DoubleTapped;
+        IsDoubleTapEnabled = true;
         KeyDown += Surface_KeyDown;
+        ApplyToolCursor();
     }
 
     public PageOverlayState Overlay { get; private set; } = new();
 
-    public ReaderEditTool ActiveTool { get; set; } = ReaderEditTool.Select;
+    public ReaderEditTool ActiveTool
+    {
+        get => _activeTool;
+        set
+        {
+            if (_activeTool == value)
+            {
+                return;
+            }
 
-    public double DisplayScale { get; set; } = 1.0;
+            _activeTool = value;
+            CancelActiveGesture();
+            if (value is ReaderEditTool.Ink or ReaderEditTool.Eraser)
+            {
+                ClearSelection();
+            }
+
+            ApplyToolInteraction();
+            ApplyToolCursor();
+
+            // Pull focus off any text box so empty ones get pruned on the way out.
+            if (value != ReaderEditTool.Text)
+            {
+                Focus(FocusState.Programmatic);
+            }
+        }
+    }
+
+    public double DisplayScale { get; private set; } = 1.0;
 
     public string InkColorHex { get; set; } = "#000000";
 
@@ -135,41 +198,75 @@ public sealed partial class PdfEditSurface : Canvas
 
     public void LoadOverlay(PageOverlayState overlay, double displayScale, double width, double height)
     {
+        CancelActiveGesture();
         Overlay = CloneOverlay(overlay);
         DisplayScale = displayScale <= 0 ? 1.0 : displayScale;
-        Width = width;
-        Height = height;
+        Width = Math.Max(0, width);
+        Height = Math.Max(0, height);
+        _undoStack.Clear();
         ClearSelection();
         RenderOverlay();
     }
 
-    public void CommitActiveEdits() => PersistTextBoxes();
-
-    public void PlaceText()
+    /// <summary>Flushes in-progress text edits into the overlay model and drops empty text boxes.</summary>
+    public void CommitActiveEdits()
     {
-        BeginTextPlacement(new Point(Math.Max(24, Width / 2 - 110), Math.Max(24, Height / 2 - 22)), null);
+        var changed = PersistTextBoxes();
+
+        if (PruneEmptyTextItems())
+        {
+            changed = true;
+            RenderOverlay();
+        }
+
+        if (changed)
+        {
+            NotifyOverlayChanged();
+        }
     }
 
-    public void PlaceSignature(string imageBase64)
+    public void PlaceText() =>
+        PlaceTextAt(new Point(PageWidth / 2 - 80, PageHeight / 2 - 20));
+
+    public void PlaceSignature(string imageBase64, double aspectRatio = 2.0)
     {
         if (string.IsNullOrWhiteSpace(imageBase64))
         {
             return;
         }
 
+        if (aspectRatio <= 0 || double.IsNaN(aspectRatio) || double.IsInfinity(aspectRatio))
+        {
+            aspectRatio = 2.0;
+        }
+
+        var width = Math.Clamp(PageWidth / 3, 90, 260);
+        var height = width / aspectRatio;
+        if (height > PageHeight / 3)
+        {
+            height = PageHeight / 3;
+            width = height * aspectRatio;
+        }
+
         PushUndo();
         var signature = new SignatureOverlay
         {
-            X = Math.Max(24, (Width / DisplayScale - 150) / 2),
-            Y = Math.Max(24, (Height / DisplayScale - 75) / 2),
+            X = Math.Max(0, (PageWidth - width) / 2),
+            Y = Math.Max(0, (PageHeight - height) / 2),
             ImageBase64 = imageBase64,
-            Width = 150,
-            Height = 75
+            Width = width,
+            Height = height
         };
+
         Overlay.Signatures.Add(signature);
         RenderOverlay();
         SelectItem(SelectionKind.Signature, signature.Id);
         NotifyOverlayChanged();
+
+        if (ActiveTool != ReaderEditTool.Select)
+        {
+            ActiveToolChangeRequested?.Invoke(this, ReaderEditTool.Select);
+        }
     }
 
     public void Undo()
@@ -179,11 +276,12 @@ public sealed partial class PdfEditSurface : Canvas
             return;
         }
 
+        CancelActiveGesture();
         Overlay = _undoStack[^1];
         _undoStack.RemoveAt(_undoStack.Count - 1);
         ClearSelection();
         RenderOverlay();
-        NotifyOverlayChanged(pushUndo: false);
+        NotifyOverlayChanged();
     }
 
     public void DeleteSelection()
@@ -194,17 +292,17 @@ public sealed partial class PdfEditSurface : Canvas
         }
 
         PushUndo();
-        if (_selectionKind == SelectionKind.Text)
+        switch (_selectionKind)
         {
-            Overlay.TextItems.RemoveAll(item => item.Id == _selectedId);
-        }
-        else if (_selectionKind == SelectionKind.Signature)
-        {
-            Overlay.Signatures.RemoveAll(item => item.Id == _selectedId);
-        }
-        else if (_selectionKind == SelectionKind.Ink && int.TryParse(_selectedId, out var index) && index >= 0 && index < Overlay.InkStrokes.Count)
-        {
-            Overlay.InkStrokes.RemoveAt(index);
+            case SelectionKind.Text:
+                Overlay.TextItems.RemoveAll(item => item.Id == _selectedId);
+                break;
+            case SelectionKind.Signature:
+                Overlay.Signatures.RemoveAll(item => item.Id == _selectedId);
+                break;
+            case SelectionKind.Ink:
+                Overlay.InkStrokes.RemoveAll(item => item.Id == _selectedId);
+                break;
         }
 
         ClearSelection();
@@ -221,44 +319,11 @@ public sealed partial class PdfEditSurface : Canvas
         _textToolbar.Visibility = Visibility.Collapsed;
     }
 
-    private void BeginTextPlacement(Point canvasPoint, Pointer? pointer)
-    {
-        PushUndo();
-        var text = new TextOverlay
-        {
-            X = canvasPoint.X / DisplayScale,
-            Y = canvasPoint.Y / DisplayScale,
-            Text = "Enter text...",
-            Width = 160,
-            Height = 40
-        };
+    private double PageWidth => DisplayScale > 0 ? Width / DisplayScale : Width;
 
-        Overlay.TextItems.Add(text);
-        RenderOverlay();
-        SelectItem(SelectionKind.Text, text.Id);
-        NotifyOverlayChanged(pushUndo: false);
+    private double PageHeight => DisplayScale > 0 ? Height / DisplayScale : Height;
 
-        if (TryGetSelectedElement() is not { } selected)
-        {
-            return;
-        }
-
-        _dragMode = DragMode.Resize;
-        _isPlacingText = true;
-        _dragStart = canvasPoint;
-        _startWidth = selected.Width;
-        _startHeight = selected.Height;
-        if (pointer is not null)
-        {
-            CapturePointer(pointer);
-        }
-
-        if (selected is TextBox box)
-        {
-            box.Focus(FocusState.Programmatic);
-            box.SelectAll();
-        }
-    }
+    // ═══════════ Rendering ═══════════
 
     private void RenderOverlay()
     {
@@ -266,64 +331,40 @@ public sealed partial class PdfEditSurface : Canvas
         try
         {
             Children.Clear();
-            _activeInkStrokes.Clear();
 
-            for (var index = 0; index < Overlay.InkStrokes.Count; index++)
+            foreach (var stroke in Overlay.InkStrokes)
             {
-                var stroke = Overlay.InkStrokes[index];
-                var points = stroke.Points.Select(ToCanvasPoint).ToList();
-                _activeInkStrokes.Add(points);
-                var polyline = CreatePolyline(points, stroke.ColorHex, stroke.Thickness * DisplayScale);
-                polyline.Tag = ("ink", index.ToString());
-                polyline.PointerPressed += Selectable_PointerPressed;
+                var polyline = CreatePolyline(
+                    stroke.Points.Select(ToCanvasPoint),
+                    stroke.ColorHex,
+                    stroke.Thickness * DisplayScale);
+                polyline.Tag = new OverlayTag(InkTagKind, stroke.Id);
                 Children.Add(polyline);
             }
 
             foreach (var text in Overlay.TextItems)
             {
-                var box = new TextBox
-                {
-                    Text = text.Text,
-                    FontSize = text.FontSize * DisplayScale,
-                    Width = Math.Max(80, text.Width * DisplayScale),
-                    Height = Math.Max(32, text.Height * DisplayScale),
-                    Foreground = ColorBrushFromHex(text.ColorHex),
-                    FontWeight = text.IsBold ? FontWeights.SemiBold : FontWeights.Normal,
-                    FontStyle = text.IsItalic ? TextFontStyle.Italic : TextFontStyle.Normal,
-                    Background = new SolidColorBrush(Colors.Transparent),
-                    BorderThickness = new Thickness(0),
-                    Padding = new Thickness(2),
-                    TextWrapping = TextWrapping.Wrap,
-                    AcceptsReturn = true,
-                    Tag = ("text", text.Id)
-                };
-                ApplyTextBoxChrome(box, text.ColorHex);
-                box.TextChanged += TextBox_TextChanged;
-                box.PointerPressed += Selectable_PointerPressed;
-                box.PointerEntered += TextBox_PointerEntered;
-                box.PointerExited += TextBox_PointerExited;
-                Canvas.SetLeft(box, text.X * DisplayScale);
-                Canvas.SetTop(box, text.Y * DisplayScale);
-                Children.Add(box);
+                Children.Add(CreateTextBox(text));
             }
 
             foreach (var signature in Overlay.Signatures)
             {
                 if (TryCreateSignatureImage(signature, out var image))
                 {
-                    image.Width = Math.Max(40, signature.Width * DisplayScale);
-                    image.Height = Math.Max(24, signature.Height * DisplayScale);
-                    image.Tag = ("signature", signature.Id);
-                    image.PointerPressed += Selectable_PointerPressed;
-                    Canvas.SetLeft(image, signature.X * DisplayScale);
-                    Canvas.SetTop(image, signature.Y * DisplayScale);
+                    image.Width = Math.Max(8, signature.Width * DisplayScale);
+                    image.Height = Math.Max(8, signature.Height * DisplayScale);
+                    image.Tag = new OverlayTag(SignatureTagKind, signature.Id);
+                    SetLeft(image, signature.X * DisplayScale);
+                    SetTop(image, signature.Y * DisplayScale);
                     Children.Add(image);
                 }
             }
 
+            Children.Add(_inkPreview);
             Children.Add(_selectionAdorner);
             Children.Add(_resizeHandle);
             Children.Add(_textToolbar);
+            ApplyToolInteraction();
             RestoreSelectionAdorner();
         }
         finally
@@ -332,186 +373,331 @@ public sealed partial class PdfEditSurface : Canvas
         }
     }
 
+    private TextBox CreateTextBox(TextOverlay text)
+    {
+        var box = new TextBox
+        {
+            Text = text.Text,
+            PlaceholderText = "Type here",
+            FontSize = Math.Max(6, text.FontSize * DisplayScale),
+            Width = Math.Max(24, text.Width * DisplayScale),
+            Height = Math.Max(16, text.Height * DisplayScale),
+            Foreground = ColorBrushFromHex(text.ColorHex),
+            FontWeight = text.IsBold ? FontWeights.Bold : FontWeights.Normal,
+            FontStyle = text.IsItalic ? TextFontStyle.Italic : TextFontStyle.Normal,
+            Background = new SolidColorBrush(Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(2),
+            TextWrapping = TextWrapping.Wrap,
+            AcceptsReturn = true,
+            Tag = new OverlayTag(TextTagKind, text.Id)
+        };
+
+        ApplyTextBoxChrome(box, text.ColorHex);
+        box.TextChanged += TextBox_TextChanged;
+        box.LostFocus += TextBox_LostFocus;
+        box.AddHandler(
+            PointerPressedEvent,
+            new PointerEventHandler(Selectable_PointerPressed),
+            handledEventsToo: true);
+        SetLeft(box, text.X * DisplayScale);
+        SetTop(box, text.Y * DisplayScale);
+        return box;
+    }
+
+    /// <summary>
+    /// Only the text tool needs live text boxes. Every other tool routes pointer input through the
+    /// canvas so drawing, erasing and dragging behave the same over ink, text and signatures.
+    /// </summary>
+    private void ApplyToolInteraction()
+    {
+        var textEditable = ActiveTool == ReaderEditTool.Text;
+
+        foreach (var child in Children.OfType<FrameworkElement>())
+        {
+            if (child.Tag is OverlayTag tag)
+            {
+                child.IsHitTestVisible = textEditable && tag.Kind == TextTagKind;
+            }
+        }
+    }
+
+    private void ApplyToolCursor() =>
+        ProtectedCursor = ActiveTool switch
+        {
+            ReaderEditTool.Ink or ReaderEditTool.Eraser => DrawCursor,
+            ReaderEditTool.Text => TextCursor,
+            _ => ArrowCursor
+        };
+
+    // ═══════════ Canvas pointer handling ═══════════
+
     private void Surface_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
+        var point = e.GetCurrentPoint(this).Position;
+
+        switch (ActiveTool)
+        {
+            case ReaderEditTool.Ink:
+                Focus(FocusState.Programmatic);
+                _currentStroke = [point];
+                _inkPreview.Stroke = ColorBrushFromHex(InkColorHex);
+                _inkPreview.StrokeThickness = Math.Max(1, InkThickness * DisplayScale);
+                _inkPreview.Points = BuildPointCollection(_currentStroke);
+                _inkPreview.Visibility = Visibility.Visible;
+                CapturePointer(e.Pointer);
+                e.Handled = true;
+                return;
+
+            case ReaderEditTool.Eraser:
+                Focus(FocusState.Programmatic);
+                _isErasing = true;
+                _erasePushedUndo = false;
+                CapturePointer(e.Pointer);
+                TryEraseAt(point);
+                e.Handled = true;
+                return;
+
+            case ReaderEditTool.Text:
+                // Existing text boxes handle their own clicks; an empty spot creates a new one.
+                if (ReferenceEquals(e.OriginalSource, this))
+                {
+                    PlaceTextAt(ToPagePosition(point));
+                    e.Handled = true;
+                }
+
+                return;
+        }
+
         Focus(FocusState.Programmatic);
 
-        if (ActiveTool == ReaderEditTool.Ink)
-        {
-            PushUndo();
-            var point = e.GetCurrentPoint(this).Position;
-            _currentStroke = [point];
-            _activeInkStrokes.Add(_currentStroke);
-            CapturePointer(e.Pointer);
-            e.Handled = true;
-            return;
-        }
-
-        if (ActiveTool == ReaderEditTool.Eraser)
-        {
-            TryEraseAt(e.GetCurrentPoint(this).Position);
-            e.Handled = true;
-            return;
-        }
-
-        if (ActiveTool == ReaderEditTool.Text && ReferenceEquals(e.OriginalSource, this))
-        {
-            BeginTextPlacement(e.GetCurrentPoint(this).Position, e.Pointer);
-            e.Handled = true;
-            return;
-        }
-
-        if (ReferenceEquals(e.OriginalSource, this))
+        if (HitTest(ToPagePosition(point)) is not { } hit)
         {
             ClearSelection();
-        }
-    }
-
-    private void Surface_PointerMoved(object sender, PointerRoutedEventArgs e)
-    {
-        if (_dragMode == DragMode.Move && TryGetSelectedElement() is { } selected)
-        {
-            var point = e.GetCurrentPoint(this).Position;
-            Canvas.SetLeft(selected, Math.Max(0, _startLeft + point.X - _dragStart.X));
-            Canvas.SetTop(selected, Math.Max(0, _startTop + point.Y - _dragStart.Y));
-            UpdateSelectionAdorner(selected);
-            e.Handled = true;
             return;
         }
 
-        if (_dragMode == DragMode.Resize && TryGetSelectedElement() is { } resizing)
-        {
-            var point = e.GetCurrentPoint(this).Position;
-            resizing.Width = Math.Max(48, _startWidth + point.X - _dragStart.X);
-            resizing.Height = Math.Max(28, _startHeight + point.Y - _dragStart.Y);
-            UpdateSelectionAdorner(resizing);
-            e.Handled = true;
-            return;
-        }
-
-        if (_currentStroke is null || ActiveTool != ReaderEditTool.Ink)
-        {
-            return;
-        }
-
-        _currentStroke.Add(e.GetCurrentPoint(this).Position);
-        RedrawInkOnly();
-        e.Handled = true;
-    }
-
-    private void Surface_PointerReleased(object sender, PointerRoutedEventArgs e)
-    {
-        if (_dragMode == DragMode.Move && TryGetSelectedElement() is not null)
-        {
-            ReleasePointerCapture(e.Pointer);
-            _dragMode = DragMode.None;
-            PersistSelectedElement();
-            NotifyOverlayChanged(pushUndo: false);
-            e.Handled = true;
-            return;
-        }
-
-        if (_dragMode == DragMode.Resize && TryGetSelectedElement() is not null)
-        {
-            ReleasePointerCapture(e.Pointer);
-            _dragMode = DragMode.None;
-            PersistSelectedElement();
-            if (_isPlacingText)
-            {
-                _isPlacingText = false;
-                ActiveTool = ReaderEditTool.Select;
-                ActiveToolChangeRequested?.Invoke(this, ReaderEditTool.Select);
-            }
-
-            NotifyOverlayChanged(pushUndo: false);
-            e.Handled = true;
-            return;
-        }
-
-        if (_currentStroke is null)
-        {
-            return;
-        }
-
-        ReleasePointerCapture(e.Pointer);
-        var stroke = new InkStrokeOverlay
-        {
-            ColorHex = InkColorHex,
-            Thickness = InkThickness,
-            Points = _currentStroke.Select(ToPagePoint).ToList()
-        };
-        if (stroke.Points.Count > 1)
-        {
-            Overlay.InkStrokes.Add(stroke);
-        }
-
-        _currentStroke = null;
-        RenderOverlay();
-        NotifyOverlayChanged(pushUndo: false);
-        e.Handled = true;
-    }
-
-    private void Selectable_PointerPressed(object sender, PointerRoutedEventArgs e)
-    {
-        if (ActiveTool == ReaderEditTool.Eraser)
-        {
-            if (sender is FrameworkElement element)
-            {
-                SelectFromTag(element.Tag);
-                DeleteSelection();
-            }
-
-            e.Handled = true;
-            return;
-        }
-
-        if (ActiveTool is not ReaderEditTool.Select and not ReaderEditTool.Text and not ReaderEditTool.Signature)
-        {
-            return;
-        }
-
-        if (sender is not FrameworkElement selected || !SelectFromTag(selected.Tag))
-        {
-            return;
-        }
-
-        CommitActiveEdits();
-        PushUndo();
-        _dragMode = DragMode.Move;
-        _dragStart = e.GetCurrentPoint(this).Position;
-        _startLeft = Canvas.GetLeft(selected);
-        _startTop = Canvas.GetTop(selected);
+        SelectItem(hit.Kind, hit.Id);
+        BeginDrag(DragMode.Move, point);
         CapturePointer(e.Pointer);
         e.Handled = true;
     }
 
-    private void ResizeHandle_PointerPressed(object sender, PointerRoutedEventArgs e)
+    private void Surface_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
     {
-        if (TryGetSelectedElement() is not { } selected)
+        if (ActiveTool != ReaderEditTool.Select)
+        {
+            return;
+        }
+
+        var pagePoint = ToPagePosition(e.GetPosition(this));
+        if (HitTest(pagePoint) is not { Kind: SelectionKind.Text } hit)
+        {
+            return;
+        }
+
+        _dragMode = DragMode.None;
+        SelectItem(SelectionKind.Text, hit.Id);
+        ActiveToolChangeRequested?.Invoke(this, ReaderEditTool.Text);
+
+        if (TryGetSelectedElement() is TextBox box)
+        {
+            box.Focus(FocusState.Programmatic);
+        }
+
+        e.Handled = true;
+    }
+
+    private void Surface_PointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        var point = e.GetCurrentPoint(this).Position;
+
+        if (_isErasing)
+        {
+            TryEraseAt(point);
+            e.Handled = true;
+            return;
+        }
+
+        if (_currentStroke is not null)
+        {
+            var last = _currentStroke[^1];
+            if (Math.Abs(point.X - last.X) + Math.Abs(point.Y - last.Y) >= 1.0)
+            {
+                _currentStroke.Add(point);
+                _inkPreview.Points.Add(point);
+            }
+
+            e.Handled = true;
+            return;
+        }
+
+        if (_dragMode != DragMode.None)
+        {
+            UpdateDrag(point);
+            e.Handled = true;
+        }
+    }
+
+    private void Surface_PointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (_isErasing)
+        {
+            ReleasePointerCapture(e.Pointer);
+            _isErasing = false;
+            if (_erasePushedUndo)
+            {
+                NotifyOverlayChanged();
+            }
+
+            _erasePushedUndo = false;
+            e.Handled = true;
+            return;
+        }
+
+        if (_currentStroke is not null)
+        {
+            ReleasePointerCapture(e.Pointer);
+            CommitInkStroke();
+            e.Handled = true;
+            return;
+        }
+
+        if (_dragMode != DragMode.None)
+        {
+            ReleasePointerCapture(e.Pointer);
+            EndDrag();
+            e.Handled = true;
+        }
+    }
+
+    private void Surface_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
+    {
+        if (_currentStroke is not null)
+        {
+            CommitInkStroke();
+            return;
+        }
+
+        if (_isErasing)
+        {
+            _isErasing = false;
+            if (_erasePushedUndo)
+            {
+                NotifyOverlayChanged();
+            }
+
+            _erasePushedUndo = false;
+            return;
+        }
+
+        if (_dragMode != DragMode.None)
+        {
+            EndDrag();
+        }
+    }
+
+    private void CommitInkStroke()
+    {
+        var points = _currentStroke;
+        _currentStroke = null;
+        _inkPreview.Visibility = Visibility.Collapsed;
+        _inkPreview.Points = new PointCollection();
+
+        if (points is null || points.Count < 2)
         {
             return;
         }
 
         PushUndo();
-        _dragMode = DragMode.Resize;
-        _dragStart = e.GetCurrentPoint(this).Position;
-        _startWidth = selected.ActualWidth > 0 ? selected.ActualWidth : selected.Width;
-        _startHeight = selected.ActualHeight > 0 ? selected.ActualHeight : selected.Height;
+        Overlay.InkStrokes.Add(new InkStrokeOverlay
+        {
+            ColorHex = InkColorHex,
+            Thickness = InkThickness,
+            Points = points.Select(ToPagePoint).ToList()
+        });
+
+        RenderOverlay();
+        NotifyOverlayChanged();
+    }
+
+    private void CancelActiveGesture()
+    {
+        _currentStroke = null;
+        _inkPreview.Visibility = Visibility.Collapsed;
+        _inkPreview.Points = new PointCollection();
+        _isErasing = false;
+        _erasePushedUndo = false;
+        _dragMode = DragMode.None;
+        _dragPushedUndo = false;
+        _dragStartInkPoints = null;
+    }
+
+    // ═══════════ Selection and dragging ═══════════
+
+    private void Selectable_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        // Only reachable for text boxes while the text tool is active: select without stealing the caret.
+        if (sender is FrameworkElement { Tag: OverlayTag tag } && tag.Kind == TextTagKind)
+        {
+            SelectItem(SelectionKind.Text, tag.Id);
+        }
+    }
+
+    /// <summary>Topmost-first hit test against the overlay model, in page units.</summary>
+    private (SelectionKind Kind, string Id)? HitTest(Point pagePoint)
+    {
+        for (var index = Overlay.Signatures.Count - 1; index >= 0; index--)
+        {
+            var item = Overlay.Signatures[index];
+            if (Contains(new Rect(item.X, item.Y, item.Width, item.Height), pagePoint))
+            {
+                return (SelectionKind.Signature, item.Id);
+            }
+        }
+
+        for (var index = Overlay.TextItems.Count - 1; index >= 0; index--)
+        {
+            var item = Overlay.TextItems[index];
+            if (Contains(new Rect(item.X, item.Y, item.Width, item.Height), pagePoint))
+            {
+                return (SelectionKind.Text, item.Id);
+            }
+        }
+
+        for (var index = Overlay.InkStrokes.Count - 1; index >= 0; index--)
+        {
+            var stroke = Overlay.InkStrokes[index];
+            var tolerance = Math.Max(4, stroke.Thickness / 2 + 3);
+            if (IsPointNearStroke(pagePoint, stroke.Points, tolerance))
+            {
+                return (SelectionKind.Ink, stroke.Id);
+            }
+        }
+
+        return null;
+    }
+
+    private void ResizeHandle_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (_selectionKind is not (SelectionKind.Text or SelectionKind.Signature))
+        {
+            return;
+        }
+
+        BeginDrag(DragMode.Resize, e.GetCurrentPoint(this).Position);
         _resizeHandle.CapturePointer(e.Pointer);
         e.Handled = true;
     }
 
     private void ResizeHandle_PointerMoved(object sender, PointerRoutedEventArgs e)
     {
-        if (_dragMode != DragMode.Resize || TryGetSelectedElement() is not { } selected)
+        if (_dragMode != DragMode.Resize)
         {
             return;
         }
 
-        var point = e.GetCurrentPoint(this).Position;
-        selected.Width = Math.Max(40, _startWidth + point.X - _dragStart.X);
-        selected.Height = Math.Max(24, _startHeight + point.Y - _dragStart.Y);
-        UpdateSelectionAdorner(selected);
+        UpdateDrag(e.GetCurrentPoint(this).Position);
         e.Handled = true;
     }
 
@@ -523,44 +709,451 @@ public sealed partial class PdfEditSurface : Canvas
         }
 
         _resizeHandle.ReleasePointerCapture(e.Pointer);
-        _dragMode = DragMode.None;
-        PersistSelectedElement();
-        _isPlacingText = false;
-        NotifyOverlayChanged(pushUndo: false);
+        EndDrag();
         e.Handled = true;
     }
 
-    private void TextBox_PointerEntered(object sender, PointerRoutedEventArgs e)
+    private void BeginDrag(DragMode mode, Point canvasPoint)
     {
-        if (ActiveTool == ReaderEditTool.Select && sender is TextBox)
-        {
-            ProtectedCursor = MoveCursor;
-        }
-        else if (ActiveTool == ReaderEditTool.Text)
-        {
-            ProtectedCursor = TextCursor;
-        }
-    }
-
-    private void TextBox_PointerExited(object sender, PointerRoutedEventArgs e) =>
-        ProtectedCursor = ArrowCursor;
-
-    private void TextBox_TextChanged(object sender, TextChangedEventArgs e)
-    {
-        if (_isRendering || sender is not TextBox box || box.Tag is not ValueTuple<string, string> tag || tag.Item1 != "text")
+        if (GetSelectionBounds() is not { } bounds)
         {
             return;
         }
 
-        var text = Overlay.TextItems.FirstOrDefault(item => item.Id == tag.Item2);
-        if (text is null)
+        _dragMode = mode;
+        _dragStart = canvasPoint;
+        _dragStartBounds = bounds;
+        _dragPushedUndo = false;
+        _dragStartInkPoints = _selectionKind == SelectionKind.Ink
+            ? FindInk(_selectedId)?.Points.Select(point => new PointOverlay { X = point.X, Y = point.Y }).ToList()
+            : null;
+    }
+
+    private void UpdateDrag(Point canvasPoint)
+    {
+        var deltaX = (canvasPoint.X - _dragStart.X) / DisplayScale;
+        var deltaY = (canvasPoint.Y - _dragStart.Y) / DisplayScale;
+
+        if (!_dragPushedUndo)
+        {
+            if (Math.Abs(deltaX) * DisplayScale < 2 && Math.Abs(deltaY) * DisplayScale < 2)
+            {
+                return;
+            }
+
+            PushUndo();
+            _dragPushedUndo = true;
+        }
+
+        if (_dragMode == DragMode.Move)
+        {
+            var x = Math.Max(0, _dragStartBounds.X + deltaX);
+            var y = Math.Max(0, _dragStartBounds.Y + deltaY);
+            MoveSelection(x - _dragStartBounds.X, y - _dragStartBounds.Y);
+        }
+        else if (_dragMode == DragMode.Resize)
+        {
+            ResizeSelection(
+                Math.Max(12, _dragStartBounds.Width + deltaX),
+                Math.Max(10, _dragStartBounds.Height + deltaY));
+        }
+
+        SyncSelectedElement();
+        RestoreSelectionAdorner();
+    }
+
+    private void EndDrag()
+    {
+        var changed = _dragPushedUndo;
+        _dragMode = DragMode.None;
+        _dragPushedUndo = false;
+        _dragStartInkPoints = null;
+
+        if (changed)
+        {
+            NotifyOverlayChanged();
+        }
+    }
+
+    private void MoveSelection(double offsetX, double offsetY)
+    {
+        switch (_selectionKind)
+        {
+            case SelectionKind.Text when FindText(_selectedId) is { } text:
+                text.X = _dragStartBounds.X + offsetX;
+                text.Y = _dragStartBounds.Y + offsetY;
+                break;
+
+            case SelectionKind.Signature when FindSignature(_selectedId) is { } signature:
+                signature.X = _dragStartBounds.X + offsetX;
+                signature.Y = _dragStartBounds.Y + offsetY;
+                break;
+
+            case SelectionKind.Ink when FindInk(_selectedId) is { } ink && _dragStartInkPoints is { } origin:
+                for (var index = 0; index < ink.Points.Count && index < origin.Count; index++)
+                {
+                    ink.Points[index].X = origin[index].X + offsetX;
+                    ink.Points[index].Y = origin[index].Y + offsetY;
+                }
+
+                break;
+        }
+    }
+
+    private void ResizeSelection(double width, double height)
+    {
+        switch (_selectionKind)
+        {
+            case SelectionKind.Text when FindText(_selectedId) is { } text:
+                text.Width = width;
+                text.Height = height;
+                break;
+
+            case SelectionKind.Signature when FindSignature(_selectedId) is { } signature:
+                signature.Width = width;
+                signature.Height = height;
+                break;
+        }
+    }
+
+    /// <summary>Pushes the current model geometry back onto the live visual without a full re-render.</summary>
+    private void SyncSelectedElement()
+    {
+        if (TryGetSelectedElement() is not { } element)
+        {
+            return;
+        }
+
+        switch (_selectionKind)
+        {
+            case SelectionKind.Text when FindText(_selectedId) is { } text:
+                SetLeft(element, text.X * DisplayScale);
+                SetTop(element, text.Y * DisplayScale);
+                element.Width = Math.Max(24, text.Width * DisplayScale);
+                element.Height = Math.Max(16, text.Height * DisplayScale);
+                break;
+
+            case SelectionKind.Signature when FindSignature(_selectedId) is { } signature:
+                SetLeft(element, signature.X * DisplayScale);
+                SetTop(element, signature.Y * DisplayScale);
+                element.Width = Math.Max(8, signature.Width * DisplayScale);
+                element.Height = Math.Max(8, signature.Height * DisplayScale);
+                break;
+
+            case SelectionKind.Ink when element is Polyline polyline && FindInk(_selectedId) is { } ink:
+                polyline.Points = BuildPointCollection(ink.Points.Select(ToCanvasPoint));
+                break;
+        }
+    }
+
+    private void SelectItem(SelectionKind kind, string id)
+    {
+        _selectionKind = kind;
+        _selectedId = id;
+        RestoreSelectionAdorner();
+    }
+
+    private void RestoreSelectionAdorner()
+    {
+        if (GetSelectionBounds() is not { } bounds)
+        {
+            _selectionAdorner.Visibility = Visibility.Collapsed;
+            _resizeHandle.Visibility = Visibility.Collapsed;
+            _textToolbar.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var left = bounds.X * DisplayScale;
+        var top = bounds.Y * DisplayScale;
+        var width = Math.Max(4, bounds.Width * DisplayScale);
+        var height = Math.Max(4, bounds.Height * DisplayScale);
+
+        _selectionAdorner.Width = width;
+        _selectionAdorner.Height = height;
+        SetLeft(_selectionAdorner, left);
+        SetTop(_selectionAdorner, top);
+        _selectionAdorner.Visibility = Visibility.Visible;
+
+        _resizeHandle.Visibility = _selectionKind is SelectionKind.Text or SelectionKind.Signature
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        SetLeft(_resizeHandle, left + width - _resizeHandle.Width / 2);
+        SetTop(_resizeHandle, top + height - _resizeHandle.Height / 2);
+
+        if (_selectionKind == SelectionKind.Text)
+        {
+            UpdateTextToolbar(left, top, width);
+        }
+        else
+        {
+            _textToolbar.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    /// <summary>Selection bounds in page units, derived from the model so they never depend on layout timing.</summary>
+    private Rect? GetSelectionBounds()
+    {
+        switch (_selectionKind)
+        {
+            case SelectionKind.Text when FindText(_selectedId) is { } text:
+                return new Rect(text.X, text.Y, Math.Max(4, text.Width), Math.Max(4, text.Height));
+
+            case SelectionKind.Signature when FindSignature(_selectedId) is { } signature:
+                return new Rect(signature.X, signature.Y, Math.Max(4, signature.Width), Math.Max(4, signature.Height));
+
+            case SelectionKind.Ink when FindInk(_selectedId) is { } ink && ink.Points.Count > 0:
+                return GetInkBounds(ink);
+
+            default:
+                return null;
+        }
+    }
+
+    private static Rect GetInkBounds(InkStrokeOverlay ink)
+    {
+        var minX = ink.Points.Min(point => point.X);
+        var minY = ink.Points.Min(point => point.Y);
+        var maxX = ink.Points.Max(point => point.X);
+        var maxY = ink.Points.Max(point => point.Y);
+        var padding = Math.Max(2, ink.Thickness);
+        return new Rect(
+            minX - padding,
+            minY - padding,
+            Math.Max(4, maxX - minX + padding * 2),
+            Math.Max(4, maxY - minY + padding * 2));
+    }
+
+    private FrameworkElement? TryGetSelectedElement()
+    {
+        if (_selectionKind == SelectionKind.None || _selectedId is null)
+        {
+            return null;
+        }
+
+        var kind = _selectionKind switch
+        {
+            SelectionKind.Text => TextTagKind,
+            SelectionKind.Signature => SignatureTagKind,
+            _ => InkTagKind
+        };
+
+        return Children
+            .OfType<FrameworkElement>()
+            .FirstOrDefault(element => element.Tag is OverlayTag tag && tag.Kind == kind && tag.Id == _selectedId);
+    }
+
+    private TextOverlay? FindText(string? id) =>
+        id is null ? null : Overlay.TextItems.FirstOrDefault(item => item.Id == id);
+
+    private SignatureOverlay? FindSignature(string? id) =>
+        id is null ? null : Overlay.Signatures.FirstOrDefault(item => item.Id == id);
+
+    private InkStrokeOverlay? FindInk(string? id) =>
+        id is null ? null : Overlay.InkStrokes.FirstOrDefault(item => item.Id == id);
+
+    // ═══════════ Text ═══════════
+
+    private void PlaceTextAt(Point pagePoint)
+    {
+        PushUndo();
+        var text = new TextOverlay
+        {
+            X = Math.Max(0, pagePoint.X),
+            Y = Math.Max(0, pagePoint.Y),
+            Text = string.Empty,
+            Width = 160,
+            Height = 32
+        };
+
+        Overlay.TextItems.Add(text);
+        RenderOverlay();
+        SelectItem(SelectionKind.Text, text.Id);
+
+        if (TryGetSelectedElement() is TextBox box)
+        {
+            box.Focus(FocusState.Programmatic);
+        }
+    }
+
+    private void TextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_isRendering || sender is not TextBox box || box.Tag is not OverlayTag tag || tag.Kind != TextTagKind)
+        {
+            return;
+        }
+
+        if (FindText(tag.Id) is not { } text)
         {
             return;
         }
 
         text.Text = box.Text;
-        text.Width = Math.Max(40, box.Width / DisplayScale);
-        text.Height = Math.Max(24, box.Height / DisplayScale);
+        NotifyOverlayChanged();
+    }
+
+    private void TextBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (_isRendering || sender is not TextBox box || box.Tag is not OverlayTag tag || tag.Kind != TextTagKind)
+        {
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(box.Text))
+        {
+            return;
+        }
+
+        Overlay.TextItems.RemoveAll(item => item.Id == tag.Id);
+        if (_selectedId == tag.Id)
+        {
+            ClearSelection();
+        }
+
+        RenderOverlay();
+        NotifyOverlayChanged();
+    }
+
+    private bool PersistTextBoxes()
+    {
+        var changed = false;
+
+        foreach (var box in Children.OfType<TextBox>())
+        {
+            if (box.Tag is not OverlayTag tag || tag.Kind != TextTagKind || FindText(tag.Id) is not { } text)
+            {
+                continue;
+            }
+
+            if (!string.Equals(text.Text, box.Text, StringComparison.Ordinal))
+            {
+                text.Text = box.Text;
+                changed = true;
+            }
+        }
+
+        return changed;
+    }
+
+    private bool PruneEmptyTextItems() =>
+        Overlay.TextItems.RemoveAll(item => string.IsNullOrWhiteSpace(item.Text)) > 0;
+
+    private void UpdateTextToolbar(double selectedLeft, double selectedTop, double selectedWidth)
+    {
+        if (FindText(_selectedId) is not { } text)
+        {
+            _textToolbar.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        if (_textColorButton.Content is Border dot)
+        {
+            dot.Background = ColorBrushFromHex(text.ColorHex);
+        }
+
+        _isSyncingColorPicker = true;
+        _textColorPicker.Color = ParseColor(text.ColorHex);
+        _isSyncingColorPicker = false;
+
+        _textToolbar.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        var toolbarWidth = _textToolbar.DesiredSize.Width;
+        var left = Math.Max(0, selectedLeft + selectedWidth / 2 - toolbarWidth / 2);
+        var top = selectedTop - 40;
+        if (top < 0)
+        {
+            top = selectedTop + 8;
+        }
+
+        SetLeft(_textToolbar, left);
+        SetTop(_textToolbar, top);
+        _textToolbar.Visibility = Visibility.Visible;
+    }
+
+    private void ToggleSelectedTextBold()
+    {
+        if (FindText(_selectedId) is not { } text)
+        {
+            return;
+        }
+
+        PushUndo();
+        text.IsBold = !text.IsBold;
+        if (TryGetSelectedElement() is TextBox box)
+        {
+            box.FontWeight = text.IsBold ? FontWeights.Bold : FontWeights.Normal;
+        }
+
+        NotifyOverlayChanged();
+    }
+
+    private void ToggleSelectedTextItalic()
+    {
+        if (FindText(_selectedId) is not { } text)
+        {
+            return;
+        }
+
+        PushUndo();
+        text.IsItalic = !text.IsItalic;
+        if (TryGetSelectedElement() is TextBox box)
+        {
+            box.FontStyle = text.IsItalic ? TextFontStyle.Italic : TextFontStyle.Normal;
+        }
+
+        NotifyOverlayChanged();
+    }
+
+    private void ScaleSelectedFontSize(double delta)
+    {
+        if (FindText(_selectedId) is not { } text)
+        {
+            return;
+        }
+
+        var updated = Math.Clamp(text.FontSize + delta, 6, 96);
+        if (Math.Abs(updated - text.FontSize) < 0.01)
+        {
+            return;
+        }
+
+        PushUndo();
+        text.FontSize = updated;
+        text.Height = Math.Max(text.Height, updated * 1.6);
+        if (TryGetSelectedElement() is TextBox box)
+        {
+            box.FontSize = Math.Max(6, updated * DisplayScale);
+            box.Height = Math.Max(16, text.Height * DisplayScale);
+        }
+
+        RestoreSelectionAdorner();
+        NotifyOverlayChanged();
+    }
+
+    private void TextColorPicker_ColorChanged(ColorPicker sender, ColorChangedEventArgs args)
+    {
+        if (_isSyncingColorPicker || FindText(_selectedId) is not { } text)
+        {
+            return;
+        }
+
+        var colorHex = $"#{args.NewColor.R:X2}{args.NewColor.G:X2}{args.NewColor.B:X2}";
+        if (string.Equals(colorHex, text.ColorHex, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        PushUndo();
+        text.ColorHex = colorHex;
+        if (TryGetSelectedElement() is TextBox box)
+        {
+            box.Foreground = new SolidColorBrush(args.NewColor);
+            ApplyTextBoxChrome(box, colorHex);
+        }
+
+        if (_textColorButton.Content is Border dot)
+        {
+            dot.Background = new SolidColorBrush(args.NewColor);
+        }
+
         NotifyOverlayChanged();
     }
 
@@ -580,17 +1173,17 @@ public sealed partial class PdfEditSurface : Canvas
         box.Resources["TextControlBorderBrushPointerOver"] = transparent;
         box.Resources["TextControlBorderBrushFocused"] = transparent;
         box.Resources["TextControlBorderBrushDisabled"] = transparent;
-        box.Resources["TextControlPlaceholderForeground"] = new SolidColorBrush(Windows.UI.Color.FromArgb(160, 0, 0, 0));
+        box.Resources["TextControlPlaceholderForeground"] = new SolidColorBrush(Windows.UI.Color.FromArgb(140, 128, 128, 128));
     }
 
-    private void Surface_KeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
+    private void Surface_KeyDown(object sender, KeyRoutedEventArgs e)
     {
         if (e.OriginalSource is TextBox)
         {
             return;
         }
 
-        if (e.Key == Windows.System.VirtualKey.Delete)
+        if (e.Key == Windows.System.VirtualKey.Delete || e.Key == Windows.System.VirtualKey.Back)
         {
             DeleteSelection();
             e.Handled = true;
@@ -602,305 +1195,70 @@ public sealed partial class PdfEditSurface : Canvas
         }
     }
 
-    private bool SelectFromTag(object? tag)
+    // ═══════════ Eraser ═══════════
+
+    private void TryEraseAt(Point canvasPoint)
     {
-        if (tag is not ValueTuple<string, string> typedTag)
-        {
-            return false;
-        }
-
-        var kind = typedTag.Item1 switch
-        {
-            "text" => SelectionKind.Text,
-            "signature" => SelectionKind.Signature,
-            "ink" => SelectionKind.Ink,
-            _ => SelectionKind.None
-        };
-
-        if (kind == SelectionKind.None)
-        {
-            return false;
-        }
-
-        SelectItem(kind, typedTag.Item2);
-        return true;
-    }
-
-    private void SelectItem(SelectionKind kind, string id)
-    {
-        _selectionKind = kind;
-        _selectedId = id;
-        RestoreSelectionAdorner();
-    }
-
-    private void RestoreSelectionAdorner()
-    {
-        if (TryGetSelectedElement() is { } selected)
-        {
-            UpdateSelectionAdorner(selected);
-        }
-        else
-        {
-            _selectionAdorner.Visibility = Visibility.Collapsed;
-            _resizeHandle.Visibility = Visibility.Collapsed;
-        }
-    }
-
-    private FrameworkElement? TryGetSelectedElement()
-    {
-        if (_selectionKind == SelectionKind.None || _selectedId is null)
-        {
-            return null;
-        }
-
-        return Children
-            .OfType<FrameworkElement>()
-            .FirstOrDefault(element =>
-                element.Tag is ValueTuple<string, string> tag &&
-                tag.Item2 == _selectedId &&
-                ((_selectionKind == SelectionKind.Text && tag.Item1 == "text") ||
-                 (_selectionKind == SelectionKind.Signature && tag.Item1 == "signature") ||
-                 (_selectionKind == SelectionKind.Ink && tag.Item1 == "ink")));
-    }
-
-    private void UpdateSelectionAdorner(FrameworkElement selected)
-    {
-        var left = Canvas.GetLeft(selected);
-        var top = Canvas.GetTop(selected);
-        var width = selected.ActualWidth > 0 ? selected.ActualWidth : selected.Width;
-        var height = selected.ActualHeight > 0 ? selected.ActualHeight : selected.Height;
-
-        if (double.IsNaN(left) || double.IsNaN(top) || width <= 0 || height <= 0)
+        if (HitTest(ToPagePosition(canvasPoint)) is not { } hit)
         {
             return;
         }
 
-        _selectionAdorner.Width = width;
-        _selectionAdorner.Height = height;
-        Canvas.SetLeft(_selectionAdorner, left);
-        Canvas.SetTop(_selectionAdorner, top);
-        _selectionAdorner.Visibility = Visibility.Visible;
-
-        _resizeHandle.Visibility = _selectionKind is SelectionKind.Text or SelectionKind.Signature
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        Canvas.SetLeft(_resizeHandle, left + width - _resizeHandle.Width / 2);
-        Canvas.SetTop(_resizeHandle, top + height - _resizeHandle.Height / 2);
-
-        if (_selectionKind == SelectionKind.Text && _selectedId is not null)
+        EnsureEraseUndo();
+        switch (hit.Kind)
         {
-            UpdateTextToolbar(left, top, width);
-        }
-        else
-        {
-            _textToolbar.Visibility = Visibility.Collapsed;
-        }
-    }
-
-    private void PersistSelectedElement()
-    {
-        if (TryGetSelectedElement() is not { } selected || _selectedId is null)
-        {
-            return;
+            case SelectionKind.Text:
+                Overlay.TextItems.RemoveAll(item => item.Id == hit.Id);
+                break;
+            case SelectionKind.Signature:
+                Overlay.Signatures.RemoveAll(item => item.Id == hit.Id);
+                break;
+            case SelectionKind.Ink:
+                Overlay.InkStrokes.RemoveAll(item => item.Id == hit.Id);
+                break;
         }
 
-        var left = Canvas.GetLeft(selected) / DisplayScale;
-        var top = Canvas.GetTop(selected) / DisplayScale;
-        var width = Math.Max(40, selected.Width / DisplayScale);
-        var height = Math.Max(24, selected.Height / DisplayScale);
+        ClearSelection();
+        RenderOverlay();
 
-        if (_selectionKind == SelectionKind.Text)
+        if (!_isErasing)
         {
-            var text = Overlay.TextItems.FirstOrDefault(item => item.Id == _selectedId);
-            if (text is not null)
-            {
-                text.X = left;
-                text.Y = top;
-                text.Width = width;
-                text.Height = height;
-                if (selected is TextBox box)
-                {
-                    text.Text = box.Text;
-                    text.FontSize = Math.Max(8, box.FontSize / DisplayScale);
-                    text.IsBold = box.FontWeight.Weight >= FontWeights.SemiBold.Weight;
-                    text.IsItalic = box.FontStyle == TextFontStyle.Italic;
-                }
-            }
-        }
-        else if (_selectionKind == SelectionKind.Signature)
-        {
-            var signature = Overlay.Signatures.FirstOrDefault(item => item.Id == _selectedId);
-            if (signature is not null)
-            {
-                signature.X = left;
-                signature.Y = top;
-                signature.Width = width;
-                signature.Height = height;
-            }
+            NotifyOverlayChanged();
         }
     }
 
-    private void PersistTextBoxes()
+    private void EnsureEraseUndo()
     {
-        foreach (var box in Children.OfType<TextBox>())
-        {
-            if (box.Tag is not ValueTuple<string, string> tag || tag.Item1 != "text")
-            {
-                continue;
-            }
-
-            var text = Overlay.TextItems.FirstOrDefault(item => item.Id == tag.Item2);
-            if (text is null)
-            {
-                continue;
-            }
-
-            text.X = Canvas.GetLeft(box) / DisplayScale;
-            text.Y = Canvas.GetTop(box) / DisplayScale;
-            text.Text = box.Text;
-            text.FontSize = Math.Max(8, box.FontSize / DisplayScale);
-            text.Width = Math.Max(40, box.Width / DisplayScale);
-            text.Height = Math.Max(24, box.Height / DisplayScale);
-            text.IsBold = box.FontWeight.Weight >= FontWeights.SemiBold.Weight;
-            text.IsItalic = box.FontStyle == TextFontStyle.Italic;
-        }
-
-        NotifyOverlayChanged();
-    }
-
-    private void UpdateTextToolbar(double selectedLeft, double selectedTop, double selectedWidth)
-    {
-        var text = Overlay.TextItems.FirstOrDefault(item => item.Id == _selectedId);
-        if (text is null)
-        {
-            _textToolbar.Visibility = Visibility.Collapsed;
-            return;
-        }
-
-        if (_textColorButton.Content is Border dot)
-        {
-            dot.Background = ColorBrushFromHex(text.ColorHex);
-        }
-
-        _textToolbar.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        var toolbarWidth = _textToolbar.DesiredSize.Width;
-        var left = Math.Max(0, selectedLeft + selectedWidth / 2 - toolbarWidth / 2);
-        var top = selectedTop - 36;
-        if (top < 0)
-        {
-            top = selectedTop + 8;
-        }
-
-        Canvas.SetLeft(_textToolbar, left);
-        Canvas.SetTop(_textToolbar, top);
-        _textToolbar.Visibility = Visibility.Visible;
-    }
-
-    private void ApplySelectedTextStyle(bool isBold, bool isItalic)
-    {
-        if (_selectionKind != SelectionKind.Text || _selectedId is null)
+        if (_isErasing && _erasePushedUndo)
         {
             return;
         }
 
         PushUndo();
-        var text = Overlay.TextItems.FirstOrDefault(item => item.Id == _selectedId);
-        if (text is null)
-        {
-            return;
-        }
-
-        text.IsBold = isBold;
-        text.IsItalic = isItalic;
-
-        if (TryGetSelectedElement() is TextBox box)
-        {
-            box.FontWeight = isBold ? FontWeights.SemiBold : FontWeights.Normal;
-            box.FontStyle = isItalic ? TextFontStyle.Italic : TextFontStyle.Normal;
-        }
-
-        NotifyOverlayChanged(pushUndo: false);
+        _erasePushedUndo = true;
     }
 
-    private void ApplySelectedTextColor(Windows.UI.Color color)
+    private static bool Contains(Rect rect, Point point) =>
+        point.X >= rect.X && point.X <= rect.X + rect.Width &&
+        point.Y >= rect.Y && point.Y <= rect.Y + rect.Height;
+
+    private static bool IsPointNearStroke(Point point, IReadOnlyList<PointOverlay> points, double tolerance)
     {
-        if (_selectionKind != SelectionKind.Text || _selectedId is null)
-        {
-            return;
-        }
-
-        PushUndo();
-        var text = Overlay.TextItems.FirstOrDefault(item => item.Id == _selectedId);
-        if (text is null)
-        {
-            return;
-        }
-
-        text.ColorHex = $"#{color.R:X2}{color.G:X2}{color.B:X2}";
-        if (TryGetSelectedElement() is TextBox box)
-        {
-            box.Foreground = new SolidColorBrush(color);
-            ApplyTextBoxChrome(box, text.ColorHex);
-        }
-
-        if (_textColorButton.Content is Border dot)
-        {
-            dot.Background = new SolidColorBrush(color);
-        }
-
-        NotifyOverlayChanged(pushUndo: false);
-    }
-
-    private void TryEraseAt(Point point)
-    {
-        var hit = Children
-            .OfType<FrameworkElement>()
-            .LastOrDefault(element =>
-                element.Tag is ValueTuple<string, string> tag &&
-                tag.Item1 != "ink" &&
-                IsPointInsideElement(point, element));
-
-        if (hit is not null)
-        {
-            SelectFromTag(hit.Tag);
-            DeleteSelection();
-            return;
-        }
-
-        for (var index = Overlay.InkStrokes.Count - 1; index >= 0; index--)
-        {
-            var points = Overlay.InkStrokes[index].Points.Select(ToCanvasPoint).ToArray();
-            if (IsPointNearStroke(point, points, Math.Max(8, Overlay.InkStrokes[index].Thickness * DisplayScale + 4)))
-            {
-                PushUndo();
-                Overlay.InkStrokes.RemoveAt(index);
-                ClearSelection();
-                RenderOverlay();
-                NotifyOverlayChanged(pushUndo: false);
-                return;
-            }
-        }
-    }
-
-    private static bool IsPointInsideElement(Point point, FrameworkElement element)
-    {
-        var left = Canvas.GetLeft(element);
-        var top = Canvas.GetTop(element);
-        var width = element.ActualWidth > 0 ? element.ActualWidth : element.Width;
-        var height = element.ActualHeight > 0 ? element.ActualHeight : element.Height;
-        return point.X >= left && point.X <= left + width && point.Y >= top && point.Y <= top + height;
-    }
-
-    private static bool IsPointNearStroke(Point point, IReadOnlyList<Point> points, double tolerance)
-    {
-        if (points.Count < 2)
+        if (points.Count == 0)
         {
             return false;
+        }
+
+        if (points.Count == 1)
+        {
+            return Distance(point, new Point(points[0].X, points[0].Y)) <= tolerance;
         }
 
         for (var i = 1; i < points.Count; i++)
         {
-            if (DistanceToSegment(point, points[i - 1], points[i]) <= tolerance)
+            var start = new Point(points[i - 1].X, points[i - 1].Y);
+            var end = new Point(points[i].X, points[i].Y);
+            if (DistanceToSegment(point, start, end) <= tolerance)
             {
                 return true;
             }
@@ -909,36 +1267,26 @@ public sealed partial class PdfEditSurface : Canvas
         return false;
     }
 
+    private static double Distance(Point a, Point b) =>
+        Math.Sqrt(Math.Pow(a.X - b.X, 2) + Math.Pow(a.Y - b.Y, 2));
+
     private static double DistanceToSegment(Point point, Point start, Point end)
     {
         var dx = end.X - start.X;
         var dy = end.Y - start.Y;
         if (Math.Abs(dx) < 0.001 && Math.Abs(dy) < 0.001)
         {
-            return Math.Sqrt(Math.Pow(point.X - start.X, 2) + Math.Pow(point.Y - start.Y, 2));
+            return Distance(point, start);
         }
 
-        var t = ((point.X - start.X) * dx + (point.Y - start.Y) * dy) / (dx * dx + dy * dy);
-        t = Math.Clamp(t, 0, 1);
-        var projection = new Point(start.X + t * dx, start.Y + t * dy);
-        return Math.Sqrt(Math.Pow(point.X - projection.X, 2) + Math.Pow(point.Y - projection.Y, 2));
+        var t = Math.Clamp(((point.X - start.X) * dx + (point.Y - start.Y) * dy) / (dx * dx + dy * dy), 0, 1);
+        return Distance(point, new Point(start.X + t * dx, start.Y + t * dy));
     }
 
-    private void RedrawInkOnly()
-    {
-        var keep = Children.Where(child => child is not Polyline || ReferenceEquals(child, _selectionAdorner)).ToList();
-        Children.Clear();
+    // ═══════════ Helpers ═══════════
 
-        foreach (var stroke in _activeInkStrokes)
-        {
-            Children.Add(CreatePolyline(stroke, InkColorHex, InkThickness * DisplayScale));
-        }
-
-        foreach (var child in keep)
-        {
-            Children.Add(child);
-        }
-    }
+    private Point ToPagePosition(Point canvasPoint) =>
+        new(canvasPoint.X / DisplayScale, canvasPoint.Y / DisplayScale);
 
     private Point ToCanvasPoint(PointOverlay point) =>
         new(point.X * DisplayScale, point.Y * DisplayScale);
@@ -946,7 +1294,7 @@ public sealed partial class PdfEditSurface : Canvas
     private PointOverlay ToPagePoint(Point point) =>
         new() { X = point.X / DisplayScale, Y = point.Y / DisplayScale };
 
-    private static Polyline CreatePolyline(IReadOnlyList<Point> points, string colorHex, double thickness)
+    private static PointCollection BuildPointCollection(IEnumerable<Point> points)
     {
         var collection = new PointCollection();
         foreach (var point in points)
@@ -954,16 +1302,19 @@ public sealed partial class PdfEditSurface : Canvas
             collection.Add(point);
         }
 
-        return new Polyline
+        return collection;
+    }
+
+    private static Polyline CreatePolyline(IEnumerable<Point> points, string colorHex, double thickness) =>
+        new()
         {
             Stroke = ColorBrushFromHex(colorHex),
             StrokeThickness = Math.Max(1, thickness),
             StrokeStartLineCap = PenLineCap.Round,
             StrokeEndLineCap = PenLineCap.Round,
             StrokeLineJoin = PenLineJoin.Round,
-            Points = collection
+            Points = BuildPointCollection(points)
         };
-    }
 
     private static bool TryCreateSignatureImage(SignatureOverlay signature, out Image image)
     {
@@ -998,10 +1349,8 @@ public sealed partial class PdfEditSurface : Canvas
         }
     }
 
-    private void NotifyOverlayChanged(bool pushUndo = true)
-    {
+    private void NotifyOverlayChanged() =>
         OverlayChanged?.Invoke(this, CloneOverlay(Overlay));
-    }
 
     private static PageOverlayState CloneOverlay(PageOverlayState source) =>
         new()
@@ -1009,6 +1358,7 @@ public sealed partial class PdfEditSurface : Canvas
             InkStrokes = source.InkStrokes
                 .Select(stroke => new InkStrokeOverlay
                 {
+                    Id = stroke.Id,
                     ColorHex = stroke.ColorHex,
                     Thickness = stroke.Thickness,
                     Points = stroke.Points.Select(point => new PointOverlay { X = point.X, Y = point.Y }).ToList()
@@ -1042,12 +1392,12 @@ public sealed partial class PdfEditSurface : Canvas
                 .ToList()
         };
 
-    private Button CreateToolbarButton(string text, RoutedEventHandler? click = null)
+    private static Button CreateToolbarButton(string text, RoutedEventHandler? click = null)
     {
         var button = new Button
         {
             Content = text,
-            Width = 28,
+            Width = 30,
             Height = 28,
             Padding = new Thickness(0),
             FontSize = 12,
@@ -1062,26 +1412,6 @@ public sealed partial class PdfEditSurface : Canvas
         }
 
         return button;
-    }
-
-    private Flyout CreateColorFlyout()
-    {
-        var picker = new ColorPicker
-        {
-            Color = Colors.Black,
-            IsAlphaEnabled = false,
-            IsAlphaSliderVisible = false,
-            IsAlphaTextInputVisible = false,
-            IsColorChannelTextInputVisible = true,
-            IsHexInputVisible = true,
-            Width = 280
-        };
-        picker.ColorChanged += (_, args) => ApplySelectedTextColor(args.NewColor);
-
-        return new Flyout
-        {
-            Content = picker
-        };
     }
 
     private static SolidColorBrush ColorBrushFromHex(string colorHex) =>

@@ -12,6 +12,7 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
     private readonly IDocumentOpenService _documentOpenService;
     private readonly IDocumentTabService _tabService;
     private readonly IUserSettingsService _settingsService;
+    private readonly IInPlaceSaveService _inPlaceSaveService;
     private readonly List<PdfDocumentSession> _sourceDocuments = [];
     private ObservableCollection<DocumentItemViewModel> _pages = [];
     private bool _isBusy;
@@ -24,12 +25,15 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
         IPdfService pdfService,
         IDocumentOpenService documentOpenService,
         IDocumentTabService tabService,
-        IUserSettingsService settingsService)
+        IUserSettingsService settingsService,
+        IInPlaceSaveService inPlaceSaveService)
     {
         _pdfService = pdfService;
         _documentOpenService = documentOpenService;
         _tabService = tabService;
         _settingsService = settingsService;
+        _inPlaceSaveService = inPlaceSaveService;
+        _inPlaceSaveService.SessionReplaced += (_, args) => RemapSession(args.OldSession, args.NewSession);
     }
 
     public ObservableCollection<DocumentItemViewModel> Pages
@@ -214,13 +218,33 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
 
         try
         {
+            var saved = 0;
+            var failures = new List<string>();
+
             foreach (var document in _sourceDocuments.ToArray())
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                await _pdfService.SaveDocumentAsync(document, document.SourcePath, cancellationToken);
+                var sourcePath = document.SourcePath;
+                var result = await _inPlaceSaveService.SaveInPlaceAsync(document, null, cancellationToken);
+
+                if (result.Saved)
+                {
+                    saved++;
+                }
+                else
+                {
+                    failures.Add($"{Path.GetFileName(sourcePath)}: {result.ErrorMessage}");
+                }
             }
 
-            SetStatus($"Saved {_sourceDocuments.Count} document(s).", InfoBarSeverity.Success);
+            if (failures.Count > 0)
+            {
+                SetStatus($"Could not save {string.Join("; ", failures)}", InfoBarSeverity.Error);
+            }
+            else
+            {
+                SetStatus($"Saved {saved} document(s).", InfoBarSeverity.Success);
+            }
         }
         catch (PdfiumDependencyException ex)
         {
@@ -233,6 +257,28 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
         finally
         {
             IsBusy = false;
+        }
+    }
+
+    /// <summary>Swaps every reference to a replaced session after an in-place save.</summary>
+    private void RemapSession(PdfDocumentSession oldSession, PdfDocumentSession newSession)
+    {
+        if (ReferenceEquals(oldSession, newSession))
+        {
+            return;
+        }
+
+        for (var index = 0; index < _sourceDocuments.Count; index++)
+        {
+            if (ReferenceEquals(_sourceDocuments[index], oldSession))
+            {
+                _sourceDocuments[index] = newSession;
+            }
+        }
+
+        foreach (var page in Pages.Where(page => ReferenceEquals(page.Document, oldSession)))
+        {
+            page.Document = newSession;
         }
     }
 

@@ -16,6 +16,8 @@ public sealed class PageOverlayState
 
 public sealed class InkStrokeOverlay
 {
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+
     public List<PointOverlay> Points { get; set; } = [];
 
     public string ColorHex { get; set; } = "#000000";

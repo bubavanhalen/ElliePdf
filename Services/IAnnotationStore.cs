@@ -14,6 +14,9 @@ public interface IAnnotationStore
 
     void RemoveTab(Guid tabId);
 
+    /// <summary>Drops every overlay for a tab, e.g. once they have been flattened into the PDF.</summary>
+    void ClearOverlays(Guid tabId);
+
     Task LoadCompanionAsync(Guid tabId, string pdfPath, CancellationToken cancellationToken = default);
 
     Task SaveCompanionAsync(Guid tabId, string pdfPath, CancellationToken cancellationToken = default);

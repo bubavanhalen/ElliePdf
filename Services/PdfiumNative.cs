@@ -114,17 +114,10 @@ internal static partial class PdfiumNative
         IntPtr bitmap);
 
     [LibraryImport("pdfium.dll")]
-    public static partial void FPDFPageObj_SetMatrix(
-        IntPtr page_object,
-        double a,
-        double b,
-        double c,
-        double d,
-        double e,
-        double f);
+    public static partial int FPDFPageObj_SetMatrix(IntPtr page_object, ref FsMatrix matrix);
 
     [LibraryImport("pdfium.dll")]
-    public static partial int FPDFPage_InsertObject(IntPtr page, IntPtr page_object);
+    public static partial void FPDFPage_InsertObject(IntPtr page, IntPtr page_object);
 
     [LibraryImport("pdfium.dll")]
     public static partial IntPtr FPDF_CreateNewDocument();
@@ -212,6 +205,18 @@ internal struct FpdfFileWrite
 {
     public int version;
     public IntPtr WriteBlock;
+}
+
+/// <summary>Mirrors PDFium's <c>FS_MATRIX</c> (six single-precision components).</summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct FsMatrix
+{
+    public float a;
+    public float b;
+    public float c;
+    public float d;
+    public float e;
+    public float f;
 }
 
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]

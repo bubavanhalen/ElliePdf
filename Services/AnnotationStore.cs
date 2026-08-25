@@ -9,6 +9,8 @@ public sealed class AnnotationStore : IAnnotationStore
     private readonly Dictionary<Guid, PageOverlayDocument> _documents = [];
     private readonly HashSet<Guid> _dirtyTabs = [];
     private readonly Dictionary<Guid, CancellationTokenSource> _saveTimers = [];
+    private readonly Dictionary<Guid, string> _pendingSavePaths = [];
+    private readonly Lock _timerLock = new();
 
     public AnnotationStore(IUserSettingsService settingsService)
     {
@@ -52,14 +54,32 @@ public sealed class AnnotationStore : IAnnotationStore
 
     public void RemoveTab(Guid tabId)
     {
-        if (_saveTimers.Remove(tabId, out var timer))
-        {
-            timer.Cancel();
-            timer.Dispose();
-        }
-
+        CancelPendingSave(tabId);
         _documents.Remove(tabId);
         _dirtyTabs.Remove(tabId);
+    }
+
+    public void ClearOverlays(Guid tabId)
+    {
+        CancelPendingSave(tabId);
+        _documents[tabId] = new PageOverlayDocument();
+        _dirtyTabs.Remove(tabId);
+    }
+
+    /// <summary>
+    /// Cancels a debounced companion save. The token source is disposed by the background task
+    /// that owns it, so cancelling here can never pull the token out from under it.
+    /// </summary>
+    private void CancelPendingSave(Guid tabId)
+    {
+        CancellationTokenSource? timer;
+        lock (_timerLock)
+        {
+            _saveTimers.Remove(tabId, out timer);
+            _pendingSavePaths.Remove(tabId);
+        }
+
+        timer?.Cancel();
     }
 
     public PageOverlayDocument? GetOverlayDocument(Guid tabId) =>
@@ -117,14 +137,14 @@ public sealed class AnnotationStore : IAnnotationStore
             return;
         }
 
-        if (_saveTimers.Remove(tabId, out var existing))
-        {
-            existing.Cancel();
-            existing.Dispose();
-        }
+        CancelPendingSave(tabId);
 
         var cts = new CancellationTokenSource();
-        _saveTimers[tabId] = cts;
+        lock (_timerLock)
+        {
+            _saveTimers[tabId] = cts;
+            _pendingSavePaths[tabId] = pdfPath;
+        }
 
         _ = Task.Run(async () =>
         {
@@ -136,11 +156,21 @@ public sealed class AnnotationStore : IAnnotationStore
             catch (OperationCanceledException)
             {
             }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
             finally
             {
-                if (_saveTimers.TryGetValue(tabId, out var current) && ReferenceEquals(current, cts))
+                lock (_timerLock)
                 {
-                    _saveTimers.Remove(tabId);
+                    if (_saveTimers.TryGetValue(tabId, out var current) && ReferenceEquals(current, cts))
+                    {
+                        _saveTimers.Remove(tabId);
+                        _pendingSavePaths.Remove(tabId);
+                    }
                 }
 
                 cts.Dispose();
@@ -150,16 +180,40 @@ public sealed class AnnotationStore : IAnnotationStore
 
     public async Task FlushPendingSavesAsync(CancellationToken cancellationToken = default)
     {
-        foreach (var (tabId, timer) in _saveTimers.ToArray())
+        KeyValuePair<Guid, string>[] pending;
+        CancellationTokenSource[] timers;
+
+        lock (_timerLock)
         {
-            timer.Cancel();
-            timer.Dispose();
-            _saveTimers.Remove(tabId);
+            pending = _pendingSavePaths.ToArray();
+            timers = _saveTimers.Values.ToArray();
+            _saveTimers.Clear();
+            _pendingSavePaths.Clear();
         }
 
-        foreach (var tabId in _dirtyTabs.ToArray())
+        foreach (var timer in timers)
+        {
+            timer.Cancel();
+        }
+
+        foreach (var (tabId, pdfPath) in pending)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (!_dirtyTabs.Contains(tabId))
+            {
+                continue;
+            }
+
+            try
+            {
+                await SaveCompanionAsync(tabId, pdfPath, cancellationToken);
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
         }
     }
 }

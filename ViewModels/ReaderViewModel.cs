@@ -721,6 +721,10 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         }
 
         await SaveToPathAsync(tab, tab.FilePath);
+
+        // The document was reopened from the flattened file; refresh the page and overlay surface.
+        NotifyDocumentChanged();
+        await RenderCurrentPageAsync();
     }
 
     [RelayCommand]
@@ -1005,15 +1009,16 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
             var scale = ResolveRenderScale();
             var rendered = await _pdfService.RenderPageAsync(document, pageIndex, scale, token);
             _lastRenderedPng = rendered.PngBytes;
-            PageImage = await BitmapHelper.CreateBitmapAsync(rendered.PngBytes);
+            var bitmap = await BitmapHelper.CreateBitmapAsync(rendered.PngBytes);
             PagePixelWidth = rendered.Width;
             PagePixelHeight = rendered.Height;
             PageWidthPoints = rendered.PageWidthPoints;
             PageHeightPoints = rendered.PageHeightPoints;
             _pageWidthPoints = rendered.PageWidthPoints;
             _pageHeightPoints = rendered.PageHeightPoints;
-            UpdateSearchHighlights();
             OnPropertyChanged(nameof(DisplayScale));
+            PageImage = bitmap;
+            UpdateSearchHighlights();
             UpdateSelectedThumbnail(pageIndex);
             NotifyDocumentChanged();
             NotifyZoomChanged();
@@ -1051,6 +1056,14 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         catch (InvalidOperationException ex)
         {
             SetStatus(ex.Message, InfoBarSeverity.Error);
+        }
+        catch (IOException ex)
+        {
+            SetStatus($"Could not write '{Path.GetFileName(outputPath)}': {ex.Message}", InfoBarSeverity.Error);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            SetStatus($"Access denied writing '{Path.GetFileName(outputPath)}'.", InfoBarSeverity.Error);
         }
         finally
         {
