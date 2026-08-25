@@ -309,6 +309,129 @@ public sealed class PdfOverlayWriterTests : IDisposable
         });
     }
 
+    [Theory]
+    [InlineData(ShapeKind.Rectangle)]
+    [InlineData(ShapeKind.Ellipse)]
+    [InlineData(ShapeKind.Line)]
+    [InlineData(ShapeKind.Arrow)]
+    public void Shapes_are_drawn_and_leave_the_text_layer_intact(ShapeKind kind)
+    {
+        var source = PdfTestHarness.CreateTextPdf(At("source.pdf"), SourceText);
+        var overlay = new PageOverlayState
+        {
+            Shapes =
+            {
+                new ShapeOverlay
+                {
+                    Kind = kind,
+                    Start = new PointOverlay { X = 60, Y = 120 },
+                    End = new PointOverlay { X = 340, Y = 260 },
+                    ColorHex = "#FF0000",
+                    Thickness = 4
+                }
+            }
+        };
+
+        Inspect(Embed(source, overlay, $"shape-{kind}.pdf"), document =>
+        {
+            var render = PdfTestHarness.Render(document, 0);
+
+            // Something red must have been drawn inside the shape's box.
+            var darkest = PdfTestHarness.DarkestInRegion(render, 55, 115, 290, 150);
+            Assert.True(darkest < 150, $"{kind}: nothing was drawn (darkest channel {darkest})");
+
+            // And the page's own text must be untouched.
+            Assert.Contains("Hello searchable", PdfTestHarness.ExtractText(document, 0));
+            return true;
+        });
+    }
+
+    [Fact]
+    public void A_filled_shape_paints_its_interior()
+    {
+        var source = PdfTestHarness.CreateTextPdf(At("source.pdf"), SourceText);
+        var overlay = new PageOverlayState
+        {
+            Shapes =
+            {
+                new ShapeOverlay
+                {
+                    Kind = ShapeKind.Rectangle,
+                    Start = new PointOverlay { X = 80, Y = 140 },
+                    End = new PointOverlay { X = 320, Y = 250 },
+                    ColorHex = "#FF0000",
+                    FillColorHex = "#FF0000",
+                    Thickness = 2
+                }
+            }
+        };
+
+        Inspect(Embed(source, overlay, "filled.pdf"), document =>
+        {
+            var render = PdfTestHarness.Render(document, 0);
+
+            // Well inside the rectangle, away from its outline.
+            var centre = PdfTestHarness.PixelAt(render, 200, 195);
+            Assert.True(centre.R > centre.G && centre.R > centre.B,
+                $"expected a red tint inside the shape, got B={centre.B} G={centre.G} R={centre.R}");
+            Assert.True(centre.G < 250, "the interior should not still be blank paper");
+            return true;
+        });
+    }
+
+    [Fact]
+    public void Pressure_varying_ink_is_embedded_as_a_tapered_ribbon()
+    {
+        var source = PdfTestHarness.CreateTextPdf(At("source.pdf"), SourceText);
+
+        var points = new List<PointOverlay>();
+        for (var index = 0; index <= 20; index++)
+        {
+            points.Add(new PointOverlay
+            {
+                X = 40 + (index * 15),
+                Y = 200,
+                // Heavy at the start, feathering out towards the end.
+                Pressure = 1.0 - (index / 20.0 * 0.95)
+            });
+        }
+
+        var overlay = new PageOverlayState
+        {
+            InkStrokes = { new InkStrokeOverlay { ColorHex = "#000000", Thickness = 14, Points = points } }
+        };
+
+        Inspect(Embed(source, overlay, "pressure.pdf"), document =>
+        {
+            var render = PdfTestHarness.Render(document, 0);
+
+            var thickEnd = CountInkInColumn(render, x: 60);
+            var thinEnd = CountInkInColumn(render, x: 320);
+
+            Assert.True(thickEnd > 0 && thinEnd > 0, "the stroke should span the page");
+            Assert.True(
+                thickEnd > thinEnd + 2,
+                $"stroke did not taper: {thickEnd}px at the heavy end vs {thinEnd}px at the light end");
+
+            return true;
+        });
+
+        static int CountInkInColumn((byte[] Pixels, int Width, int Height) render, int x)
+        {
+            var count = 0;
+            for (var y = 0; y < render.Height; y++)
+            {
+                var pixel = PdfTestHarness.PixelAt(render, x, y);
+                if (pixel.R < 160 && pixel.G < 160 && pixel.B < 160)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+    }
+
     [Fact]
     public void Empty_overlays_are_not_treated_as_content()
     {

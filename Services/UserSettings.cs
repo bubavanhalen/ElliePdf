@@ -15,4 +15,7 @@ public sealed class UserSettings
     public int RecentFilesMaxCount { get; set; } = 12;
 
     public string AppTheme { get; set; } = "System";
+
+    /// <summary>Signatures the user has kept for reuse, most recent first.</summary>
+    public List<Models.SavedSignature> SavedSignatures { get; set; } = [];
 }

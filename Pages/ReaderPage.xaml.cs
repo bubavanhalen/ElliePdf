@@ -26,6 +26,12 @@ public sealed partial class ReaderPage : Page
 {
     private readonly List<List<Point>> _signatureStrokes = [];
     private List<Point>? _currentSignatureStroke;
+    private (string Base64, double Aspect)? _typedSignature;
+    private (string Base64, double Aspect)? _importedSignature;
+
+    /// <summary>Script-like faces that ship with Windows, in order of preference.</summary>
+    private static readonly string[] SignatureFontCandidates =
+        ["Segoe Script", "Gabriola", "Ink Free", "Brush Script MT", "Segoe UI"];
 
     private PrintDocument? _printDocument;
     private IReadOnlyList<int> _printPageIndices = [];
@@ -55,6 +61,8 @@ public sealed partial class ReaderPage : Page
         };
         PageViewer.EditSurface.OverlayChanged += EditSurface_OverlayChanged;
         PageViewer.EditSurface.ActiveToolChangeRequested += EditSurface_ActiveToolChangeRequested;
+        PageViewer.EditSurface.EditRecording += EditSurface_EditRecording;
+        ViewModel.HistoryApplied += ViewModel_HistoryApplied;
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
         BtnClearSignature.Click += BtnClearSignature_Click;
         SignatureDialog.PrimaryButtonClick += SignatureDialog_PrimaryButtonClick;
@@ -98,6 +106,8 @@ public sealed partial class ReaderPage : Page
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         PageViewer.EditSurface.OverlayChanged -= EditSurface_OverlayChanged;
         PageViewer.EditSurface.ActiveToolChangeRequested -= EditSurface_ActiveToolChangeRequested;
+        PageViewer.EditSurface.EditRecording -= EditSurface_EditRecording;
+        ViewModel.HistoryApplied -= ViewModel_HistoryApplied;
     }
 
     private void OnViewportWidthChanged(object? sender, double width) => ViewModel.ViewportWidth = width;
@@ -122,7 +132,9 @@ public sealed partial class ReaderPage : Page
         }
         else if (e.PropertyName is nameof(ReaderViewModel.ActiveEditTool)
             or nameof(ReaderViewModel.InkColorHex)
-            or nameof(ReaderViewModel.InkThickness))
+            or nameof(ReaderViewModel.InkThickness)
+            or nameof(ReaderViewModel.EraserRadius)
+            or nameof(ReaderViewModel.ErasePartially))
         {
             ApplyEditSurfaceState();
             UpdateInkPaletteSelection();
@@ -226,7 +238,15 @@ public sealed partial class ReaderPage : Page
         PageViewer.EditSurface.ActiveTool = ViewModel.ActiveEditTool;
         PageViewer.EditSurface.InkColorHex = ViewModel.InkColorHex;
         PageViewer.EditSurface.InkThickness = ViewModel.InkThickness;
+        PageViewer.EditSurface.EraserRadius = ViewModel.EraserRadius;
+        PageViewer.EditSurface.ErasePartially = ViewModel.ErasePartially;
     }
+
+    private void EditSurface_EditRecording(object? sender, PageOverlayState before) =>
+        ViewModel.RecordHistory(before);
+
+    private void ViewModel_HistoryApplied(object? sender, Services.OverlaySnapshot snapshot) =>
+        PageViewer.EditSurface.ApplyHistoryState(snapshot.State);
 
     private void EditSurface_OverlayChanged(object? sender, PageOverlayState overlay) =>
         ViewModel.PersistCurrentOverlay(overlay);
@@ -281,17 +301,20 @@ public sealed partial class ReaderPage : Page
         OpenInkPalette();
     }
 
-    private void OpenInkPalette()
+    private void OpenInkPalette() => OpenPalette(InkPalettePopup, InkPalette, InkToolButton);
+
+    /// <summary>Anchors a palette popup above the tool button that opened it.</summary>
+    private void OpenPalette(Popup popup, FrameworkElement palette, FrameworkElement anchorElement)
     {
-        InkPalette.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        var desired = InkPalette.DesiredSize;
-        var anchor = InkToolButton.TransformToVisual(RootGrid).TransformPoint(new Point(0, 0));
-        var left = anchor.X + InkToolButton.ActualWidth / 2 - desired.Width / 2;
+        palette.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        var desired = palette.DesiredSize;
+        var anchor = anchorElement.TransformToVisual(RootGrid).TransformPoint(new Point(0, 0));
+        var left = anchor.X + (anchorElement.ActualWidth / 2) - (desired.Width / 2);
         var top = anchor.Y - desired.Height - 10;
 
-        InkPalettePopup.HorizontalOffset = Math.Clamp(left, 8, Math.Max(8, RootGrid.ActualWidth - desired.Width - 8));
-        InkPalettePopup.VerticalOffset = Math.Max(8, top);
-        InkPalettePopup.IsOpen = true;
+        popup.HorizontalOffset = Math.Clamp(left, 8, Math.Max(8, RootGrid.ActualWidth - desired.Width - 8));
+        popup.VerticalOffset = Math.Max(8, top);
+        popup.IsOpen = true;
     }
 
     private void InkColorSwatch_Click(object sender, RoutedEventArgs e)
@@ -323,6 +346,33 @@ public sealed partial class ReaderPage : Page
         UpdatePaletteButton(InkThinButton, Math.Abs(ViewModel.InkThickness - 2) < 0.1);
         UpdatePaletteButton(InkMediumButton, Math.Abs(ViewModel.InkThickness - 5) < 0.1);
         UpdatePaletteButton(InkThickButton, Math.Abs(ViewModel.InkThickness - 9) < 0.1);
+        UpdatePaletteButton(EraserSmallButton, Math.Abs(ViewModel.EraserRadius - 6) < 0.1);
+        UpdatePaletteButton(EraserMediumButton, Math.Abs(ViewModel.EraserRadius - 14) < 0.1);
+        UpdatePaletteButton(EraserLargeButton, Math.Abs(ViewModel.EraserRadius - 26) < 0.1);
+    }
+
+    private void EraserToolButton_Click(object sender, RoutedEventArgs e)
+    {
+        ApplyEditSurfaceState();
+        UpdateInkPaletteSelection();
+        OpenPalette(EraserPalettePopup, EraserPalette, EraserToolButton);
+    }
+
+    private void EraserRadiusButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string value } &&
+            double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var radius))
+        {
+            ViewModel.SetEraserRadiusCommand.Execute(radius);
+            ApplyEditSurfaceState();
+            UpdateInkPaletteSelection();
+        }
+    }
+
+    private void ErasePartialToggle_Click(object sender, RoutedEventArgs e)
+    {
+        ViewModel.ToggleErasePartiallyCommand.Execute(null);
+        ApplyEditSurfaceState();
     }
 
     private static void UpdatePaletteButton(Button button, bool isSelected)
@@ -336,7 +386,10 @@ public sealed partial class ReaderPage : Page
     }
 
     private void UndoEditButton_Click(object sender, RoutedEventArgs e) =>
-        PageViewer.EditSurface.Undo();
+        ViewModel.UndoEditCommand.Execute(null);
+
+    private void RedoEditButton_Click(object sender, RoutedEventArgs e) =>
+        ViewModel.RedoEditCommand.Execute(null);
 
     private void DeleteEditButton_Click(object sender, RoutedEventArgs e) =>
         PageViewer.EditSurface.DeleteSelection();
@@ -345,9 +398,145 @@ public sealed partial class ReaderPage : Page
     {
         _signatureStrokes.Clear();
         _currentSignatureStroke = null;
+        _importedSignature = null;
+        _typedSignature = null;
         SignatureCanvas.Children.Clear();
+        ImportedSignaturePreview.Source = null;
+        TypedSignaturePreview.Source = null;
+        TypedSignatureBox.Text = string.Empty;
+
+        InitializeSignatureFonts();
+        await LoadSavedSignaturesAsync();
+
+        SignaturePivot.SelectedIndex = 0;
         SignatureDialog.XamlRoot = XamlRoot;
         await SignatureDialog.ShowAsync();
+    }
+
+    private void InitializeSignatureFonts()
+    {
+        if (TypedSignatureFontBox.Items.Count > 0)
+        {
+            return;
+        }
+
+        foreach (var family in SignatureFontCandidates)
+        {
+            TypedSignatureFontBox.Items.Add(family);
+        }
+
+        TypedSignatureFontBox.SelectedIndex = 0;
+    }
+
+    private async Task LoadSavedSignaturesAsync()
+    {
+        var saved = ViewModel.GetSavedSignatures();
+        var items = new List<SavedSignatureViewModel>();
+
+        foreach (var signature in saved)
+        {
+            BitmapImage? preview = null;
+            try
+            {
+                preview = await Helpers.BitmapHelper.CreateBitmapAsync(Convert.FromBase64String(signature.ImageBase64));
+            }
+            catch (FormatException)
+            {
+                // A corrupt entry simply does not get a thumbnail.
+            }
+
+            items.Add(new SavedSignatureViewModel(signature, preview));
+        }
+
+        SavedSignaturesGrid.ItemsSource = items;
+        NoSavedSignaturesText.Visibility = items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        SavedSignaturesGrid.Visibility = items.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private async void SavedSignaturesGrid_ItemClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is not SavedSignatureViewModel item)
+        {
+            return;
+        }
+
+        SignatureDialog.Hide();
+        PlaceSignature(item.ImageBase64, item.AspectRatio);
+        await Task.CompletedTask;
+    }
+
+    private async void DeleteSavedSignature_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string id })
+        {
+            ViewModel.DeleteSavedSignature(id);
+            await LoadSavedSignaturesAsync();
+        }
+    }
+
+    private async void TypedSignatureBox_TextChanged(object sender, TextChangedEventArgs e) =>
+        await RefreshTypedSignatureAsync();
+
+    private async void TypedSignatureFontBox_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        await RefreshTypedSignatureAsync();
+
+    private async Task RefreshTypedSignatureAsync()
+    {
+        var text = TypedSignatureBox.Text;
+        var font = TypedSignatureFontBox.SelectedItem as string ?? SignatureFontCandidates[0];
+
+        if (!Helpers.SignatureRenderer.TryRenderTyped(text, font, out var png, out var aspect))
+        {
+            _typedSignature = null;
+            TypedSignaturePreview.Source = null;
+            return;
+        }
+
+        _typedSignature = (Convert.ToBase64String(png), aspect);
+        TypedSignaturePreview.Source = await Helpers.BitmapHelper.CreateBitmapAsync(png);
+    }
+
+    private async void ImportSignatureButton_Click(object sender, RoutedEventArgs e)
+    {
+        var picker = new FileOpenPicker(XamlRoot.ContentIslandEnvironment.AppWindowId)
+        {
+            SuggestedStartLocation = PickerLocationId.PicturesLibrary
+        };
+
+        foreach (var extension in new[] { ".png", ".jpg", ".jpeg", ".bmp" })
+        {
+            picker.FileTypeFilter.Add(extension);
+        }
+
+        var file = await picker.PickSingleFileAsync();
+        if (file is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var bytes = await File.ReadAllBytesAsync(file.Path);
+
+            // Decoding and alpha-keying a photo is slow enough to freeze the window.
+            var result = await Task.Run(() =>
+                Helpers.SignatureRenderer.TryImport(bytes, out var png, out var aspect)
+                    ? (Png: png, Aspect: aspect)
+                    : ((byte[] Png, double Aspect)?)null);
+
+            if (result is not { } imported)
+            {
+                ViewModel.ReportSignatureImportFailed();
+                return;
+            }
+
+            _importedSignature = (Convert.ToBase64String(imported.Png), imported.Aspect);
+            ImportedSignaturePreview.Source = await Helpers.BitmapHelper.CreateBitmapAsync(imported.Png);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            ViewModel.ReportSignatureImportFailed();
+        }
     }
 
     private void BtnClearSignature_Click(object sender, RoutedEventArgs e)
@@ -431,6 +620,31 @@ public sealed partial class ReaderPage : Page
 
     private void SignatureDialog_PrimaryButtonClick(ContentDialog sender, ContentDialogButtonClickEventArgs args)
     {
+        var selection = SignaturePivot.SelectedIndex switch
+        {
+            0 => CaptureDrawnSignature(),
+            1 => _typedSignature is { } typed ? (typed.Base64, typed.Aspect, SaveTypedSignatureCheckBox.IsChecked == true) : null,
+            3 => _importedSignature is { } imported ? (imported.Base64, imported.Aspect, SaveImportedSignatureCheckBox.IsChecked == true) : null,
+            _ => null
+        };
+
+        if (selection is not { } chosen)
+        {
+            // Nothing usable on the active tab, so keep the dialog open.
+            args.Cancel = true;
+            return;
+        }
+
+        if (chosen.Save)
+        {
+            ViewModel.SaveSignature(chosen.Base64, chosen.Aspect);
+        }
+
+        PlaceSignature(chosen.Base64, chosen.Aspect);
+    }
+
+    private (string Base64, double Aspect, bool Save)? CaptureDrawnSignature()
+    {
         // Rasterize while the strokes are still in hand; the canvas leaves the tree as the dialog closes.
         var strokes = _signatureStrokes
             .Select(stroke => (IReadOnlyList<Helpers.StrokePoint>)stroke
@@ -440,13 +654,17 @@ public sealed partial class ReaderPage : Page
 
         if (!Helpers.SignatureRenderer.TryRender(strokes, out var pngBytes, out var aspectRatio))
         {
-            args.Cancel = true;
-            return;
+            return null;
         }
 
+        return (Convert.ToBase64String(pngBytes), aspectRatio, SaveSignatureCheckBox.IsChecked == true);
+    }
+
+    private void PlaceSignature(string base64, double aspectRatio)
+    {
         ViewModel.UseSelectToolCommand.Execute(null);
         ApplyEditSurfaceState();
-        PageViewer.EditSurface.PlaceSignature(Convert.ToBase64String(pngBytes), aspectRatio);
+        PageViewer.EditSurface.PlaceSignature(base64, aspectRatio);
     }
 
     private async void PrintButton_Click(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
@@ -710,7 +928,25 @@ public sealed partial class ReaderPage : Page
 
             if (controlDown && e.Key == VirtualKey.Z)
             {
-                PageViewer.EditSurface.Undo();
+                var shiftDown = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift)
+                    .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+
+                if (shiftDown)
+                {
+                    ViewModel.RedoEditCommand.Execute(null);
+                }
+                else
+                {
+                    ViewModel.UndoEditCommand.Execute(null);
+                }
+
+                e.Handled = true;
+                return;
+            }
+
+            if (controlDown && e.Key == VirtualKey.Y)
+            {
+                ViewModel.RedoEditCommand.Execute(null);
                 e.Handled = true;
                 return;
             }

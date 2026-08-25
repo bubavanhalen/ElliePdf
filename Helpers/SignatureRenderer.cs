@@ -17,12 +17,14 @@ internal static class SignatureRenderer
     private const float Supersample = 3f;
     private const float PaddingDips = 6f;
 
+    /// <summary>Longest edge kept when importing; far more than a signature stamp ever needs.</summary>
+    private const int MaxImportEdge = 1600;
+
     public static bool TryRender(
         IReadOnlyList<IReadOnlyList<StrokePoint>> strokes,
         out byte[] pngBytes,
         out double aspectRatio)
-    {
-        pngBytes = [];
+    {        pngBytes = [];
         aspectRatio = 2.0;
 
         var drawable = strokes.Where(stroke => stroke.Count >= 2).ToList();
@@ -73,6 +75,133 @@ internal static class SignatureRenderer
         pngBytes = stream.ToArray();
         aspectRatio = (double)pixelWidth / pixelHeight;
         return true;
+    }
+
+    /// <summary>Renders a typed name as a signature in a script-like face.</summary>
+    public static bool TryRenderTyped(string text, string fontFamily, out byte[] pngBytes, out double aspectRatio)
+    {
+        pngBytes = [];
+        aspectRatio = 2.0;
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        const float fontSize = 64f;
+        const float padding = 12f;
+
+        using var font = new Font(fontFamily, fontSize, FontStyle.Italic, GraphicsUnit.Pixel);
+
+        // Measure on a throwaway surface before allocating the real one.
+        using (var measuring = Graphics.FromImage(new Bitmap(1, 1)))
+        {
+            var size = measuring.MeasureString(text, font);
+            var width = Math.Max(1, (int)Math.Ceiling(size.Width + (padding * 2)));
+            var height = Math.Max(1, (int)Math.Ceiling(size.Height + (padding * 2)));
+
+            using var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+            using (var graphics = Graphics.FromImage(bitmap))
+            {
+                graphics.Clear(Color.Transparent);
+                graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
+
+                using var brush = new SolidBrush(Color.Black);
+                graphics.DrawString(text, font, brush, padding, padding);
+            }
+
+            using var stream = new MemoryStream();
+            bitmap.Save(stream, ImageFormat.Png);
+            pngBytes = stream.ToArray();
+            aspectRatio = (double)width / height;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Normalises an imported image into a transparent PNG, dropping a white-ish background so a
+    /// photographed or scanned signature does not arrive as a white box.
+    /// </summary>
+    /// <remarks>
+    /// Phone photos run to tens of megapixels, so this works over a locked buffer rather than
+    /// per-pixel GDI+ calls, and downscales anything larger than a signature could ever need.
+    /// </remarks>
+    public static bool TryImport(byte[] imageBytes, out byte[] pngBytes, out double aspectRatio)
+    {
+        pngBytes = [];
+        aspectRatio = 2.0;
+
+        try
+        {
+            using var stream = new MemoryStream(imageBytes);
+            using var source = new Bitmap(stream);
+
+            if (source.Width <= 0 || source.Height <= 0)
+            {
+                return false;
+            }
+
+            var scale = Math.Min(1.0, (double)MaxImportEdge / Math.Max(source.Width, source.Height));
+            var width = Math.Max(1, (int)Math.Round(source.Width * scale));
+            var height = Math.Max(1, (int)Math.Round(source.Height * scale));
+
+            using var normalised = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+            using (var graphics = Graphics.FromImage(normalised))
+            {
+                graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                graphics.DrawImage(source, 0, 0, width, height);
+            }
+
+            RemoveLightBackground(normalised);
+
+            using var output = new MemoryStream();
+            normalised.Save(output, ImageFormat.Png);
+            pngBytes = output.ToArray();
+            aspectRatio = (double)width / height;
+            return true;
+        }
+        catch (Exception ex) when (ex is ArgumentException or OutOfMemoryException or IOException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Fades light pixels to transparent, leaving ink opaque and edges smooth.</summary>
+    private static void RemoveLightBackground(Bitmap bitmap)
+    {
+        const int opaqueBelow = 120;
+        const int transparentAbove = 230;
+
+        var rect = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
+        var data = bitmap.LockBits(rect, ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
+
+        try
+        {
+            var length = Math.Abs(data.Stride) * bitmap.Height;
+            var buffer = new byte[length];
+            System.Runtime.InteropServices.Marshal.Copy(data.Scan0, buffer, 0, length);
+
+            for (var offset = 0; offset < length; offset += 4)
+            {
+                // Buffer is BGRA.
+                var brightness = (buffer[offset] + buffer[offset + 1] + buffer[offset + 2]) / 3;
+
+                buffer[offset + 3] = brightness >= transparentAbove
+                    ? (byte)0
+                    : brightness <= opaqueBelow
+                        ? (byte)255
+                        : (byte)(255 * (transparentAbove - brightness) / (transparentAbove - opaqueBelow));
+            }
+
+            System.Runtime.InteropServices.Marshal.Copy(buffer, 0, data.Scan0, length);
+        }
+        finally
+        {
+            bitmap.UnlockBits(data);
+        }
     }
 
     /// <summary>Decodes a stored signature PNG into tightly packed BGRA rows for PDFium.</summary>

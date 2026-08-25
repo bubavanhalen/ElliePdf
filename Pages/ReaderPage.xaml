@@ -14,35 +14,136 @@
     <Page.Resources>
         <ContentDialog
             x:Name="SignatureDialog"
-            Title="Capture Signature"
+            Title="Signature"
             AutomationProperties.AutomationId="SignatureDialog"
-            PrimaryButtonText="OK"
+            PrimaryButtonText="Insert"
             SecondaryButtonText="Cancel">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
-                <Border
-                    Grid.Row="0"
-                    Padding="8"
-                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    CornerRadius="8">
-                    <Canvas
-                        x:Name="SignatureCanvas"
-                        Width="400"
-                        Height="200"
-                        Background="Transparent"
-                        AutomationProperties.AutomationId="SignatureCanvas" />
-                </Border>
-                <Button
-                    x:Name="BtnClearSignature"
-                    Grid.Row="1"
-                    Margin="0,8,0,0"
-                    AutomationProperties.AutomationId="BtnClearSignature"
-                    Content="Clear"
-                    HorizontalAlignment="Left" />
-            </Grid>
+            <Pivot x:Name="SignaturePivot" Width="440">
+                <PivotItem Header="Draw">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Border
+                            Grid.Row="0"
+                            Padding="8"
+                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                            CornerRadius="8">
+                            <Canvas
+                                x:Name="SignatureCanvas"
+                                Width="400"
+                                Height="180"
+                                Background="Transparent"
+                                AutomationProperties.AutomationId="SignatureCanvas" />
+                        </Border>
+                        <StackPanel
+                            Grid.Row="1"
+                            Margin="0,8,0,0"
+                            Orientation="Horizontal"
+                            Spacing="8">
+                            <Button
+                                x:Name="BtnClearSignature"
+                                AutomationProperties.AutomationId="BtnClearSignature"
+                                Content="Clear" />
+                            <CheckBox
+                                x:Name="SaveSignatureCheckBox"
+                                Content="Save for reuse"
+                                IsChecked="True" />
+                        </StackPanel>
+                    </Grid>
+                </PivotItem>
+
+                <PivotItem Header="Type">
+                    <StackPanel Spacing="10">
+                        <TextBox
+                            x:Name="TypedSignatureBox"
+                            Header="Your name"
+                            PlaceholderText="Jane Doe"
+                            TextChanged="TypedSignatureBox_TextChanged" />
+                        <ComboBox
+                            x:Name="TypedSignatureFontBox"
+                            Header="Style"
+                            HorizontalAlignment="Stretch"
+                            SelectionChanged="TypedSignatureFontBox_SelectionChanged" />
+                        <Border
+                            Height="110"
+                            Padding="8"
+                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                            CornerRadius="8">
+                            <Image x:Name="TypedSignaturePreview" Stretch="Uniform" />
+                        </Border>
+                        <CheckBox
+                            x:Name="SaveTypedSignatureCheckBox"
+                            Content="Save for reuse"
+                            IsChecked="True" />
+                    </StackPanel>
+                </PivotItem>
+
+                <PivotItem Header="Saved">
+                    <Grid>
+                        <TextBlock
+                            x:Name="NoSavedSignaturesText"
+                            Margin="0,24,0,0"
+                            HorizontalAlignment="Center"
+                            Opacity="0.7"
+                            Text="No saved signatures yet."
+                            Visibility="Collapsed" />
+                        <GridView
+                            x:Name="SavedSignaturesGrid"
+                            Height="230"
+                            IsItemClickEnabled="True"
+                            ItemClick="SavedSignaturesGrid_ItemClick"
+                            SelectionMode="Single">
+                            <GridView.ItemTemplate>
+                                <DataTemplate x:DataType="vm:SavedSignatureViewModel">
+                                    <Grid
+                                        Width="180"
+                                        Height="100"
+                                        Padding="6"
+                                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                                        CornerRadius="8">
+                                        <Image Source="{x:Bind Preview}" Stretch="Uniform" />
+                                        <Button
+                                            Width="28"
+                                            Height="28"
+                                            Padding="0"
+                                            Click="DeleteSavedSignature_Click"
+                                            HorizontalAlignment="Right"
+                                            Tag="{x:Bind Id}"
+                                            ToolTipService.ToolTip="Delete"
+                                            VerticalAlignment="Top">
+                                            <FontIcon FontSize="12" Glyph="&#xE74D;" />
+                                        </Button>
+                                    </Grid>
+                                </DataTemplate>
+                            </GridView.ItemTemplate>
+                        </GridView>
+                    </Grid>
+                </PivotItem>
+
+                <PivotItem Header="Image">
+                    <StackPanel Spacing="10">
+                        <TextBlock
+                            Opacity="0.75"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="Import a photo or scan. A white background is removed automatically."
+                            TextWrapping="Wrap" />
+                        <Button Click="ImportSignatureButton_Click" Content="Choose image…" />
+                        <Border
+                            Height="130"
+                            Padding="8"
+                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                            CornerRadius="8">
+                            <Image x:Name="ImportedSignaturePreview" Stretch="Uniform" />
+                        </Border>
+                        <CheckBox
+                            x:Name="SaveImportedSignatureCheckBox"
+                            Content="Save for reuse"
+                            IsChecked="True" />
+                    </StackPanel>
+                </PivotItem>
+            </Pivot>
         </ContentDialog>
     </Page.Resources>
 
@@ -664,17 +765,61 @@
                     AutomationProperties.Name="Eraser"
                     Command="{x:Bind ViewModel.UseEraserToolCommand}"
                     IsChecked="{x:Bind ViewModel.IsEraserToolActive, Mode=OneWay}"
+                    Click="EraserToolButton_Click"
+                    x:Name="EraserToolButton"
                     Style="{StaticResource EllieToolToggleStyle}"
-                    ToolTipService.ToolTip="Erase selected object">
+                    ToolTipService.ToolTip="Eraser">
                     <FontIcon Style="{StaticResource EllieToolIconStyle}" Glyph="&#xE75C;" />
+                </ToggleButton>
+                <Border Style="{StaticResource EllieDividerStyle}" />
+                <ToggleButton
+                    AutomationProperties.Name="Rectangle"
+                    Command="{x:Bind ViewModel.UseRectangleToolCommand}"
+                    IsChecked="{x:Bind ViewModel.IsRectangleToolActive, Mode=OneWay}"
+                    Style="{StaticResource EllieToolToggleStyle}"
+                    ToolTipService.ToolTip="Rectangle">
+                    <FontIcon Style="{StaticResource EllieToolIconStyle}" Glyph="&#xE739;" />
+                </ToggleButton>
+                <ToggleButton
+                    AutomationProperties.Name="Ellipse"
+                    Command="{x:Bind ViewModel.UseEllipseToolCommand}"
+                    IsChecked="{x:Bind ViewModel.IsEllipseToolActive, Mode=OneWay}"
+                    Style="{StaticResource EllieToolToggleStyle}"
+                    ToolTipService.ToolTip="Ellipse">
+                    <FontIcon Style="{StaticResource EllieToolIconStyle}" Glyph="&#xEA3A;" />
+                </ToggleButton>
+                <ToggleButton
+                    AutomationProperties.Name="Line"
+                    Command="{x:Bind ViewModel.UseLineToolCommand}"
+                    IsChecked="{x:Bind ViewModel.IsLineToolActive, Mode=OneWay}"
+                    Style="{StaticResource EllieToolToggleStyle}"
+                    ToolTipService.ToolTip="Line">
+                    <FontIcon Style="{StaticResource EllieToolIconStyle}" Glyph="&#xE738;" />
+                </ToggleButton>
+                <ToggleButton
+                    AutomationProperties.Name="Arrow"
+                    Command="{x:Bind ViewModel.UseArrowToolCommand}"
+                    IsChecked="{x:Bind ViewModel.IsArrowToolActive, Mode=OneWay}"
+                    Style="{StaticResource EllieToolToggleStyle}"
+                    ToolTipService.ToolTip="Arrow">
+                    <FontIcon Style="{StaticResource EllieToolIconStyle}" Glyph="&#xE8AD;" />
                 </ToggleButton>
                 <Border Style="{StaticResource EllieDividerStyle}" />
                 <Button
                     AutomationProperties.Name="Undo"
                     Click="UndoEditButton_Click"
+                    IsEnabled="{x:Bind ViewModel.CanUndoEdit, Mode=OneWay}"
                     Style="{StaticResource EllieToolButtonStyle}"
                     ToolTipService.ToolTip="Undo edit (Ctrl+Z)">
                     <FontIcon Style="{StaticResource EllieToolIconStyle}" Glyph="&#xE7A7;" />
+                </Button>
+                <Button
+                    AutomationProperties.Name="Redo"
+                    Click="RedoEditButton_Click"
+                    IsEnabled="{x:Bind ViewModel.CanRedoEdit, Mode=OneWay}"
+                    Style="{StaticResource EllieToolButtonStyle}"
+                    ToolTipService.ToolTip="Redo edit (Ctrl+Y)">
+                    <FontIcon Style="{StaticResource EllieToolIconStyle}" Glyph="&#xE7A6;" />
                 </Button>
                 <Button
                     AutomationProperties.Name="Delete selected edit"
@@ -847,6 +992,92 @@
                             RadiusX="4"
                             RadiusY="4" />
                     </Button>
+                </StackPanel>
+            </Border>
+        </Popup>
+
+        <!--  Eraser options  -->
+        <Popup
+            x:Name="EraserPalettePopup"
+            Canvas.ZIndex="40"
+            IsLightDismissEnabled="True">
+            <Border
+                x:Name="EraserPalette"
+                Padding="10,8"
+                Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="20"
+                Opacity="0.98">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock
+                        Margin="2,0,4,0"
+                        Opacity="0.75"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="Size"
+                        VerticalAlignment="Center" />
+                    <Button
+                        x:Name="EraserSmallButton"
+                        Width="34"
+                        Height="30"
+                        Padding="0"
+                        Background="Transparent"
+                        BorderThickness="2"
+                        Click="EraserRadiusButton_Click"
+                        Tag="6"
+                        ToolTipService.ToolTip="Small">
+                        <Ellipse
+                            Width="10"
+                            Height="10"
+                            Stroke="{ThemeResource TextFillColorPrimaryBrush}"
+                            StrokeThickness="1" />
+                    </Button>
+                    <Button
+                        x:Name="EraserMediumButton"
+                        Width="34"
+                        Height="30"
+                        Padding="0"
+                        Background="Transparent"
+                        BorderThickness="2"
+                        Click="EraserRadiusButton_Click"
+                        Tag="14"
+                        ToolTipService.ToolTip="Medium">
+                        <Ellipse
+                            Width="16"
+                            Height="16"
+                            Stroke="{ThemeResource TextFillColorPrimaryBrush}"
+                            StrokeThickness="1" />
+                    </Button>
+                    <Button
+                        x:Name="EraserLargeButton"
+                        Width="34"
+                        Height="30"
+                        Padding="0"
+                        Background="Transparent"
+                        BorderThickness="2"
+                        Click="EraserRadiusButton_Click"
+                        Tag="26"
+                        ToolTipService.ToolTip="Large">
+                        <Ellipse
+                            Width="22"
+                            Height="22"
+                            Stroke="{ThemeResource TextFillColorPrimaryBrush}"
+                            StrokeThickness="1" />
+                    </Button>
+                    <Border
+                        Width="1"
+                        Height="24"
+                        Margin="4,0"
+                        Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                    <ToggleButton
+                        x:Name="ErasePartialToggle"
+                        Height="30"
+                        Padding="10,0"
+                        Click="ErasePartialToggle_Click"
+                        IsChecked="{x:Bind ViewModel.ErasePartially, Mode=OneWay}"
+                        ToolTipService.ToolTip="Cut strokes where you erase instead of deleting them whole">
+                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="Partial" />
+                    </ToggleButton>
                 </StackPanel>
             </Border>
         </Popup>

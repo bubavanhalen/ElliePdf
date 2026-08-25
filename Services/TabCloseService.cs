@@ -13,17 +13,20 @@ public sealed class TabCloseService : ITabCloseService
     private readonly IAnnotationStore _annotationStore;
     private readonly IUnsavedChangesPrompt _unsavedChangesPrompt;
     private readonly IEditSaveService _editSaveService;
+    private readonly IOverlayHistory _history;
 
     public TabCloseService(
         IDocumentTabService tabService,
         IAnnotationStore annotationStore,
         IUnsavedChangesPrompt unsavedChangesPrompt,
-        IEditSaveService editSaveService)
+        IEditSaveService editSaveService,
+        IOverlayHistory history)
     {
         _tabService = tabService;
         _annotationStore = annotationStore;
         _unsavedChangesPrompt = unsavedChangesPrompt;
         _editSaveService = editSaveService;
+        _history = history;
     }
 
     public async Task<bool> TryCloseTabAsync(Guid tabId, CancellationToken cancellationToken = default)
@@ -67,6 +70,7 @@ public sealed class TabCloseService : ITabCloseService
             else if (choice == UnsavedChangesChoice.Discard)
             {
                 _annotationStore.RemoveTab(tab.Id);
+                _history.Clear(tab.Id);
             }
         }
 
@@ -88,6 +92,8 @@ public sealed class TabCloseService : ITabCloseService
         }
 
         _annotationStore.RemoveTab(tabId);
+
+        _history.Clear(tabId);
         await _tabService.CloseTabAsync(tabId, cancellationToken);
         return true;
     }

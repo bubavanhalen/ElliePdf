@@ -18,6 +18,15 @@ internal static class PdfOverlayWriter
 {
     private const float TextPadding = 2f;
 
+    /// <summary>PDFium's non-zero winding fill mode.</summary>
+    private const int FillModeWinding = 2;
+
+    /// <summary>
+    /// Alpha for a shape's interior. Matches <c>PdfEditSurface.ShapeFillAlpha</c> so what the user
+    /// positions on screen is what the saved file shows.
+    /// </summary>
+    private const uint ShapeFillAlpha = 70;
+
     // Arial/Helvetica metrics (units per em 2048): ascender 1854, descender 434, line gap 67.
     private const double BaselineFactor = 1854.0 / 2048.0;
     private const double LineHeightFactor = (1854.0 + 434.0 + 67.0) / 2048.0;
@@ -25,6 +34,7 @@ internal static class PdfOverlayWriter
     public static bool HasContent(PageOverlayState? overlay) =>
         overlay is not null &&
         (overlay.InkStrokes.Any(stroke => stroke.Points.Count > 1) ||
+         overlay.Shapes.Count > 0 ||
          overlay.TextItems.Any(text => !string.IsNullOrWhiteSpace(text.Text)) ||
          overlay.Signatures.Any(signature => !string.IsNullOrWhiteSpace(signature.ImageBase64)));
 
@@ -93,6 +103,11 @@ internal static class PdfOverlayWriter
                 WriteInkStroke(page, stroke, matrix);
             }
 
+            foreach (var shape in overlay.Shapes)
+            {
+                WriteShape(page, shape, matrix);
+            }
+
             foreach (var signature in overlay.Signatures)
             {
                 WriteSignature(document, page, signature, matrix, bitmaps);
@@ -116,10 +131,28 @@ internal static class PdfOverlayWriter
 
     // ═══════════ Ink ═══════════
 
+    /// <summary>
+    /// Constant-width strokes are written as a stroked path, which stays compact and crisp.
+    /// Pressure-varying strokes have no stroked-path equivalent in PDF, so they are written as a
+    /// filled outline built from the same geometry the edit surface draws.
+    /// </summary>
     private static void WriteInkStroke(IntPtr page, InkStrokeOverlay stroke, Matrix2D matrix)
     {
         if (stroke.Points.Count < 2)
         {
+            return;
+        }
+
+        var (r, g, b) = ParseColor(stroke.ColorHex);
+
+        if (!InkGeometry.HasUniformPressure(stroke.Points))
+        {
+            var outline = InkGeometry.BuildOutline(stroke.Points, stroke.Thickness);
+            if (outline.Count >= 3)
+            {
+                WriteFilledPolygon(page, outline.Select(v => (v.X, v.Y)), (r, g, b), matrix);
+            }
+
             return;
         }
 
@@ -136,13 +169,168 @@ internal static class PdfOverlayWriter
             PdfiumNative.FPDFPath_LineTo(path, (float)point.X, (float)point.Y);
         }
 
-        var (r, g, b) = ParseColor(stroke.ColorHex);
+        var width = InkGeometry.WidthAt(stroke.Thickness, stroke.Points[0].Pressure);
         PdfiumNative.FPDFPageObj_SetStrokeColor(path, r, g, b, 255);
         // The display->PDF matrix is a rotation plus a flip, so widths carry over unscaled.
-        PdfiumNative.FPDFPageObj_SetStrokeWidth(path, (float)Math.Max(0.1, stroke.Thickness));
+        PdfiumNative.FPDFPageObj_SetStrokeWidth(path, (float)Math.Max(0.1, width));
         PdfiumNative.FPDFPageObj_SetLineCap(path, 1);
         PdfiumNative.FPDFPageObj_SetLineJoin(path, 1);
         PdfiumNative.FPDFPath_SetDrawMode(path, 0, 1);
+        PdfiumNative.FPDFPage_InsertObject(page, path);
+    }
+
+    /// <summary>Writes a closed, filled polygon in display coordinates.</summary>
+    private static void WriteFilledPolygon(
+        IntPtr page,
+        IEnumerable<(double X, double Y)> vertices,
+        (uint R, uint G, uint B) color,
+        Matrix2D matrix)
+    {
+        var points = vertices.ToList();
+        if (points.Count < 3)
+        {
+            return;
+        }
+
+        var start = matrix.Transform(points[0].X, points[0].Y);
+        var path = PdfiumNative.FPDFPageObj_CreateNewPath((float)start.X, (float)start.Y);
+        if (path == IntPtr.Zero)
+        {
+            return;
+        }
+
+        for (var index = 1; index < points.Count; index++)
+        {
+            var point = matrix.Transform(points[index].X, points[index].Y);
+            PdfiumNative.FPDFPath_LineTo(path, (float)point.X, (float)point.Y);
+        }
+
+        PdfiumNative.FPDFPath_Close(path);
+        PdfiumNative.FPDFPageObj_SetFillColor(path, color.R, color.G, color.B, 255);
+        PdfiumNative.FPDFPath_SetDrawMode(path, FillModeWinding, 0);
+        PdfiumNative.FPDFPage_InsertObject(page, path);
+    }
+
+    // ═══════════ Shapes ═══════════
+
+    private static void WriteShape(IntPtr page, ShapeOverlay shape, Matrix2D matrix)
+    {
+        var stroke = ParseColor(shape.ColorHex);
+        var fill = shape.FillColorHex is null ? ((uint, uint, uint)?)null : ParseColor(shape.FillColorHex);
+
+        switch (shape.Kind)
+        {
+            case ShapeKind.Rectangle:
+            {
+                var corners = ShapeGeometry.RectangleCorners(shape);
+                var start = matrix.Transform(corners[0].X, corners[0].Y);
+                var path = PdfiumNative.FPDFPageObj_CreateNewPath((float)start.X, (float)start.Y);
+                if (path == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                for (var index = 1; index < corners.Count; index++)
+                {
+                    var point = matrix.Transform(corners[index].X, corners[index].Y);
+                    PdfiumNative.FPDFPath_LineTo(path, (float)point.X, (float)point.Y);
+                }
+
+                PdfiumNative.FPDFPath_Close(path);
+                FinishShapePath(page, path, shape, stroke, fill);
+                break;
+            }
+
+            case ShapeKind.Ellipse:
+            {
+                var (origin, segments) = ShapeGeometry.EllipseCurves(shape);
+                var start = matrix.Transform(origin.X, origin.Y);
+                var path = PdfiumNative.FPDFPageObj_CreateNewPath((float)start.X, (float)start.Y);
+                if (path == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                foreach (var segment in segments)
+                {
+                    var c1 = matrix.Transform(segment.Control1.X, segment.Control1.Y);
+                    var c2 = matrix.Transform(segment.Control2.X, segment.Control2.Y);
+                    var end = matrix.Transform(segment.End.X, segment.End.Y);
+                    PdfiumNative.FPDFPath_BezierTo(
+                        path,
+                        (float)c1.X, (float)c1.Y,
+                        (float)c2.X, (float)c2.Y,
+                        (float)end.X, (float)end.Y);
+                }
+
+                PdfiumNative.FPDFPath_Close(path);
+                FinishShapePath(page, path, shape, stroke, fill);
+                break;
+            }
+
+            case ShapeKind.Line:
+                WriteSegment(page, shape, shape.Start.X, shape.Start.Y, shape.End.X, shape.End.Y, stroke, matrix);
+                break;
+
+            default:
+            {
+                var shaftEnd = ShapeGeometry.ArrowShaftEnd(shape);
+                WriteSegment(page, shape, shape.Start.X, shape.Start.Y, shaftEnd.X, shaftEnd.Y, stroke, matrix);
+
+                if (ShapeGeometry.ArrowHead(shape) is { } head)
+                {
+                    WriteFilledPolygon(page, head.Select(v => (v.X, v.Y)), stroke, matrix);
+                }
+
+                break;
+            }
+        }
+    }
+
+    private static void WriteSegment(
+        IntPtr page,
+        ShapeOverlay shape,
+        double x1,
+        double y1,
+        double x2,
+        double y2,
+        (uint R, uint G, uint B) color,
+        Matrix2D matrix)
+    {
+        var start = matrix.Transform(x1, y1);
+        var path = PdfiumNative.FPDFPageObj_CreateNewPath((float)start.X, (float)start.Y);
+        if (path == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var end = matrix.Transform(x2, y2);
+        PdfiumNative.FPDFPath_LineTo(path, (float)end.X, (float)end.Y);
+
+        PdfiumNative.FPDFPageObj_SetStrokeColor(path, color.R, color.G, color.B, 255);
+        PdfiumNative.FPDFPageObj_SetStrokeWidth(path, (float)Math.Max(0.1, shape.Thickness));
+        PdfiumNative.FPDFPageObj_SetLineCap(path, 1);
+        PdfiumNative.FPDFPageObj_SetLineJoin(path, 1);
+        PdfiumNative.FPDFPath_SetDrawMode(path, 0, 1);
+        PdfiumNative.FPDFPage_InsertObject(page, path);
+    }
+
+    private static void FinishShapePath(
+        IntPtr page,
+        IntPtr path,
+        ShapeOverlay shape,
+        (uint R, uint G, uint B) stroke,
+        (uint R, uint G, uint B)? fill)
+    {
+        if (fill is { } interior)
+        {
+            PdfiumNative.FPDFPageObj_SetFillColor(path, interior.R, interior.G, interior.B, ShapeFillAlpha);
+        }
+
+        PdfiumNative.FPDFPageObj_SetStrokeColor(path, stroke.R, stroke.G, stroke.B, 255);
+        PdfiumNative.FPDFPageObj_SetStrokeWidth(path, (float)Math.Max(0.1, shape.Thickness));
+        PdfiumNative.FPDFPageObj_SetLineJoin(path, 1);
+        PdfiumNative.FPDFPath_SetDrawMode(path, fill is null ? 0 : FillModeWinding, 1);
         PdfiumNative.FPDFPage_InsertObject(page, path);
     }
 

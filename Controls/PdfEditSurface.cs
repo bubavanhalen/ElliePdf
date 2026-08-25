@@ -1,18 +1,22 @@
 using ElliePdf.Models;
+using ElliePdf.Services;
 using ElliePdf.ViewModels;
 using Microsoft.UI;
 using Microsoft.UI.Input;
+using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Shapes;
-using Microsoft.UI.Text;
 using System.Runtime.InteropServices.WindowsRuntime;
 using Windows.Foundation;
 using Windows.Storage.Streams;
+using PointerDeviceType = Microsoft.UI.Input.PointerDeviceType;
 using TextFontStyle = Windows.UI.Text.FontStyle;
+using XamlPath = Microsoft.UI.Xaml.Shapes.Path;
+using XamlShape = Microsoft.UI.Xaml.Shapes.Shape;
 
 namespace ElliePdf.Controls;
 
@@ -21,6 +25,7 @@ public sealed partial class PdfEditSurface : Canvas
     private const string InkTagKind = "ink";
     private const string TextTagKind = "text";
     private const string SignatureTagKind = "signature";
+    private const string ShapeTagKind = "shape";
 
     /// <summary>Metrically compatible with the PDF standard Helvetica used when embedding text.</summary>
     private static readonly FontFamily OverlayFontFamily = new("Arial");
@@ -28,12 +33,19 @@ public sealed partial class PdfEditSurface : Canvas
     /// <summary>Kept in sync with <c>PdfOverlayWriter.TextPadding</c>, in page units.</summary>
     private const double TextPadding = 2;
 
+    /// <summary>
+    /// Alpha used for a shape's interior. Matches <c>PdfOverlayWriter.ShapeFillAlpha</c> so a
+    /// filled shape looks the same on screen as it does once saved.
+    /// </summary>
+    private const byte ShapeFillAlpha = 70;
+
     private enum SelectionKind
     {
         None,
         Text,
         Signature,
-        Ink
+        Ink,
+        Shape
     }
 
     private enum DragMode
@@ -45,19 +57,27 @@ public sealed partial class PdfEditSurface : Canvas
 
     private sealed record OverlayTag(string Kind, string Id);
 
-    private readonly List<PageOverlayState> _undoStack = [];
     private readonly Border _selectionAdorner;
     private readonly Border _resizeHandle;
     private readonly Border _textToolbar;
+    private readonly Border _styleToolbar;
     private readonly Button _textColorButton;
-    private readonly Polyline _inkPreview;
+    private readonly Button _styleColorButton;
     private readonly ColorPicker _textColorPicker;
+    private readonly ColorPicker _styleColorPicker;
+    private readonly XamlPath _inkPreview;
+    private readonly Polyline _inkPreviewLine;
+    private readonly Canvas _shapePreview;
+    private readonly Ellipse _eraserCursor;
 
-    private List<Point>? _currentStroke;
+    private List<PointOverlay>? _currentStroke;
+    private Point? _shapeStart;
     private DragMode _dragMode;
     private Point _dragStart;
     private Rect _dragStartBounds;
+    private Rect _dragStartGeometry;
     private List<PointOverlay>? _dragStartInkPoints;
+    private (PointOverlay Start, PointOverlay End)? _dragStartShape;
     private bool _dragPushedUndo;
     private bool _isErasing;
     private bool _erasePushedUndo;
@@ -65,7 +85,11 @@ public sealed partial class PdfEditSurface : Canvas
     private string? _selectedId;
     private bool _isRendering;
     private bool _isSyncingColorPicker;
+    private bool _colorPushedUndo;
     private ReaderEditTool _activeTool = ReaderEditTool.Select;
+    private uint? _activePointerId;
+    private PointerDeviceType _activePointerDevice;
+    private bool _penInRange;
 
     private static readonly InputCursor ArrowCursor = InputSystemCursor.Create(InputSystemCursorShape.Arrow);
     private static readonly InputCursor DrawCursor = InputSystemCursor.Create(InputSystemCursorShape.Cross);
@@ -96,7 +120,7 @@ public sealed partial class PdfEditSurface : Canvas
         _resizeHandle.PointerMoved += ResizeHandle_PointerMoved;
         _resizeHandle.PointerReleased += ResizeHandle_PointerReleased;
 
-        _inkPreview = new Polyline
+        _inkPreviewLine = new Polyline
         {
             IsHitTestVisible = false,
             StrokeStartLineCap = PenLineCap.Round,
@@ -105,57 +129,66 @@ public sealed partial class PdfEditSurface : Canvas
             Visibility = Visibility.Collapsed
         };
 
-        _textColorPicker = new ColorPicker
+        _inkPreview = new XamlPath
         {
-            Color = Colors.Black,
-            IsAlphaEnabled = false,
-            IsAlphaSliderVisible = false,
-            IsAlphaTextInputVisible = false,
-            IsColorChannelTextInputVisible = true,
-            IsHexInputVisible = true,
-            Width = 280
+            IsHitTestVisible = false,
+            Visibility = Visibility.Collapsed
         };
-        _textColorPicker.ColorChanged += TextColorPicker_ColorChanged;
 
+        _shapePreview = new Canvas { IsHitTestVisible = false };
+
+        _eraserCursor = new Ellipse
+        {
+            IsHitTestVisible = false,
+            Stroke = new SolidColorBrush(Windows.UI.Color.FromArgb(200, 90, 90, 90)),
+            StrokeThickness = 1,
+            Fill = new SolidColorBrush(Windows.UI.Color.FromArgb(40, 140, 140, 140)),
+            Visibility = Visibility.Collapsed
+        };
+
+        _textColorPicker = CreateColorPicker(TextColorPicker_ColorChanged);
         _textColorButton = CreateToolbarButton(string.Empty);
-        _textColorButton.Content = new Border
-        {
-            Width = 14,
-            Height = 14,
-            CornerRadius = new CornerRadius(7),
-            Background = new SolidColorBrush(Colors.Black)
-        };
-        _textColorButton.Flyout = new Flyout { Content = _textColorPicker };
+        _textColorButton.Content = CreateColorDot();
+        _textColorButton.Flyout = CreateColorFlyout(_textColorPicker);
 
-        _textToolbar = new Border
+        _textToolbar = CreateToolbarShell(new StackPanel
         {
-            Padding = new Thickness(6, 4, 6, 4),
-            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(245, 32, 32, 32)),
-            CornerRadius = new CornerRadius(14),
-            Visibility = Visibility.Collapsed,
-            Child = new StackPanel
+            Orientation = Orientation.Horizontal,
+            Spacing = 4,
+            Children =
             {
-                Orientation = Orientation.Horizontal,
-                Spacing = 4,
-                Children =
-                {
-                    CreateToolbarButton("A-", (_, _) => ScaleSelectedFontSize(-2)),
-                    CreateToolbarButton("A+", (_, _) => ScaleSelectedFontSize(2)),
-                    CreateToolbarButton("B", (_, _) => ToggleSelectedTextBold()),
-                    CreateToolbarButton("I", (_, _) => ToggleSelectedTextItalic()),
-                    _textColorButton
-                }
+                CreateToolbarButton("A-", (_, _) => ScaleSelectedFontSize(-2)),
+                CreateToolbarButton("A+", (_, _) => ScaleSelectedFontSize(2)),
+                CreateToolbarButton("B", (_, _) => ToggleSelectedTextBold()),
+                CreateToolbarButton("I", (_, _) => ToggleSelectedTextItalic()),
+                _textColorButton
             }
-        };
+        });
 
-        Children.Add(_inkPreview);
-        Children.Add(_selectionAdorner);
-        Children.Add(_resizeHandle);
-        Children.Add(_textToolbar);
+        _styleColorPicker = CreateColorPicker(StyleColorPicker_ColorChanged);
+        _styleColorButton = CreateToolbarButton(string.Empty);
+        _styleColorButton.Content = CreateColorDot();
+        _styleColorButton.Flyout = CreateColorFlyout(_styleColorPicker);
+
+        _styleToolbar = CreateToolbarShell(new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 4,
+            Children =
+            {
+                _styleColorButton,
+                CreateToolbarButton("−", (_, _) => ScaleSelectedThickness(-1)),
+                CreateToolbarButton("+", (_, _) => ScaleSelectedThickness(1)),
+                CreateToolbarButton("▣", (_, _) => ToggleSelectedFill())
+            }
+        });
+
+        AddOverlayChrome();
         PointerPressed += Surface_PointerPressed;
         PointerMoved += Surface_PointerMoved;
         PointerReleased += Surface_PointerReleased;
         PointerCaptureLost += Surface_PointerCaptureLost;
+        PointerExited += Surface_PointerExited;
         DoubleTapped += Surface_DoubleTapped;
         IsDoubleTapEnabled = true;
         KeyDown += Surface_KeyDown;
@@ -176,13 +209,15 @@ public sealed partial class PdfEditSurface : Canvas
 
             _activeTool = value;
             CancelActiveGesture();
-            if (value is ReaderEditTool.Ink or ReaderEditTool.Eraser)
+
+            if (value is not ReaderEditTool.Select and not ReaderEditTool.Text)
             {
                 ClearSelection();
             }
 
             ApplyToolInteraction();
             ApplyToolCursor();
+            _eraserCursor.Visibility = Visibility.Collapsed;
 
             // Pull focus off any text box so empty ones get pruned on the way out.
             if (value != ReaderEditTool.Text)
@@ -198,18 +233,26 @@ public sealed partial class PdfEditSurface : Canvas
 
     public double InkThickness { get; set; } = 2;
 
+    /// <summary>Eraser radius in page units.</summary>
+    public double EraserRadius { get; set; } = 10;
+
+    /// <summary>When true the eraser cuts strokes apart; otherwise it removes whole items.</summary>
+    public bool ErasePartially { get; set; } = true;
+
     public event EventHandler<PageOverlayState>? OverlayChanged;
 
     public event EventHandler<ReaderEditTool>? ActiveToolChangeRequested;
 
+    /// <summary>Raised with a copy of the overlay immediately before it is modified.</summary>
+    public event EventHandler<PageOverlayState>? EditRecording;
+
     public void LoadOverlay(PageOverlayState overlay, double displayScale, double width, double height)
     {
         CancelActiveGesture();
-        Overlay = CloneOverlay(overlay);
+        Overlay = OverlayHistory.Clone(overlay);
         DisplayScale = displayScale <= 0 ? 1.0 : displayScale;
         Width = Math.Max(0, width);
         Height = Math.Max(0, height);
-        _undoStack.Clear();
         ClearSelection();
         RenderOverlay();
     }
@@ -254,7 +297,7 @@ public sealed partial class PdfEditSurface : Canvas
             width = height * aspectRatio;
         }
 
-        PushUndo();
+        RecordEdit();
         var signature = new SignatureOverlay
         {
             X = Math.Max(0, (PageWidth - width) / 2),
@@ -275,19 +318,13 @@ public sealed partial class PdfEditSurface : Canvas
         }
     }
 
-    public void Undo()
+    /// <summary>Replaces the overlay without recording history, used when undo or redo rewinds a page.</summary>
+    public void ApplyHistoryState(PageOverlayState state)
     {
-        if (_undoStack.Count == 0)
-        {
-            return;
-        }
-
         CancelActiveGesture();
-        Overlay = _undoStack[^1];
-        _undoStack.RemoveAt(_undoStack.Count - 1);
+        Overlay = OverlayHistory.Clone(state);
         ClearSelection();
         RenderOverlay();
-        NotifyOverlayChanged();
     }
 
     public void DeleteSelection()
@@ -297,7 +334,7 @@ public sealed partial class PdfEditSurface : Canvas
             return;
         }
 
-        PushUndo();
+        RecordEdit();
         switch (_selectionKind)
         {
             case SelectionKind.Text:
@@ -308,6 +345,9 @@ public sealed partial class PdfEditSurface : Canvas
                 break;
             case SelectionKind.Ink:
                 Overlay.InkStrokes.RemoveAll(item => item.Id == _selectedId);
+                break;
+            case SelectionKind.Shape:
+                Overlay.Shapes.RemoveAll(item => item.Id == _selectedId);
                 break;
         }
 
@@ -323,6 +363,7 @@ public sealed partial class PdfEditSurface : Canvas
         _selectionAdorner.Visibility = Visibility.Collapsed;
         _resizeHandle.Visibility = Visibility.Collapsed;
         _textToolbar.Visibility = Visibility.Collapsed;
+        _styleToolbar.Visibility = Visibility.Collapsed;
     }
 
     private double PageWidth => DisplayScale > 0 ? Width / DisplayScale : Width;
@@ -330,6 +371,18 @@ public sealed partial class PdfEditSurface : Canvas
     private double PageHeight => DisplayScale > 0 ? Height / DisplayScale : Height;
 
     // ═══════════ Rendering ═══════════
+
+    private void AddOverlayChrome()
+    {
+        Children.Add(_inkPreviewLine);
+        Children.Add(_inkPreview);
+        Children.Add(_shapePreview);
+        Children.Add(_eraserCursor);
+        Children.Add(_selectionAdorner);
+        Children.Add(_resizeHandle);
+        Children.Add(_textToolbar);
+        Children.Add(_styleToolbar);
+    }
 
     private void RenderOverlay()
     {
@@ -340,12 +393,21 @@ public sealed partial class PdfEditSurface : Canvas
 
             foreach (var stroke in Overlay.InkStrokes)
             {
-                var polyline = CreatePolyline(
-                    stroke.Points.Select(ToCanvasPoint),
-                    stroke.ColorHex,
-                    stroke.Thickness * DisplayScale);
-                polyline.Tag = new OverlayTag(InkTagKind, stroke.Id);
-                Children.Add(polyline);
+                var visual = CreateInkVisual(stroke);
+                if (visual is not null)
+                {
+                    visual.Tag = new OverlayTag(InkTagKind, stroke.Id);
+                    Children.Add(visual);
+                }
+            }
+
+            foreach (var shape in Overlay.Shapes)
+            {
+                foreach (var visual in CreateShapeVisuals(shape))
+                {
+                    visual.Tag = new OverlayTag(ShapeTagKind, shape.Id);
+                    Children.Add(visual);
+                }
             }
 
             foreach (var text in Overlay.TextItems)
@@ -366,10 +428,7 @@ public sealed partial class PdfEditSurface : Canvas
                 }
             }
 
-            Children.Add(_inkPreview);
-            Children.Add(_selectionAdorner);
-            Children.Add(_resizeHandle);
-            Children.Add(_textToolbar);
+            AddOverlayChrome();
             ApplyToolInteraction();
             RestoreSelectionAdorner();
         }
@@ -377,6 +436,149 @@ public sealed partial class PdfEditSurface : Canvas
         {
             _isRendering = false;
         }
+    }
+
+    /// <summary>
+    /// Uniform-pressure strokes render as a plain polyline, which stays crisp; pressure-varying
+    /// strokes become a filled ribbon so the width can taper.
+    /// </summary>
+    private FrameworkElement? CreateInkVisual(InkStrokeOverlay stroke)
+    {
+        if (stroke.Points.Count < 2)
+        {
+            return null;
+        }
+
+        if (InkGeometry.HasUniformPressure(stroke.Points))
+        {
+            var width = InkGeometry.WidthAt(stroke.Thickness, stroke.Points[0].Pressure);
+            return CreatePolyline(
+                stroke.Points.Select(point => ToCanvasPoint(point)),
+                stroke.ColorHex,
+                width * DisplayScale);
+        }
+
+        var outline = InkGeometry.BuildOutline(stroke.Points, stroke.Thickness);
+        if (outline.Count < 3)
+        {
+            return null;
+        }
+
+        return new XamlPath
+        {
+            Fill = ColorBrushFromHex(stroke.ColorHex),
+            Data = BuildPolygonGeometry(outline.Select(vertex => new Point(
+                vertex.X * DisplayScale,
+                vertex.Y * DisplayScale)))
+        };
+    }
+
+    private IEnumerable<XamlShape> CreateShapeVisuals(ShapeOverlay shape)
+    {
+        var stroke = ColorBrushFromHex(shape.ColorHex);
+        var thickness = Math.Max(1, shape.Thickness * DisplayScale);
+        var fill = shape.FillColorHex is null ? null : FillBrushFromHex(shape.FillColorHex);
+
+        switch (shape.Kind)
+        {
+            case ShapeKind.Rectangle:
+            {
+                var (left, top, width, height) = ShapeGeometry.Bounds(shape);
+                var rectangle = new Rectangle
+                {
+                    Width = Math.Max(1, width * DisplayScale),
+                    Height = Math.Max(1, height * DisplayScale),
+                    Stroke = stroke,
+                    StrokeThickness = thickness,
+                    Fill = fill
+                };
+                SetLeft(rectangle, left * DisplayScale);
+                SetTop(rectangle, top * DisplayScale);
+                yield return rectangle;
+                break;
+            }
+
+            case ShapeKind.Ellipse:
+            {
+                var (left, top, width, height) = ShapeGeometry.Bounds(shape);
+                var ellipse = new Ellipse
+                {
+                    Width = Math.Max(1, width * DisplayScale),
+                    Height = Math.Max(1, height * DisplayScale),
+                    Stroke = stroke,
+                    StrokeThickness = thickness,
+                    Fill = fill
+                };
+                SetLeft(ellipse, left * DisplayScale);
+                SetTop(ellipse, top * DisplayScale);
+                yield return ellipse;
+                break;
+            }
+
+            case ShapeKind.Line:
+                yield return new Line
+                {
+                    X1 = shape.Start.X * DisplayScale,
+                    Y1 = shape.Start.Y * DisplayScale,
+                    X2 = shape.End.X * DisplayScale,
+                    Y2 = shape.End.Y * DisplayScale,
+                    Stroke = stroke,
+                    StrokeThickness = thickness,
+                    StrokeStartLineCap = PenLineCap.Round,
+                    StrokeEndLineCap = PenLineCap.Round
+                };
+                break;
+
+            default:
+            {
+                var shaftEnd = ShapeGeometry.ArrowShaftEnd(shape);
+                yield return new Line
+                {
+                    X1 = shape.Start.X * DisplayScale,
+                    Y1 = shape.Start.Y * DisplayScale,
+                    X2 = shaftEnd.X * DisplayScale,
+                    Y2 = shaftEnd.Y * DisplayScale,
+                    Stroke = stroke,
+                    StrokeThickness = thickness,
+                    StrokeStartLineCap = PenLineCap.Round
+                };
+
+                if (ShapeGeometry.ArrowHead(shape) is { } head)
+                {
+                    yield return new XamlPath
+                    {
+                        Fill = stroke,
+                        Data = BuildPolygonGeometry(head.Select(vertex => new Point(
+                            vertex.X * DisplayScale,
+                            vertex.Y * DisplayScale)))
+                    };
+                }
+
+                break;
+            }
+        }
+    }
+
+    private static PathGeometry BuildPolygonGeometry(IEnumerable<Point> points)
+    {
+        var ordered = points.ToList();
+        var figure = new PathFigure
+        {
+            StartPoint = ordered.Count > 0 ? ordered[0] : new Point(0, 0),
+            IsClosed = true,
+            IsFilled = true
+        };
+
+        var segment = new PolyLineSegment();
+        for (var index = 1; index < ordered.Count; index++)
+        {
+            segment.Points.Add(ordered[index]);
+        }
+
+        figure.Segments.Add(segment);
+        var geometry = new PathGeometry();
+        geometry.Figures.Add(figure);
+        return geometry;
     }
 
     private TextBox CreateTextBox(TextOverlay text)
@@ -414,7 +616,7 @@ public sealed partial class PdfEditSurface : Canvas
 
     /// <summary>
     /// Only the text tool needs live text boxes. Every other tool routes pointer input through the
-    /// canvas so drawing, erasing and dragging behave the same over ink, text and signatures.
+    /// canvas so drawing, erasing and dragging behave the same over every kind of annotation.
     /// </summary>
     private void ApplyToolInteraction()
     {
@@ -434,33 +636,62 @@ public sealed partial class PdfEditSurface : Canvas
         {
             ReaderEditTool.Ink or ReaderEditTool.Eraser => DrawCursor,
             ReaderEditTool.Text => TextCursor,
+            _ when ActiveTool.IsShape() => DrawCursor,
             _ => ArrowCursor
         };
 
     // ═══════════ Canvas pointer handling ═══════════
 
+    /// <summary>
+    /// Rejects touch contacts while a pen is hovering or drawing, so a resting palm cannot scribble
+    /// over the page, and ignores secondary contacts once a gesture is underway.
+    /// </summary>
+    private bool ShouldIgnore(PointerRoutedEventArgs e)
+    {
+        var device = e.Pointer.PointerDeviceType;
+
+        if (_activePointerId is { } active)
+        {
+            return e.Pointer.PointerId != active;
+        }
+
+        return device == PointerDeviceType.Touch && _penInRange;
+    }
+
     private void Surface_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        var point = e.GetCurrentPoint(this).Position;
+        if (ShouldIgnore(e))
+        {
+            e.Handled = true;
+            return;
+        }
+
+        var currentPoint = e.GetCurrentPoint(this);
+        var point = currentPoint.Position;
+
+        if (e.Pointer.PointerDeviceType == PointerDeviceType.Pen)
+        {
+            _penInRange = true;
+        }
 
         switch (ActiveTool)
         {
             case ReaderEditTool.Ink:
                 Focus(FocusState.Programmatic);
-                _currentStroke = [point];
-                _inkPreview.Stroke = ColorBrushFromHex(InkColorHex);
-                _inkPreview.StrokeThickness = Math.Max(1, InkThickness * DisplayScale);
-                _inkPreview.Points = BuildPointCollection(_currentStroke);
-                _inkPreview.Visibility = Visibility.Visible;
+                BeginGesture(e);
+                _currentStroke = [ToPagePoint(currentPoint)];
+                UpdateInkPreview();
                 CapturePointer(e.Pointer);
                 e.Handled = true;
                 return;
 
             case ReaderEditTool.Eraser:
                 Focus(FocusState.Programmatic);
+                BeginGesture(e);
                 _isErasing = true;
                 _erasePushedUndo = false;
                 CapturePointer(e.Pointer);
+                UpdateEraserCursor(point);
                 TryEraseAt(point);
                 e.Handled = true;
                 return;
@@ -476,6 +707,16 @@ public sealed partial class PdfEditSurface : Canvas
                 return;
         }
 
+        if (ActiveTool.IsShape())
+        {
+            Focus(FocusState.Programmatic);
+            BeginGesture(e);
+            _shapeStart = point;
+            CapturePointer(e.Pointer);
+            e.Handled = true;
+            return;
+        }
+
         Focus(FocusState.Programmatic);
 
         if (HitTest(ToPagePosition(point)) is not { } hit)
@@ -484,10 +725,17 @@ public sealed partial class PdfEditSurface : Canvas
             return;
         }
 
+        BeginGesture(e);
         SelectItem(hit.Kind, hit.Id);
         BeginDrag(DragMode.Move, point);
         CapturePointer(e.Pointer);
         e.Handled = true;
+    }
+
+    private void BeginGesture(PointerRoutedEventArgs e)
+    {
+        _activePointerId = e.Pointer.PointerId;
+        _activePointerDevice = e.Pointer.PointerDeviceType;
     }
 
     private void Surface_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
@@ -517,10 +765,27 @@ public sealed partial class PdfEditSurface : Canvas
 
     private void Surface_PointerMoved(object sender, PointerRoutedEventArgs e)
     {
-        var point = e.GetCurrentPoint(this).Position;
+        if (e.Pointer.PointerDeviceType == PointerDeviceType.Pen)
+        {
+            _penInRange = true;
+        }
+
+        var currentPoint = e.GetCurrentPoint(this);
+        var point = currentPoint.Position;
+
+        if (ActiveTool == ReaderEditTool.Eraser && _activePointerId is null)
+        {
+            UpdateEraserCursor(point);
+        }
+
+        if (ShouldIgnore(e))
+        {
+            return;
+        }
 
         if (_isErasing)
         {
+            UpdateEraserCursor(point);
             TryEraseAt(point);
             e.Handled = true;
             return;
@@ -528,13 +793,23 @@ public sealed partial class PdfEditSurface : Canvas
 
         if (_currentStroke is not null)
         {
+            var sample = ToPagePoint(currentPoint);
             var last = _currentStroke[^1];
-            if (Math.Abs(point.X - last.X) + Math.Abs(point.Y - last.Y) >= 1.0)
+
+            // Skip samples that add no visible detail at the current zoom.
+            if ((Math.Abs(sample.X - last.X) + Math.Abs(sample.Y - last.Y)) * DisplayScale >= 1.0)
             {
-                _currentStroke.Add(point);
-                _inkPreview.Points.Add(point);
+                _currentStroke.Add(sample);
+                UpdateInkPreview();
             }
 
+            e.Handled = true;
+            return;
+        }
+
+        if (_shapeStart is { } start)
+        {
+            UpdateShapePreview(start, point);
             e.Handled = true;
             return;
         }
@@ -548,16 +823,15 @@ public sealed partial class PdfEditSurface : Canvas
 
     private void Surface_PointerReleased(object sender, PointerRoutedEventArgs e)
     {
+        if (ShouldIgnore(e))
+        {
+            return;
+        }
+
         if (_isErasing)
         {
             ReleasePointerCapture(e.Pointer);
-            _isErasing = false;
-            if (_erasePushedUndo)
-            {
-                NotifyOverlayChanged();
-            }
-
-            _erasePushedUndo = false;
+            FinishErase();
             e.Handled = true;
             return;
         }
@@ -570,12 +844,23 @@ public sealed partial class PdfEditSurface : Canvas
             return;
         }
 
+        if (_shapeStart is { } start)
+        {
+            ReleasePointerCapture(e.Pointer);
+            CommitShape(start, e.GetCurrentPoint(this).Position);
+            e.Handled = true;
+            return;
+        }
+
         if (_dragMode != DragMode.None)
         {
             ReleasePointerCapture(e.Pointer);
             EndDrag();
             e.Handled = true;
+            return;
         }
+
+        _activePointerId = null;
     }
 
     private void Surface_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
@@ -588,56 +873,175 @@ public sealed partial class PdfEditSurface : Canvas
 
         if (_isErasing)
         {
-            _isErasing = false;
-            if (_erasePushedUndo)
-            {
-                NotifyOverlayChanged();
-            }
+            FinishErase();
+            return;
+        }
 
-            _erasePushedUndo = false;
+        if (_shapeStart is not null)
+        {
+            CancelActiveGesture();
             return;
         }
 
         if (_dragMode != DragMode.None)
         {
             EndDrag();
+            return;
         }
+
+        _activePointerId = null;
+    }
+
+    private void Surface_PointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        if (e.Pointer.PointerDeviceType == PointerDeviceType.Pen)
+        {
+            _penInRange = false;
+        }
+
+        if (_activePointerId is null)
+        {
+            _eraserCursor.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void UpdateInkPreview()
+    {
+        if (_currentStroke is null || _currentStroke.Count == 0)
+        {
+            _inkPreview.Visibility = Visibility.Collapsed;
+            _inkPreviewLine.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        if (InkGeometry.HasUniformPressure(_currentStroke))
+        {
+            var width = InkGeometry.WidthAt(InkThickness, _currentStroke[0].Pressure);
+            _inkPreviewLine.Stroke = ColorBrushFromHex(InkColorHex);
+            _inkPreviewLine.StrokeThickness = Math.Max(1, width * DisplayScale);
+            _inkPreviewLine.Points = BuildPointCollection(_currentStroke.Select(ToCanvasPoint));
+            _inkPreviewLine.Visibility = Visibility.Visible;
+            _inkPreview.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var outline = InkGeometry.BuildOutline(_currentStroke, InkThickness);
+        if (outline.Count < 3)
+        {
+            return;
+        }
+
+        _inkPreview.Fill = ColorBrushFromHex(InkColorHex);
+        _inkPreview.Data = BuildPolygonGeometry(outline.Select(vertex => new Point(
+            vertex.X * DisplayScale,
+            vertex.Y * DisplayScale)));
+        _inkPreview.Visibility = Visibility.Visible;
+        _inkPreviewLine.Visibility = Visibility.Collapsed;
     }
 
     private void CommitInkStroke()
     {
         var points = _currentStroke;
         _currentStroke = null;
+        _activePointerId = null;
         _inkPreview.Visibility = Visibility.Collapsed;
-        _inkPreview.Points = new PointCollection();
+        _inkPreviewLine.Visibility = Visibility.Collapsed;
 
         if (points is null || points.Count < 2)
         {
             return;
         }
 
-        PushUndo();
+        NormalizeUnsupportedPressure(points);
+
+        RecordEdit();
         Overlay.InkStrokes.Add(new InkStrokeOverlay
         {
             ColorHex = InkColorHex,
             Thickness = InkThickness,
-            Points = points.Select(ToPagePoint).ToList()
+            Points = points
         });
 
         RenderOverlay();
         NotifyOverlayChanged();
     }
 
+    private void UpdateShapePreview(Point start, Point current)
+    {
+        _shapePreview.Children.Clear();
+
+        var preview = BuildShape(start, current);
+        if (preview is null)
+        {
+            return;
+        }
+
+        foreach (var visual in CreateShapeVisuals(preview))
+        {
+            visual.Opacity = 0.85;
+            _shapePreview.Children.Add(visual);
+        }
+    }
+
+    private ShapeOverlay? BuildShape(Point start, Point end)
+    {
+        var from = ToPagePosition(start);
+        var to = ToPagePosition(end);
+
+        return new ShapeOverlay
+        {
+            Kind = ActiveTool.ToShapeKind(),
+            Start = new PointOverlay { X = from.X, Y = from.Y },
+            End = new PointOverlay { X = to.X, Y = to.Y },
+            ColorHex = InkColorHex,
+            Thickness = InkThickness
+        };
+    }
+
+    private void CommitShape(Point start, Point end)
+    {
+        _shapeStart = null;
+        _activePointerId = null;
+        _shapePreview.Children.Clear();
+
+        var shape = BuildShape(start, end);
+        if (shape is null)
+        {
+            return;
+        }
+
+        var dx = Math.Abs(shape.End.X - shape.Start.X) * DisplayScale;
+        var dy = Math.Abs(shape.End.Y - shape.Start.Y) * DisplayScale;
+
+        // A click without a drag is not a shape.
+        if (dx < 4 && dy < 4)
+        {
+            return;
+        }
+
+        RecordEdit();
+        Overlay.Shapes.Add(shape);
+        RenderOverlay();
+        SelectItem(SelectionKind.Shape, shape.Id);
+        NotifyOverlayChanged();
+
+        ActiveToolChangeRequested?.Invoke(this, ReaderEditTool.Select);
+    }
+
     private void CancelActiveGesture()
     {
         _currentStroke = null;
+        _shapeStart = null;
+        _activePointerId = null;
         _inkPreview.Visibility = Visibility.Collapsed;
-        _inkPreview.Points = new PointCollection();
+        _inkPreviewLine.Visibility = Visibility.Collapsed;
+        _shapePreview.Children.Clear();
         _isErasing = false;
         _erasePushedUndo = false;
         _dragMode = DragMode.None;
         _dragPushedUndo = false;
         _dragStartInkPoints = null;
+        _dragStartShape = null;
     }
 
     // ═══════════ Selection and dragging ═══════════
@@ -672,11 +1076,22 @@ public sealed partial class PdfEditSurface : Canvas
             }
         }
 
+        for (var index = Overlay.Shapes.Count - 1; index >= 0; index--)
+        {
+            var shape = Overlay.Shapes[index];
+            var tolerance = HitTolerance(shape.Thickness);
+
+            if (ShapeGeometry.DistanceTo(shape, pagePoint.X, pagePoint.Y) <= tolerance ||
+                ShapeGeometry.ContainsInterior(shape, pagePoint.X, pagePoint.Y))
+            {
+                return (SelectionKind.Shape, shape.Id);
+            }
+        }
+
         for (var index = Overlay.InkStrokes.Count - 1; index >= 0; index--)
         {
             var stroke = Overlay.InkStrokes[index];
-            var tolerance = Math.Max(4, stroke.Thickness / 2 + 3);
-            if (IsPointNearStroke(pagePoint, stroke.Points, tolerance))
+            if (InkGeometry.DistanceTo(stroke.Points, pagePoint.X, pagePoint.Y) <= HitTolerance(stroke.Thickness))
             {
                 return (SelectionKind.Ink, stroke.Id);
             }
@@ -685,9 +1100,19 @@ public sealed partial class PdfEditSurface : Canvas
         return null;
     }
 
+    /// <summary>
+    /// Hit tolerance in page units. The slack is defined in screen pixels and converted, so targets
+    /// stay equally easy to hit at any zoom level.
+    /// </summary>
+    private double HitTolerance(double thickness)
+    {
+        const double screenSlack = 6;
+        return Math.Max(thickness / 2, 1) + (screenSlack / Math.Max(0.05, DisplayScale));
+    }
+
     private void ResizeHandle_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        if (_selectionKind is not (SelectionKind.Text or SelectionKind.Signature))
+        if (_selectionKind is SelectionKind.None)
         {
             return;
         }
@@ -722,7 +1147,7 @@ public sealed partial class PdfEditSurface : Canvas
 
     private void BeginDrag(DragMode mode, Point canvasPoint)
     {
-        if (GetSelectionBounds() is not { } bounds)
+        if (GetSelectionBounds() is not { } bounds || GetGeometryBounds() is not { } geometry)
         {
             return;
         }
@@ -730,9 +1155,18 @@ public sealed partial class PdfEditSurface : Canvas
         _dragMode = mode;
         _dragStart = canvasPoint;
         _dragStartBounds = bounds;
+        _dragStartGeometry = geometry;
         _dragPushedUndo = false;
+
         _dragStartInkPoints = _selectionKind == SelectionKind.Ink
-            ? FindInk(_selectedId)?.Points.Select(point => new PointOverlay { X = point.X, Y = point.Y }).ToList()
+            ? FindInk(_selectedId)?.Points
+                .Select(point => new PointOverlay { X = point.X, Y = point.Y, Pressure = point.Pressure })
+                .ToList()
+            : null;
+
+        _dragStartShape = _selectionKind == SelectionKind.Shape && FindShape(_selectedId) is { } shape
+            ? (new PointOverlay { X = shape.Start.X, Y = shape.Start.Y },
+               new PointOverlay { X = shape.End.X, Y = shape.End.Y })
             : null;
     }
 
@@ -748,7 +1182,7 @@ public sealed partial class PdfEditSurface : Canvas
                 return;
             }
 
-            PushUndo();
+            RecordEdit();
             _dragPushedUndo = true;
         }
 
@@ -760,12 +1194,14 @@ public sealed partial class PdfEditSurface : Canvas
         }
         else if (_dragMode == DragMode.Resize)
         {
+            // Resize works off the unpadded geometry, so grabbing the handle does not itself
+            // rescale the item by whatever padding the selection box adds for stroke width.
             ResizeSelection(
-                Math.Max(12, _dragStartBounds.Width + deltaX),
-                Math.Max(10, _dragStartBounds.Height + deltaY));
+                Math.Max(4, _dragStartGeometry.Width + deltaX),
+                Math.Max(4, _dragStartGeometry.Height + deltaY));
         }
 
-        SyncSelectedElement();
+        RenderSelectionOnly();
         RestoreSelectionAdorner();
     }
 
@@ -775,6 +1211,8 @@ public sealed partial class PdfEditSurface : Canvas
         _dragMode = DragMode.None;
         _dragPushedUndo = false;
         _dragStartInkPoints = null;
+        _dragStartShape = null;
+        _activePointerId = null;
 
         if (changed)
         {
@@ -804,6 +1242,13 @@ public sealed partial class PdfEditSurface : Canvas
                 }
 
                 break;
+
+            case SelectionKind.Shape when FindShape(_selectedId) is { } shape && _dragStartShape is { } origin:
+                shape.Start.X = origin.Start.X + offsetX;
+                shape.Start.Y = origin.Start.Y + offsetY;
+                shape.End.X = origin.End.X + offsetX;
+                shape.End.Y = origin.End.Y + offsetY;
+                break;
         }
     }
 
@@ -820,35 +1265,71 @@ public sealed partial class PdfEditSurface : Canvas
                 signature.Width = width;
                 signature.Height = height;
                 break;
+
+            case SelectionKind.Shape when FindShape(_selectedId) is { } shape && _dragStartShape is { } origin:
+            {
+                // Scale about the anchor corner so the drag feels like a normal resize handle.
+                var originalWidth = Math.Abs(origin.End.X - origin.Start.X);
+                var originalHeight = Math.Abs(origin.End.Y - origin.Start.Y);
+                var scaleX = originalWidth > 1e-6 ? width / originalWidth : 1;
+                var scaleY = originalHeight > 1e-6 ? height / originalHeight : 1;
+
+                var anchorX = Math.Min(origin.Start.X, origin.End.X);
+                var anchorY = Math.Min(origin.Start.Y, origin.End.Y);
+
+                shape.Start.X = anchorX + ((origin.Start.X - anchorX) * scaleX);
+                shape.Start.Y = anchorY + ((origin.Start.Y - anchorY) * scaleY);
+                shape.End.X = anchorX + ((origin.End.X - anchorX) * scaleX);
+                shape.End.Y = anchorY + ((origin.End.Y - anchorY) * scaleY);
+                break;
+            }
+
+            case SelectionKind.Ink when FindInk(_selectedId) is { } ink && _dragStartInkPoints is { } origin:
+            {
+                var bounds = InkBounds(origin);
+                var scaleX = bounds.Width > 1e-6 ? width / bounds.Width : 1;
+                var scaleY = bounds.Height > 1e-6 ? height / bounds.Height : 1;
+
+                for (var index = 0; index < ink.Points.Count && index < origin.Count; index++)
+                {
+                    ink.Points[index].X = bounds.X + ((origin[index].X - bounds.X) * scaleX);
+                    ink.Points[index].Y = bounds.Y + ((origin[index].Y - bounds.Y) * scaleY);
+                }
+
+                break;
+            }
         }
     }
 
-    /// <summary>Pushes the current model geometry back onto the live visual without a full re-render.</summary>
-    private void SyncSelectedElement()
+    /// <summary>Re-renders just the selected item during a drag, avoiding a full rebuild per frame.</summary>
+    private void RenderSelectionOnly()
     {
-        if (TryGetSelectedElement() is not { } element)
+        if (_selectedId is null)
         {
             return;
         }
 
         switch (_selectionKind)
         {
-            case SelectionKind.Text when FindText(_selectedId) is { } text:
-                SetLeft(element, text.X * DisplayScale);
-                SetTop(element, text.Y * DisplayScale);
-                element.Width = Math.Max(24, text.Width * DisplayScale);
-                element.Height = Math.Max(16, text.Height * DisplayScale);
+            case SelectionKind.Text when FindText(_selectedId) is { } text &&
+                                         TryGetSelectedElement() is { } textElement:
+                SetLeft(textElement, text.X * DisplayScale);
+                SetTop(textElement, text.Y * DisplayScale);
+                textElement.Width = Math.Max(24, text.Width * DisplayScale);
+                textElement.Height = Math.Max(16, text.Height * DisplayScale);
                 break;
 
-            case SelectionKind.Signature when FindSignature(_selectedId) is { } signature:
-                SetLeft(element, signature.X * DisplayScale);
-                SetTop(element, signature.Y * DisplayScale);
-                element.Width = Math.Max(8, signature.Width * DisplayScale);
-                element.Height = Math.Max(8, signature.Height * DisplayScale);
+            case SelectionKind.Signature when FindSignature(_selectedId) is { } signature &&
+                                              TryGetSelectedElement() is { } signatureElement:
+                SetLeft(signatureElement, signature.X * DisplayScale);
+                SetTop(signatureElement, signature.Y * DisplayScale);
+                signatureElement.Width = Math.Max(8, signature.Width * DisplayScale);
+                signatureElement.Height = Math.Max(8, signature.Height * DisplayScale);
                 break;
 
-            case SelectionKind.Ink when element is Polyline polyline && FindInk(_selectedId) is { } ink:
-                polyline.Points = BuildPointCollection(ink.Points.Select(ToCanvasPoint));
+            default:
+                // Ink and shapes can change their whole geometry, so rebuild them.
+                RenderOverlay();
                 break;
         }
     }
@@ -867,6 +1348,7 @@ public sealed partial class PdfEditSurface : Canvas
             _selectionAdorner.Visibility = Visibility.Collapsed;
             _resizeHandle.Visibility = Visibility.Collapsed;
             _textToolbar.Visibility = Visibility.Collapsed;
+            _styleToolbar.Visibility = Visibility.Collapsed;
             return;
         }
 
@@ -881,19 +1363,52 @@ public sealed partial class PdfEditSurface : Canvas
         SetTop(_selectionAdorner, top);
         _selectionAdorner.Visibility = Visibility.Visible;
 
-        _resizeHandle.Visibility = _selectionKind is SelectionKind.Text or SelectionKind.Signature
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        SetLeft(_resizeHandle, left + width - _resizeHandle.Width / 2);
-        SetTop(_resizeHandle, top + height - _resizeHandle.Height / 2);
+        _resizeHandle.Visibility = Visibility.Visible;
+        SetLeft(_resizeHandle, left + width - (_resizeHandle.Width / 2));
+        SetTop(_resizeHandle, top + height - (_resizeHandle.Height / 2));
 
         if (_selectionKind == SelectionKind.Text)
         {
             UpdateTextToolbar(left, top, width);
+            _styleToolbar.Visibility = Visibility.Collapsed;
+        }
+        else if (_selectionKind is SelectionKind.Ink or SelectionKind.Shape)
+        {
+            UpdateStyleToolbar(left, top, width);
+            _textToolbar.Visibility = Visibility.Collapsed;
         }
         else
         {
             _textToolbar.Visibility = Visibility.Collapsed;
+            _styleToolbar.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    /// <summary>
+    /// The item's true geometry in page units, without the stroke-width padding that
+    /// <see cref="GetSelectionBounds"/> adds for the visible selection box.
+    /// </summary>
+    private Rect? GetGeometryBounds()
+    {
+        switch (_selectionKind)
+        {
+            case SelectionKind.Text when FindText(_selectedId) is { } text:
+                return new Rect(text.X, text.Y, Math.Max(4, text.Width), Math.Max(4, text.Height));
+
+            case SelectionKind.Signature when FindSignature(_selectedId) is { } signature:
+                return new Rect(signature.X, signature.Y, Math.Max(4, signature.Width), Math.Max(4, signature.Height));
+
+            case SelectionKind.Ink when FindInk(_selectedId) is { } ink && ink.Points.Count > 0:
+                return InkBounds(ink.Points);
+
+            case SelectionKind.Shape when FindShape(_selectedId) is { } shape:
+            {
+                var (left, top, width, height) = ShapeGeometry.Bounds(shape);
+                return new Rect(left, top, Math.Max(1e-6, width), Math.Max(1e-6, height));
+            }
+
+            default:
+                return null;
         }
     }
 
@@ -909,25 +1424,34 @@ public sealed partial class PdfEditSurface : Canvas
                 return new Rect(signature.X, signature.Y, Math.Max(4, signature.Width), Math.Max(4, signature.Height));
 
             case SelectionKind.Ink when FindInk(_selectedId) is { } ink && ink.Points.Count > 0:
-                return GetInkBounds(ink);
+            {
+                var bounds = InkBounds(ink.Points);
+                var padding = Math.Max(2, ink.Thickness);
+                return new Rect(
+                    bounds.X - padding,
+                    bounds.Y - padding,
+                    Math.Max(4, bounds.Width + (padding * 2)),
+                    Math.Max(4, bounds.Height + (padding * 2)));
+            }
+
+            case SelectionKind.Shape when FindShape(_selectedId) is { } shape:
+            {
+                var (left, top, width, height) = ShapeGeometry.SelectionBounds(shape);
+                return new Rect(left, top, Math.Max(4, width), Math.Max(4, height));
+            }
 
             default:
                 return null;
         }
     }
 
-    private static Rect GetInkBounds(InkStrokeOverlay ink)
+    private static Rect InkBounds(IReadOnlyList<PointOverlay> points)
     {
-        var minX = ink.Points.Min(point => point.X);
-        var minY = ink.Points.Min(point => point.Y);
-        var maxX = ink.Points.Max(point => point.X);
-        var maxY = ink.Points.Max(point => point.Y);
-        var padding = Math.Max(2, ink.Thickness);
-        return new Rect(
-            minX - padding,
-            minY - padding,
-            Math.Max(4, maxX - minX + padding * 2),
-            Math.Max(4, maxY - minY + padding * 2));
+        var minX = points.Min(point => point.X);
+        var minY = points.Min(point => point.Y);
+        var maxX = points.Max(point => point.X);
+        var maxY = points.Max(point => point.Y);
+        return new Rect(minX, minY, Math.Max(1e-6, maxX - minX), Math.Max(1e-6, maxY - minY));
     }
 
     private FrameworkElement? TryGetSelectedElement()
@@ -941,6 +1465,7 @@ public sealed partial class PdfEditSurface : Canvas
         {
             SelectionKind.Text => TextTagKind,
             SelectionKind.Signature => SignatureTagKind,
+            SelectionKind.Shape => ShapeTagKind,
             _ => InkTagKind
         };
 
@@ -958,11 +1483,14 @@ public sealed partial class PdfEditSurface : Canvas
     private InkStrokeOverlay? FindInk(string? id) =>
         id is null ? null : Overlay.InkStrokes.FirstOrDefault(item => item.Id == id);
 
+    private ShapeOverlay? FindShape(string? id) =>
+        id is null ? null : Overlay.Shapes.FirstOrDefault(item => item.Id == id);
+
     // ═══════════ Text ═══════════
 
     private void PlaceTextAt(Point pagePoint)
     {
-        PushUndo();
+        RecordEdit();
         var text = new TextOverlay
         {
             X = Math.Max(0, pagePoint.X),
@@ -1052,27 +1580,51 @@ public sealed partial class PdfEditSurface : Canvas
             return;
         }
 
-        if (_textColorButton.Content is Border dot)
-        {
-            dot.Background = ColorBrushFromHex(text.ColorHex);
-        }
-
+        SetColorDot(_textColorButton, text.ColorHex);
         _isSyncingColorPicker = true;
         _textColorPicker.Color = ParseColor(text.ColorHex);
         _isSyncingColorPicker = false;
 
-        _textToolbar.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        var toolbarWidth = _textToolbar.DesiredSize.Width;
-        var left = Math.Max(0, selectedLeft + selectedWidth / 2 - toolbarWidth / 2);
+        PositionToolbar(_textToolbar, selectedLeft, selectedTop, selectedWidth);
+    }
+
+    private void UpdateStyleToolbar(double selectedLeft, double selectedTop, double selectedWidth)
+    {
+        var colorHex = _selectionKind switch
+        {
+            SelectionKind.Ink => FindInk(_selectedId)?.ColorHex,
+            SelectionKind.Shape => FindShape(_selectedId)?.ColorHex,
+            _ => null
+        };
+
+        if (colorHex is null)
+        {
+            _styleToolbar.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        SetColorDot(_styleColorButton, colorHex);
+        _isSyncingColorPicker = true;
+        _styleColorPicker.Color = ParseColor(colorHex);
+        _isSyncingColorPicker = false;
+
+        PositionToolbar(_styleToolbar, selectedLeft, selectedTop, selectedWidth);
+    }
+
+    private void PositionToolbar(Border toolbar, double selectedLeft, double selectedTop, double selectedWidth)
+    {
+        toolbar.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        var toolbarWidth = toolbar.DesiredSize.Width;
+        var left = Math.Max(0, selectedLeft + (selectedWidth / 2) - (toolbarWidth / 2));
         var top = selectedTop - 40;
         if (top < 0)
         {
             top = selectedTop + 8;
         }
 
-        SetLeft(_textToolbar, left);
-        SetTop(_textToolbar, top);
-        _textToolbar.Visibility = Visibility.Visible;
+        SetLeft(toolbar, left);
+        SetTop(toolbar, top);
+        toolbar.Visibility = Visibility.Visible;
     }
 
     private void ToggleSelectedTextBold()
@@ -1082,7 +1634,7 @@ public sealed partial class PdfEditSurface : Canvas
             return;
         }
 
-        PushUndo();
+        RecordEdit();
         text.IsBold = !text.IsBold;
         if (TryGetSelectedElement() is TextBox box)
         {
@@ -1099,7 +1651,7 @@ public sealed partial class PdfEditSurface : Canvas
             return;
         }
 
-        PushUndo();
+        RecordEdit();
         text.IsItalic = !text.IsItalic;
         if (TryGetSelectedElement() is TextBox box)
         {
@@ -1122,7 +1674,7 @@ public sealed partial class PdfEditSurface : Canvas
             return;
         }
 
-        PushUndo();
+        RecordEdit();
         text.FontSize = updated;
         text.Height = Math.Max(text.Height, updated * 1.6);
         if (TryGetSelectedElement() is TextBox box)
@@ -1135,6 +1687,105 @@ public sealed partial class PdfEditSurface : Canvas
         NotifyOverlayChanged();
     }
 
+    // ═══════════ Restyling ═══════════
+
+    private void ScaleSelectedThickness(double delta)
+    {
+        switch (_selectionKind)
+        {
+            case SelectionKind.Ink when FindInk(_selectedId) is { } ink:
+            {
+                var updated = Math.Clamp(ink.Thickness + delta, 1, 40);
+                if (Math.Abs(updated - ink.Thickness) < 0.01)
+                {
+                    return;
+                }
+
+                RecordEdit();
+                ink.Thickness = updated;
+                break;
+            }
+
+            case SelectionKind.Shape when FindShape(_selectedId) is { } shape:
+            {
+                var updated = Math.Clamp(shape.Thickness + delta, 1, 40);
+                if (Math.Abs(updated - shape.Thickness) < 0.01)
+                {
+                    return;
+                }
+
+                RecordEdit();
+                shape.Thickness = updated;
+                break;
+            }
+
+            default:
+                return;
+        }
+
+        RenderOverlay();
+        NotifyOverlayChanged();
+    }
+
+    /// <summary>Cycles a closed shape between unfilled and filled with a translucent tint of its outline.</summary>
+    private void ToggleSelectedFill()
+    {
+        if (FindShape(_selectedId) is not { } shape || shape.Kind is ShapeKind.Line or ShapeKind.Arrow)
+        {
+            return;
+        }
+
+        RecordEdit();
+        shape.FillColorHex = shape.FillColorHex is null ? shape.ColorHex : null;
+        RenderOverlay();
+        NotifyOverlayChanged();
+    }
+
+    private void StyleColorPicker_ColorChanged(ColorPicker sender, ColorChangedEventArgs args)
+    {
+        if (_isSyncingColorPicker)
+        {
+            return;
+        }
+
+        var colorHex = ToHex(args.NewColor);
+
+        switch (_selectionKind)
+        {
+            case SelectionKind.Ink when FindInk(_selectedId) is { } ink:
+                if (string.Equals(colorHex, ink.ColorHex, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                RecordColorEditOnce();
+                ink.ColorHex = colorHex;
+                break;
+
+            case SelectionKind.Shape when FindShape(_selectedId) is { } shape:
+                if (string.Equals(colorHex, shape.ColorHex, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                RecordColorEditOnce();
+                if (shape.FillColorHex is not null)
+                {
+                    shape.FillColorHex = colorHex;
+                }
+
+                shape.ColorHex = colorHex;
+                break;
+
+            default:
+                return;
+        }
+
+        SetColorDot(_styleColorButton, colorHex);
+        RenderOverlay();
+        NotifyOverlayChanged();
+    }
+
     private void TextColorPicker_ColorChanged(ColorPicker sender, ColorChangedEventArgs args)
     {
         if (_isSyncingColorPicker || FindText(_selectedId) is not { } text)
@@ -1142,13 +1793,13 @@ public sealed partial class PdfEditSurface : Canvas
             return;
         }
 
-        var colorHex = $"#{args.NewColor.R:X2}{args.NewColor.G:X2}{args.NewColor.B:X2}";
+        var colorHex = ToHex(args.NewColor);
         if (string.Equals(colorHex, text.ColorHex, StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
 
-        PushUndo();
+        RecordColorEditOnce();
         text.ColorHex = colorHex;
         if (TryGetSelectedElement() is TextBox box)
         {
@@ -1156,11 +1807,7 @@ public sealed partial class PdfEditSurface : Canvas
             ApplyTextBoxChrome(box, colorHex);
         }
 
-        if (_textColorButton.Content is Border dot)
-        {
-            dot.Background = new SolidColorBrush(args.NewColor);
-        }
-
+        SetColorDot(_textColorButton, colorHex);
         NotifyOverlayChanged();
     }
 
@@ -1190,83 +1837,173 @@ public sealed partial class PdfEditSurface : Canvas
             return;
         }
 
-        if (e.Key == Windows.System.VirtualKey.Delete || e.Key == Windows.System.VirtualKey.Back)
+        switch (e.Key)
         {
-            DeleteSelection();
-            e.Handled = true;
+            case Windows.System.VirtualKey.Delete:
+            case Windows.System.VirtualKey.Back:
+                DeleteSelection();
+                e.Handled = true;
+                break;
+
+            case Windows.System.VirtualKey.Escape:
+                ClearSelection();
+                e.Handled = true;
+                break;
+
+            case Windows.System.VirtualKey.Left:
+                NudgeSelection(-1, 0);
+                e.Handled = true;
+                break;
+
+            case Windows.System.VirtualKey.Right:
+                NudgeSelection(1, 0);
+                e.Handled = true;
+                break;
+
+            case Windows.System.VirtualKey.Up:
+                NudgeSelection(0, -1);
+                e.Handled = true;
+                break;
+
+            case Windows.System.VirtualKey.Down:
+                NudgeSelection(0, 1);
+                e.Handled = true;
+                break;
         }
-        else if (e.Key == Windows.System.VirtualKey.Escape)
+    }
+
+    private void NudgeSelection(double offsetX, double offsetY)
+    {
+        if (_selectionKind == SelectionKind.None || GetSelectionBounds() is not { } bounds)
         {
-            ClearSelection();
-            e.Handled = true;
+            return;
         }
+
+        RecordEdit();
+        _dragStartBounds = bounds;
+        _dragStartInkPoints = FindInk(_selectedId)?.Points
+            .Select(point => new PointOverlay { X = point.X, Y = point.Y, Pressure = point.Pressure })
+            .ToList();
+        _dragStartShape = FindShape(_selectedId) is { } shape
+            ? (new PointOverlay { X = shape.Start.X, Y = shape.Start.Y },
+               new PointOverlay { X = shape.End.X, Y = shape.End.Y })
+            : null;
+
+        MoveSelection(offsetX, offsetY);
+        _dragStartInkPoints = null;
+        _dragStartShape = null;
+
+        RenderOverlay();
+        NotifyOverlayChanged();
     }
 
     // ═══════════ Eraser ═══════════
 
+    private void UpdateEraserCursor(Point canvasPoint)
+    {
+        var radius = EraserRadius * DisplayScale;
+        _eraserCursor.Width = radius * 2;
+        _eraserCursor.Height = radius * 2;
+        SetLeft(_eraserCursor, canvasPoint.X - radius);
+        SetTop(_eraserCursor, canvasPoint.Y - radius);
+        _eraserCursor.Visibility = Visibility.Visible;
+    }
+
     private void TryEraseAt(Point canvasPoint)
     {
-        if (HitTest(ToPagePosition(canvasPoint)) is not { } hit)
-        {
-            return;
-        }
+        var pagePoint = ToPagePosition(canvasPoint);
 
-        EnsureEraseUndo();
-        switch (hit.Kind)
+        if (ErasePartially ? ErasePartial(pagePoint) : EraseWhole(pagePoint))
         {
-            case SelectionKind.Text:
-                Overlay.TextItems.RemoveAll(item => item.Id == hit.Id);
-                break;
-            case SelectionKind.Signature:
-                Overlay.Signatures.RemoveAll(item => item.Id == hit.Id);
-                break;
-            case SelectionKind.Ink:
-                Overlay.InkStrokes.RemoveAll(item => item.Id == hit.Id);
-                break;
-        }
-
-        ClearSelection();
-        RenderOverlay();
-
-        if (!_isErasing)
-        {
-            NotifyOverlayChanged();
+            RenderOverlay();
         }
     }
 
-    private void EnsureEraseUndo()
+    /// <summary>Cuts ink where the eraser touches it, and removes other annotations outright.</summary>
+    private bool ErasePartial(Point pagePoint)
     {
-        if (_isErasing && _erasePushedUndo)
+        var changed = false;
+
+        for (var index = Overlay.InkStrokes.Count - 1; index >= 0; index--)
         {
-            return;
-        }
+            var stroke = Overlay.InkStrokes[index];
+            var reach = EraserRadius + (stroke.Thickness / 2);
 
-        PushUndo();
-        _erasePushedUndo = true;
-    }
-
-    private static bool Contains(Rect rect, Point point) =>
-        point.X >= rect.X && point.X <= rect.X + rect.Width &&
-        point.Y >= rect.Y && point.Y <= rect.Y + rect.Height;
-
-    private static bool IsPointNearStroke(Point point, IReadOnlyList<PointOverlay> points, double tolerance)
-    {
-        if (points.Count == 0)
-        {
-            return false;
-        }
-
-        if (points.Count == 1)
-        {
-            return Distance(point, new Point(points[0].X, points[0].Y)) <= tolerance;
-        }
-
-        for (var i = 1; i < points.Count; i++)
-        {
-            var start = new Point(points[i - 1].X, points[i - 1].Y);
-            var end = new Point(points[i].X, points[i].Y);
-            if (DistanceToSegment(point, start, end) <= tolerance)
+            if (InkGeometry.DistanceTo(stroke.Points, pagePoint.X, pagePoint.Y) > reach)
             {
+                continue;
+            }
+
+            EnsureEraseUndo();
+            var fragments = InkGeometry.Erase(stroke.Points, pagePoint.X, pagePoint.Y, reach);
+            Overlay.InkStrokes.RemoveAt(index);
+
+            foreach (var fragment in fragments)
+            {
+                Overlay.InkStrokes.Insert(index, new InkStrokeOverlay
+                {
+                    ColorHex = stroke.ColorHex,
+                    Thickness = stroke.Thickness,
+                    Points = fragment
+                });
+            }
+
+            changed = true;
+        }
+
+        return EraseNonInk(pagePoint) || changed;
+    }
+
+    private bool EraseWhole(Point pagePoint)
+    {
+        for (var index = Overlay.InkStrokes.Count - 1; index >= 0; index--)
+        {
+            var stroke = Overlay.InkStrokes[index];
+            if (InkGeometry.DistanceTo(stroke.Points, pagePoint.X, pagePoint.Y) <= EraserRadius + (stroke.Thickness / 2))
+            {
+                EnsureEraseUndo();
+                Overlay.InkStrokes.RemoveAt(index);
+                return true;
+            }
+        }
+
+        return EraseNonInk(pagePoint);
+    }
+
+    private bool EraseNonInk(Point pagePoint)
+    {
+        for (var index = Overlay.Shapes.Count - 1; index >= 0; index--)
+        {
+            var shape = Overlay.Shapes[index];
+            var reach = EraserRadius + (shape.Thickness / 2);
+
+            if (ShapeGeometry.DistanceTo(shape, pagePoint.X, pagePoint.Y) <= reach ||
+                ShapeGeometry.ContainsInterior(shape, pagePoint.X, pagePoint.Y))
+            {
+                EnsureEraseUndo();
+                Overlay.Shapes.RemoveAt(index);
+                return true;
+            }
+        }
+
+        for (var index = Overlay.TextItems.Count - 1; index >= 0; index--)
+        {
+            var item = Overlay.TextItems[index];
+            if (Contains(new Rect(item.X, item.Y, item.Width, item.Height), pagePoint))
+            {
+                EnsureEraseUndo();
+                Overlay.TextItems.RemoveAt(index);
+                return true;
+            }
+        }
+
+        for (var index = Overlay.Signatures.Count - 1; index >= 0; index--)
+        {
+            var item = Overlay.Signatures[index];
+            if (Contains(new Rect(item.X, item.Y, item.Width, item.Height), pagePoint))
+            {
+                EnsureEraseUndo();
+                Overlay.Signatures.RemoveAt(index);
                 return true;
             }
         }
@@ -1274,21 +2011,35 @@ public sealed partial class PdfEditSurface : Canvas
         return false;
     }
 
-    private static double Distance(Point a, Point b) =>
-        Math.Sqrt(Math.Pow(a.X - b.X, 2) + Math.Pow(a.Y - b.Y, 2));
-
-    private static double DistanceToSegment(Point point, Point start, Point end)
+    /// <summary>One undo entry covers a whole eraser drag, not every sample along it.</summary>
+    private void EnsureEraseUndo()
     {
-        var dx = end.X - start.X;
-        var dy = end.Y - start.Y;
-        if (Math.Abs(dx) < 0.001 && Math.Abs(dy) < 0.001)
+        if (_erasePushedUndo)
         {
-            return Distance(point, start);
+            return;
         }
 
-        var t = Math.Clamp(((point.X - start.X) * dx + (point.Y - start.Y) * dy) / (dx * dx + dy * dy), 0, 1);
-        return Distance(point, new Point(start.X + t * dx, start.Y + t * dy));
+        RecordEdit();
+        _erasePushedUndo = true;
     }
+
+    private void FinishErase()
+    {
+        var changed = _erasePushedUndo;
+        _isErasing = false;
+        _erasePushedUndo = false;
+        _activePointerId = null;
+
+        if (changed)
+        {
+            ClearSelection();
+            NotifyOverlayChanged();
+        }
+    }
+
+    private static bool Contains(Rect rect, Point point) =>
+        point.X >= rect.X && point.X <= rect.X + rect.Width &&
+        point.Y >= rect.Y && point.Y <= rect.Y + rect.Height;
 
     // ═══════════ Helpers ═══════════
 
@@ -1298,8 +2049,39 @@ public sealed partial class PdfEditSurface : Canvas
     private Point ToCanvasPoint(PointOverlay point) =>
         new(point.X * DisplayScale, point.Y * DisplayScale);
 
-    private PointOverlay ToPagePoint(Point point) =>
-        new() { X = point.X / DisplayScale, Y = point.Y / DisplayScale };
+    /// <summary>Converts a pointer sample to page units, capturing pen pressure when it is reported.</summary>
+    private PointOverlay ToPagePoint(PointerPoint pointerPoint)
+    {
+        // Only pens carry meaningful pressure; mice and touch always draw at full width.
+        var pressure = _activePointerDevice == PointerDeviceType.Pen
+            ? Math.Clamp(pointerPoint.Properties.Pressure, 0.0, 1.0)
+            : 1.0;
+
+        return new PointOverlay
+        {
+            X = pointerPoint.Position.X / DisplayScale,
+            Y = pointerPoint.Position.Y / DisplayScale,
+            Pressure = pressure
+        };
+    }
+
+    /// <summary>
+    /// Digitizers without pressure support report a constant 0.5 for every sample, which would
+    /// otherwise render the whole stroke at 67% of the chosen thickness. A stroke that never varies
+    /// carries no pressure information, so it is normalised back to full width.
+    /// </summary>
+    private static void NormalizeUnsupportedPressure(List<PointOverlay> points)
+    {
+        if (points.Count == 0 || !InkGeometry.HasUniformPressure(points))
+        {
+            return;
+        }
+
+        foreach (var point in points)
+        {
+            point.Pressure = 1;
+        }
+    }
 
     private static PointCollection BuildPointCollection(IEnumerable<Point> points)
     {
@@ -1347,57 +2129,79 @@ public sealed partial class PdfEditSurface : Canvas
         }
     }
 
-    private void PushUndo()
-    {
-        _undoStack.Add(CloneOverlay(Overlay));
-        if (_undoStack.Count > 50)
-        {
-            _undoStack.RemoveAt(0);
-        }
-    }
+    /// <summary>Publishes the pre-edit state so the owning view model can push it onto the undo stack.</summary>
+    private void RecordEdit() =>
+        EditRecording?.Invoke(this, OverlayHistory.Clone(Overlay));
 
     private void NotifyOverlayChanged() =>
-        OverlayChanged?.Invoke(this, CloneOverlay(Overlay));
+        OverlayChanged?.Invoke(this, OverlayHistory.Clone(Overlay));
 
-    private static PageOverlayState CloneOverlay(PageOverlayState source) =>
+    private static Border CreateToolbarShell(UIElement content) =>
         new()
         {
-            InkStrokes = source.InkStrokes
-                .Select(stroke => new InkStrokeOverlay
-                {
-                    Id = stroke.Id,
-                    ColorHex = stroke.ColorHex,
-                    Thickness = stroke.Thickness,
-                    Points = stroke.Points.Select(point => new PointOverlay { X = point.X, Y = point.Y }).ToList()
-                })
-                .ToList(),
-            TextItems = source.TextItems
-                .Select(text => new TextOverlay
-                {
-                    Id = text.Id,
-                    X = text.X,
-                    Y = text.Y,
-                    Text = text.Text,
-                    FontSize = text.FontSize,
-                    Width = text.Width,
-                    Height = text.Height,
-                    ColorHex = text.ColorHex,
-                    IsBold = text.IsBold,
-                    IsItalic = text.IsItalic
-                })
-                .ToList(),
-            Signatures = source.Signatures
-                .Select(signature => new SignatureOverlay
-                {
-                    Id = signature.Id,
-                    X = signature.X,
-                    Y = signature.Y,
-                    ImageBase64 = signature.ImageBase64,
-                    Width = signature.Width,
-                    Height = signature.Height
-                })
-                .ToList()
+            Padding = new Thickness(6, 4, 6, 4),
+            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(245, 32, 32, 32)),
+            CornerRadius = new CornerRadius(14),
+            Visibility = Visibility.Collapsed,
+            Child = content
         };
+
+    private static ColorPicker CreateColorPicker(TypedEventHandler<ColorPicker, ColorChangedEventArgs> handler)
+    {
+        var picker = new ColorPicker
+        {
+            Color = Colors.Black,
+            IsAlphaEnabled = false,
+            IsAlphaSliderVisible = false,
+            IsAlphaTextInputVisible = false,
+            IsColorChannelTextInputVisible = true,
+            IsHexInputVisible = true,
+            Width = 280
+        };
+
+        picker.ColorChanged += handler;
+        return picker;
+    }
+
+    /// <summary>
+    /// Wraps a picker in a flyout that resets the undo debounce each time it opens, so dragging
+    /// across the spectrum produces one undo entry rather than one per sampled colour.
+    /// </summary>
+    private Flyout CreateColorFlyout(ColorPicker picker)
+    {
+        var flyout = new Flyout { Content = picker };
+        flyout.Opened += (_, _) => _colorPushedUndo = false;
+        return flyout;
+    }
+
+    /// <summary>Records an undo entry only on the first colour change of a picker interaction.</summary>
+    private void RecordColorEditOnce()
+    {
+        if (_colorPushedUndo)
+        {
+            return;
+        }
+
+        RecordEdit();
+        _colorPushedUndo = true;
+    }
+
+    private static Border CreateColorDot() =>
+        new()
+        {
+            Width = 14,
+            Height = 14,
+            CornerRadius = new CornerRadius(7),
+            Background = new SolidColorBrush(Colors.Black)
+        };
+
+    private static void SetColorDot(Button button, string colorHex)
+    {
+        if (button.Content is Border dot)
+        {
+            dot.Background = ColorBrushFromHex(colorHex);
+        }
+    }
 
     private static Button CreateToolbarButton(string text, RoutedEventHandler? click = null)
     {
@@ -1421,8 +2225,18 @@ public sealed partial class PdfEditSurface : Canvas
         return button;
     }
 
+    private static string ToHex(Windows.UI.Color color) =>
+        $"#{color.R:X2}{color.G:X2}{color.B:X2}";
+
     private static SolidColorBrush ColorBrushFromHex(string colorHex) =>
         new(ParseColor(colorHex));
+
+    /// <summary>A shape's interior brush, translucent so page content stays readable beneath it.</summary>
+    private static SolidColorBrush FillBrushFromHex(string colorHex)
+    {
+        var color = ParseColor(colorHex);
+        return new SolidColorBrush(Windows.UI.Color.FromArgb(ShapeFillAlpha, color.R, color.G, color.B));
+    }
 
     private static Windows.UI.Color ParseColor(string colorHex)
     {

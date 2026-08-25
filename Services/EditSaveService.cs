@@ -9,11 +9,16 @@ public sealed class EditSaveService : IEditSaveService
 {
     private readonly IAnnotationStore _annotationStore;
     private readonly IDocumentSaveService _saveService;
+    private readonly IOverlayHistory _history;
 
-    public EditSaveService(IAnnotationStore annotationStore, IDocumentSaveService saveService)
+    public EditSaveService(
+        IAnnotationStore annotationStore,
+        IDocumentSaveService saveService,
+        IOverlayHistory history)
     {
         _annotationStore = annotationStore;
         _saveService = saveService;
+        _history = history;
     }
 
     public async Task SaveTabAsync(DocumentTab tab, string outputPath, CancellationToken cancellationToken = default)
@@ -41,7 +46,9 @@ public sealed class EditSaveService : IEditSaveService
             if (isInPlace)
             {
                 // The overlays are now part of the page content; keeping them would draw them twice.
+                // Undo entries reference those same overlays, so they have to go as well.
                 _annotationStore.ClearOverlays(tab.Id);
+                _history.Clear(tab.Id);
                 tab.IsDirty = false;
             }
         }

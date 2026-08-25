@@ -115,6 +115,19 @@ internal static partial class PdfiumNative
     [LibraryImport("pdfium.dll")]
     public static partial int FPDFPath_LineTo(IntPtr path, float x, float y);
 
+    [LibraryImport("pdfium.dll")]
+    public static partial int FPDFPath_BezierTo(
+        IntPtr path,
+        float x1,
+        float y1,
+        float x2,
+        float y2,
+        float x3,
+        float y3);
+
+    [LibraryImport("pdfium.dll")]
+    public static partial int FPDFPath_Close(IntPtr path);
+
     /// <param name="fillmode">0 = none, 1 = alternate, 2 = winding.</param>
     [LibraryImport("pdfium.dll")]
     public static partial int FPDFPath_SetDrawMode(IntPtr path, int fillmode, int stroke);
