@@ -36,13 +36,25 @@
   <Project Path="tests\ElliePdf.Recovery.Tests\ElliePdf.Recovery.Tests.csproj" />
   <Project Path="tests\ElliePdf.Pdf.Contracts.Tests\ElliePdf.Pdf.Contracts.Tests.csproj" />
   <Project Path="tests\ElliePdf.Pdf.Transport.Tests\ElliePdf.Pdf.Transport.Tests.csproj" />
-  <Project Path="tests\ElliePdf.Pdf.Client.Tests\ElliePdf.Pdf.Client.Tests.csproj" />
-  <Project Path="tests\ElliePdf.Pdfium.IntegrationTests\ElliePdf.Pdfium.IntegrationTests.csproj" />
-  <Project Path="tests\ElliePdf.Pdfium.Worker.Tests\ElliePdf.Pdfium.Worker.Tests.csproj" />
+  <Project Path="tests\ElliePdf.Pdf.Client.Tests\ElliePdf.Pdf.Client.Tests.csproj">
+    <Platform Solution="*|x64" Project="x64" />
+    <Platform Solution="*|ARM64" Project="ARM64" />
+  </Project>
+  <Project Path="tests\ElliePdf.Pdfium.IntegrationTests\ElliePdf.Pdfium.IntegrationTests.csproj">
+    <Platform Solution="*|x64" Project="x64" />
+    <Platform Solution="*|ARM64" Project="ARM64" />
+  </Project>
+  <Project Path="tests\ElliePdf.Pdfium.Worker.Tests\ElliePdf.Pdfium.Worker.Tests.csproj">
+    <Platform Solution="*|x64" Project="x64" />
+    <Platform Solution="*|ARM64" Project="ARM64" />
+  </Project>
   <Project Path="tests\ElliePdf.Rendering.Tests\ElliePdf.Rendering.Tests.csproj" />
   <Project Path="tests\ElliePdf.Printing.Tests\ElliePdf.Printing.Tests.csproj" />
   <Project Path="tests\ElliePdf.Diagnostics.Tests\ElliePdf.Diagnostics.Tests.csproj" />
-  <Project Path="tests\ElliePdf.Fuzz.Tests\ElliePdf.Fuzz.Tests.csproj" />
+  <Project Path="tests\ElliePdf.Fuzz.Tests\ElliePdf.Fuzz.Tests.csproj">
+    <Platform Solution="*|x64" Project="x64" />
+    <Platform Solution="*|ARM64" Project="ARM64" />
+  </Project>
   <Project Path="tests\ElliePdf.Semantics.Tests\ElliePdf.Semantics.Tests.csproj" />
   <Project Path="tests\ElliePdf.UI.AutomationTests\ElliePdf.UI.AutomationTests.csproj" />
   <Project Path="tests\ElliePdf.PerformanceTests\ElliePdf.PerformanceTests.csproj" />
