@@ -18,7 +18,10 @@
   <Project Path="src\ElliePdf.Application\ElliePdf.Application.csproj" />
   <Project Path="src\ElliePdf.Infrastructure\ElliePdf.Infrastructure.csproj" />
   <Project Path="src\ElliePdf.Pdfium\ElliePdf.Pdfium.csproj" />
-  <Project Path="src\ElliePdf.Pdfium.Worker\ElliePdf.Pdfium.Worker.csproj" />
+  <Project Path="src\ElliePdf.Pdfium.Worker\ElliePdf.Pdfium.Worker.csproj">
+    <Platform Solution="*|x64" Project="x64" />
+    <Platform Solution="*|ARM64" Project="ARM64" />
+  </Project>
   <Project Path="src\ElliePdf.Rendering\ElliePdf.Rendering.csproj" />
   <Project Path="src\ElliePdf.Printing\ElliePdf.Printing.csproj" />
   <Project Path="src\ElliePdf.Pdf.Contracts\ElliePdf.Pdf.Contracts.csproj" />
