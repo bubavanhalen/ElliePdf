@@ -1,0 +1,163 @@
+name: Signed Package Lifecycle
+
+on:
+  workflow_dispatch:
+    inputs:
+      architecture:
+        description: Disposable VM architecture
+        required: true
+        type: choice
+        options:
+          - x64
+          - arm64
+      previous_tag:
+        description: Older signed release tag
+        required: true
+        type: string
+      previous_run_id:
+        description: Older Release Signing run ID
+        required: true
+        type: string
+      current_tag:
+        description: Current signed release tag
+        required: true
+        type: string
+      current_run_id:
+        description: Current Release Signing run ID
+        required: true
+        type: string
+      rollback_tag:
+        description: Forward-versioned last-known-good release tag
+        required: true
+        type: string
+      rollback_run_id:
+        description: Forward rollback Release Signing run ID
+        required: true
+        type: string
+      rotation_tag:
+        description: Still-newer certificate-rotation release tag
+        required: true
+        type: string
+      rotation_run_id:
+        description: Certificate-rotation Release Signing run ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  lifecycle:
+    if: github.ref == 'refs/heads/master'
+    runs-on:
+      - self-hosted
+      - windows
+      - ${{ inputs.architecture }}
+      - elliepdf-package-vm
+    environment: package-lifecycle
+    timeout-minutes: 90
+    env:
+      ELLIEPDF_PACKAGE_TEST_VM: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The signed packages are untrusted inputs to the current, reviewed
+          # lifecycle harness; never execute scripts from a selected tag.
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+      - name: Download and authenticate the four signed generations
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
+          PACKAGE_ARCHITECTURE: ${{ inputs.architecture }}
+          PREVIOUS_TAG: ${{ inputs.previous_tag }}
+          PREVIOUS_RUN_ID: ${{ inputs.previous_run_id }}
+          CURRENT_TAG: ${{ inputs.current_tag }}
+          CURRENT_RUN_ID: ${{ inputs.current_run_id }}
+          ROLLBACK_TAG: ${{ inputs.rollback_tag }}
+          ROLLBACK_RUN_ID: ${{ inputs.rollback_run_id }}
+          ROTATION_TAG: ${{ inputs.rotation_tag }}
+          ROTATION_RUN_ID: ${{ inputs.rotation_run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.Security.Cryptography.Pkcs
+          function Resolve-SignedGeneration([string]$Label, [string]$Tag, [string]$RunId) {
+            if ($Tag -notmatch '^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') { throw "$Label tag is invalid." }
+            if ($RunId -notmatch '^[1-9][0-9]*$') { throw "$Label run ID is invalid." }
+            $run = gh api "repos/$env:SOURCE_REPOSITORY/actions/runs/$RunId" | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0 -or $run.conclusion -ne 'success' -or $run.name -ne 'Release Signing' -or $run.event -notin @('push', 'workflow_dispatch')) { throw "$Label is not a successful Release Signing run." }
+            $expectedRunPath = if ($run.event -eq 'push') {
+              '^\.github/workflows/release-signing\.yml@(?:refs/tags/)?' + [Regex]::Escape($Tag) + '$'
+            } else {
+              '^\.github/workflows/release-signing\.yml@(?:refs/heads/)?master$'
+            }
+            if ([string]$run.path -notmatch $expectedRunPath) { throw "$Label signing workflow was loaded from an untrusted ref: $($run.path)" }
+            $root = Join-Path $PWD "artifacts/lifecycle/$Label"
+            if (Test-Path -LiteralPath $root) { throw "Refusing stale lifecycle directory: $root" }
+            New-Item -ItemType Directory -Path $root -Force | Out-Null
+            gh run download $RunId --repo $env:SOURCE_REPOSITORY --name "signed-release-$Tag" --dir $root
+            if ($LASTEXITCODE -ne 0) { throw "$Label signed artifact download failed." }
+            $matching = @(Get-ChildItem -LiteralPath $root -Recurse -Filter '*.checksums.json' -File | Where-Object {
+              $candidate = Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json -Depth 100
+              ([string]$candidate.architecture).ToLowerInvariant() -eq $env:PACKAGE_ARCHITECTURE
+            })
+            if ($matching.Count -ne 1) { throw "$Label must contain exactly one $env:PACKAGE_ARCHITECTURE checksum record." }
+            $recordFile = $matching[0]
+            $recordBytes = [IO.File]::ReadAllBytes($recordFile.FullName)
+            $record = [Text.Encoding]::UTF8.GetString($recordBytes) | ConvertFrom-Json -Depth 100
+            if ([string]$record.tag -cne $Tag -or [string]$record.provenance.refName -cne $Tag -or [string]$record.provenance.runId -cne $RunId) { throw "$Label record provenance does not match the selected tag/run." }
+            if ([string]$record.provenance.repository -cne $env:SOURCE_REPOSITORY) { throw "$Label record repository does not match its signing run." }
+            if ($run.event -eq 'push' -and [string]$record.provenance.sha -cne [string]$run.head_sha) { throw "$Label record source does not match its tag-push signing run." }
+            $rootPrefix = [IO.Path]::GetFullPath($root).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+            $package = [IO.Path]::GetFullPath((Join-Path $root ([string]$record.signedPackage.path)))
+            if (-not $package.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $package -PathType Leaf)) { throw "$Label package path escapes or is missing." }
+            if ((Get-FileHash -LiteralPath $package -Algorithm SHA256).Hash -cne ([string]$record.signedPackage.sha256).ToUpperInvariant()) { throw "$Label package hash mismatch." }
+            $cmsPath = $recordFile.FullName + '.p7s'
+            if (-not (Test-Path -LiteralPath $cmsPath -PathType Leaf)) { throw "$Label detached checksum signature is missing." }
+            $cms = [Security.Cryptography.Pkcs.SignedCms]::new([Security.Cryptography.Pkcs.ContentInfo]::new($recordBytes), $true)
+            $cms.Decode([IO.File]::ReadAllBytes($cmsPath))
+            $cms.CheckSignature($false)
+            if ($cms.SignerInfos.Count -ne 1 -or $cms.SignerInfos[0].Certificate.Thumbprint -cne [string]$record.signingCertificate.thumbprint) { throw "$Label checksum signer mismatch." }
+            return [pscustomobject]@{ Package = $package; Version = [string]$record.packageVersion }
+          }
+          $previous = Resolve-SignedGeneration previous $env:PREVIOUS_TAG $env:PREVIOUS_RUN_ID
+          $current = Resolve-SignedGeneration current $env:CURRENT_TAG $env:CURRENT_RUN_ID
+          $rollback = Resolve-SignedGeneration rollback $env:ROLLBACK_TAG $env:ROLLBACK_RUN_ID
+          $rotation = Resolve-SignedGeneration rotation $env:ROTATION_TAG $env:ROTATION_RUN_ID
+          "LIFECYCLE_PREVIOUS_PACKAGE=$($previous.Package)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "LIFECYCLE_CURRENT_PACKAGE=$($current.Package)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "LIFECYCLE_CURRENT_VERSION=$($current.Version)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "LIFECYCLE_ROLLBACK_PACKAGE=$($rollback.Package)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "LIFECYCLE_ROTATION_PACKAGE=$($rotation.Package)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Execute signed install, update, rollback, rotation and uninstall matrix
+        shell: pwsh
+        env:
+          EXPECTED_IDENTITY_NAME: ${{ vars.ELLIEPDF_PRODUCTION_IDENTITY_NAME }}
+          EXPECTED_PUBLISHER: ${{ vars.ELLIEPDF_PRODUCTION_PUBLISHER }}
+          ROTATED_CERTIFICATE_THUMBPRINT: ${{ vars.ELLIEPDF_ROTATED_CERTIFICATE_THUMBPRINT }}
+          PACKAGE_ARCHITECTURE: ${{ inputs.architecture }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:EXPECTED_IDENTITY_NAME) -or [string]::IsNullOrWhiteSpace($env:EXPECTED_PUBLISHER) -or [string]::IsNullOrWhiteSpace($env:ROTATED_CERTIFICATE_THUMBPRINT)) { throw 'Protected lifecycle identity/publisher/rotated-certificate variables are required.' }
+          $resultPath = Join-Path $PWD 'artifacts/lifecycle-result.txt'
+          Start-Transcript -Path $resultPath -Force
+          try {
+            .\eng\Invoke-PackageSmoke.ps1 `
+              -PackagePath $env:LIFECYCLE_CURRENT_PACKAGE `
+              -PreviousPackagePath $env:LIFECYCLE_PREVIOUS_PACKAGE `
+              -RollbackPackagePath $env:LIFECYCLE_ROLLBACK_PACKAGE `
+              -CertificateRotationPackagePath $env:LIFECYCLE_ROTATION_PACKAGE `
+              -ExpectedIdentityName $env:EXPECTED_IDENTITY_NAME `
+              -ExpectedPublisher $env:EXPECTED_PUBLISHER `
+              -ExpectedArchitecture $env:PACKAGE_ARCHITECTURE `
+              -ExpectedVersion $env:LIFECYCLE_CURRENT_VERSION `
+              -RotatedCertificateThumbprint $env:ROTATED_CERTIFICATE_THUMBPRINT `
+              -Execute -AllowDestructive
+          }
+          finally { Stop-Transcript }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: package-lifecycle-${{ inputs.architecture }}-${{ inputs.current_tag }}
+          path: artifacts/lifecycle-result.txt

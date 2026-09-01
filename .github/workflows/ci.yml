@@ -5,24 +5,311 @@ on:
     branches: [main, master]
   pull_request:
     branches: [main, master]
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_ROLL_FORWARD: Disable
 
 jobs:
   build:
     runs-on: windows-latest
-
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: x64
+            rid: win-x64
+            execute_tests: true
+          - platform: ARM64
+            rid: win-arm64
+            execute_tests: false
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
-          dotnet-version: '11.0.x'
+          global-json-file: global.json
+      - name: Restore locked
+        run: dotnet restore ElliePdf.slnx --locked-mode -p:Platform=${{ matrix.platform }} -p:RuntimeIdentifier=${{ matrix.rid }}
+      - name: Restore local tools
+        run: dotnet tool restore
+      - name: Verify resource locale completeness
+        shell: pwsh
+        run: |
+          .\eng\Test-ResourceCompleteness.ps1
+          .\eng\Test-LocalizationUsage.ps1
+      - name: Verify PDFium native supply
+        shell: pwsh
+        run: .\eng\Verify-PdfiumNative.ps1
+      - name: Build architecture
+        run: dotnet build ElliePdf.slnx -c Release -p:Platform=${{ matrix.platform }} -p:RuntimeIdentifier=${{ matrix.rid }} --no-restore
+      - name: Run every test project (x64)
+        if: matrix.execute_tests
+        shell: pwsh
+        run: |
+          $projects = @('ElliePdf.Tests\ElliePdf.Tests.csproj') + (Get-ChildItem tests -Filter *.Tests.csproj -Recurse | ForEach-Object FullName)
+          foreach ($project in $projects) { dotnet test $project -c Release -p:Platform=x64 -p:RuntimeIdentifier=win-x64 --no-restore }
+      - name: Generate and verify evidence
+        shell: pwsh
+        run: |
+          .\eng\Generate-Sbom.ps1 -OutputPath sbom-${{ matrix.rid }}.json
+          .\eng\Test-ReleaseEvidence.ps1 -SbomPath sbom-${{ matrix.rid }}.json
+          .\eng\Test-ResourceCompleteness.ps1
+          .\eng\Test-UpstreamWarningAllowlist.ps1
+          .\eng\Test-MsixVersionMapping.ps1
+          .\eng\Get-ToolchainFingerprint.ps1 -OutputPath toolchain-fingerprint-${{ matrix.rid }}.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: build-evidence-${{ matrix.rid }}
+          path: |
+            sbom-${{ matrix.rid }}.json
+            toolchain-fingerprint-${{ matrix.rid }}.json
+            THIRD_PARTY_NOTICES.md
+            SUPPORTED_WINDOWS.md
+            third_party/pdfium/154.0.8021/PROVENANCE.md
 
-      - name: Restore
-        run: dotnet restore ElliePdf.slnx
+  publish:
+    needs: build
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: x64
+            rid: win-x64
+          - platform: ARM64
+            rid: win-arm64
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          global-json-file: global.json
+      - name: Restore locked
+        run: dotnet restore ElliePdf.slnx --locked-mode -p:Platform=${{ matrix.platform }} -p:RuntimeIdentifier=${{ matrix.rid }}
+      - name: Restore local tools
+        run: dotnet tool restore
+      - name: Publish NativeAOT worker, app and unsigned MSIX
+        shell: pwsh
+        run: .\eng\Publish-ReleaseArtifacts.ps1 -Platform '${{ matrix.platform }}' -RuntimeIdentifier '${{ matrix.rid }}' -Package
+      - name: Verify symbols and SourceLink
+        shell: pwsh
+        run: .\eng\Test-SourceLink.ps1 -SymbolsPath 'artifacts\symbols\${{ matrix.rid }}'
+      - name: Validate package payload
+        shell: pwsh
+        run: |
+          $root = "artifacts\publish\${{ matrix.rid }}"
+          if (-not (Test-Path "$root\PdfWorker\ElliePdf.Pdfium.Worker.exe")) { throw 'PdfWorker is missing from publish payload.' }
+          Get-ChildItem $root -Recurse | Sort-Object FullName | Out-File "payload-${{ matrix.rid }}.txt"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: unsigned-release-${{ matrix.rid }}
+          path: |
+            artifacts/publish/${{ matrix.rid }}
+            artifacts/package/${{ matrix.rid }}
+            payload-${{ matrix.rid }}.txt
 
-      - name: Build
+  test-arm64:
+    # A self-hosted runner must never process pull-request code.  ARM64 execution
+    # is intentionally limited to the protected branches and scheduled/manual
+    # runs; hosted x64 remains the compile/package matrix for every PR.
+    if: >-
+      github.event_name == 'schedule' ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')) ||
+      (github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))
+    needs: build
+    runs-on: [self-hosted, windows, ARM64, elliepdf-arm64]
+    timeout-minutes: 120
+    steps:
+      - name: Assert trusted ARM64 execution context
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_EVENT_NAME -eq 'pull_request') { throw 'ARM64 self-hosted execution is forbidden for pull requests.' }
+          if ($env:GITHUB_REF -notin @('refs/heads/main', 'refs/heads/master')) { throw "ARM64 self-hosted execution requires a protected branch; got '$env:GITHUB_REF'." }
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          global-json-file: global.json
+      - name: Restore locked
+        run: dotnet restore ElliePdf.slnx --locked-mode -p:Platform=ARM64 -p:RuntimeIdentifier=win-arm64
+      - name: Restore local tools
+        run: dotnet tool restore
+      - name: Build ARM64 test binaries
+        run: dotnet build ElliePdf.slnx -c Release -p:Platform=ARM64 -p:RuntimeIdentifier=win-arm64 --no-restore
+      - name: Run every test project on ARM64
+        shell: pwsh
+        run: |
+          $projects = @('ElliePdf.Tests\ElliePdf.Tests.csproj') + (Get-ChildItem tests -Filter *.Tests.csproj -Recurse | ForEach-Object FullName)
+          foreach ($project in $projects) { dotnet test $project -c Release -p:Platform=ARM64 -p:RuntimeIdentifier=win-arm64 --no-restore }
+
+  scheduled-validation:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: publish
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          global-json-file: global.json
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: unsigned-release-win-x64
+          path: artifacts/scheduled/win-x64
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: unsigned-release-win-arm64
+          path: artifacts/scheduled/win-arm64
+      - name: Restore locked
+        run: dotnet restore ElliePdf.slnx --locked-mode
+      - name: Restore local tools
+        run: dotnet tool restore
+      - name: Fuzz nightly worker-isolation gate
+        shell: pwsh
+        run: .\eng\Run-BoundedFuzz.ps1 -Mode Nightly -Configuration Release
+      - name: Performance smoke (when corpus/harness is present)
+        shell: pwsh
+        run: |
+          if (Test-Path .\Benchmark\Benchmark.csproj) { dotnet run --project .\Benchmark\Benchmark.csproj -c Release --no-restore }
+      - name: ETW collection/export/report contract
+        shell: pwsh
+        run: .\eng\Test-EtwBenchmarkPipeline.ps1
+      - name: UI and accessibility gate inventory
+        shell: pwsh
+        run: |
+          .\eng\Run-UiAccessibility.ps1
+      - name: Static MSIX validation
+        shell: pwsh
+        run: |
+          $x64 = @(Get-ChildItem artifacts/scheduled/win-x64 -Recurse -Filter *.msix)
+          $arm64 = @(Get-ChildItem artifacts/scheduled/win-arm64 -Recurse -Filter *.msix)
+          if ($x64.Count -eq 0 -or $arm64.Count -eq 0) { throw 'Both architecture packages are required.' }
+          $x64 | ForEach-Object { .\eng\Test-MsixPayload.ps1 -PackagePath $_.FullName -ExpectedArchitecture x64 }
+          $arm64 | ForEach-Object { .\eng\Test-MsixPayload.ps1 -PackagePath $_.FullName -ExpectedArchitecture arm64 }
+
+  performance-validation-x64:
+    if: >-
+      github.event_name == 'schedule' ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')) ||
+      (github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))
+    needs: publish
+    runs-on: [self-hosted, windows, x64, elliepdf-performance]
+    timeout-minutes: 600
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          global-json-file: global.json
+      - name: Restore locked
+        run: dotnet restore ElliePdf.slnx --locked-mode
+      - name: Restore local tools
+        run: dotnet tool restore
+      - name: Build Release tooling
         run: dotnet build ElliePdf.slnx -c Release -p:Platform=x64 --no-restore
+      - name: Real worker fuzz gate
+        shell: pwsh
+        run: .\eng\Run-BoundedFuzz.ps1 -Mode Release -Configuration Release
+      - name: Real 10k atomic save gate
+        shell: pwsh
+        run: .\eng\Invoke-AtomicSaveFaultHarness.ps1 -Configuration Release -Iterations 10000
+      - name: Mixed-document lifecycle soak
+        shell: pwsh
+        run: .\eng\Invoke-MixedDocumentSoak.ps1 -Configuration Release -DurationMinutes 480
+      - name: Dedicated UI/comparator ETW suite (fail closed)
+        env:
+          ELLIEPDF_REFERENCE_SUITE_PATH: ${{ vars.ELLIEPDF_REFERENCE_SUITE_PATH }}
+        shell: pwsh
+        run: |
+          if (-not (Test-Path .\Benchmark\comparators.manifest.json)) { throw 'Comparator manifest is missing.' }
+          if ([string]::IsNullOrWhiteSpace($env:ELLIEPDF_REFERENCE_SUITE_PATH)) { throw 'ELLIEPDF_REFERENCE_SUITE_PATH is not configured on the dedicated performance agent.' }
+          if (-not (Test-Path -LiteralPath $env:ELLIEPDF_REFERENCE_SUITE_PATH -PathType Leaf)) { throw 'The configured reference-suite driver was not found.' }
+          & $env:ELLIEPDF_REFERENCE_SUITE_PATH -RepositoryRoot (Resolve-Path .).Path
+          if ($LASTEXITCODE -ne 0) { throw "The configured reference-suite driver failed with exit code $LASTEXITCODE." }
 
-      - name: Test
-        run: dotnet test ElliePdf.Tests/ElliePdf.Tests.csproj -c Release -p:Platform=x64
+  ui-validation-x64:
+    if: >-
+      github.event_name == 'schedule' ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')) ||
+      (github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))
+    needs: publish
+    runs-on: [self-hosted, windows, x64, elliepdf-interactive]
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: unsigned-release-win-x64
+          path: artifacts/release
+      - name: Static package validation
+        shell: pwsh
+        run: |
+          $packages = @(Get-ChildItem artifacts/release -Recurse -Filter *.msix)
+          if ($packages.Count -eq 0) { throw 'No x64 MSIX package was downloaded.' }
+          $packages | ForEach-Object { .\eng\Test-MsixPayload.ps1 -PackagePath $_.FullName -ExpectedArchitecture x64 }
+      - name: UIA discovery (interactive desktop)
+        shell: pwsh
+        run: |
+          $target = Get-ChildItem artifacts/release -Recurse -Filter ElliePdf.exe | Where-Object FullName -NotMatch '\\PdfWorker\\' | Select-Object -First 1
+          if ($null -eq $target) { throw 'Published ElliePdf executable was not found.' }
+          .\eng\Run-UiAccessibility.ps1 -Interactive -Execute -RequireFixture -TargetPath $target.FullName `
+            -FixturePath testdata/generated/synthetic-mixed-orientation-links-forms-outlines.pdf -FixturePageCount 8 `
+            -SecondaryFixturePath testdata/generated/synthetic-1000-pages.pdf -SecondaryFixturePageCount 1000 `
+            -ResultPath artifacts/uia/uia-x64.json
+      - name: Windows App Certification Kit
+        shell: pwsh
+        run: |
+          $packages = @(Get-ChildItem artifacts/release -Recurse -Filter *.msix)
+          if ($packages.Count -eq 0) { throw 'No x64 MSIX package was downloaded.' }
+          $packages | ForEach-Object { .\eng\Invoke-Wack.ps1 -PackagePath $_.FullName -Execute }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: uia-wack-x64
+          path: |
+            artifacts/uia
+            artifacts/release/**/wack-report.xml
+
+  ui-validation-arm64:
+    if: >-
+      github.event_name == 'schedule' ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')) ||
+      (github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))
+    needs: publish
+    runs-on: [self-hosted, windows, ARM64, elliepdf-interactive]
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: unsigned-release-win-arm64
+          path: artifacts/release
+      - name: Static package validation
+        shell: pwsh
+        run: |
+          $packages = @(Get-ChildItem artifacts/release -Recurse -Filter *.msix)
+          if ($packages.Count -eq 0) { throw 'No ARM64 MSIX package was downloaded.' }
+          $packages | ForEach-Object { .\eng\Test-MsixPayload.ps1 -PackagePath $_.FullName -ExpectedArchitecture arm64 }
+      - name: UIA discovery (interactive desktop)
+        shell: pwsh
+        run: |
+          $target = Get-ChildItem artifacts/release -Recurse -Filter ElliePdf.exe | Where-Object FullName -NotMatch '\\PdfWorker\\' | Select-Object -First 1
+          if ($null -eq $target) { throw 'Published ElliePdf executable was not found.' }
+          .\eng\Run-UiAccessibility.ps1 -Interactive -Execute -RequireFixture -TargetPath $target.FullName `
+            -FixturePath testdata/generated/synthetic-mixed-orientation-links-forms-outlines.pdf -FixturePageCount 8 `
+            -SecondaryFixturePath testdata/generated/synthetic-1000-pages.pdf -SecondaryFixturePageCount 1000 `
+            -ResultPath artifacts/uia/uia-arm64.json
+      - name: Windows App Certification Kit
+        shell: pwsh
+        run: |
+          $packages = @(Get-ChildItem artifacts/release -Recurse -Filter *.msix)
+          if ($packages.Count -eq 0) { throw 'No ARM64 MSIX package was downloaded.' }
+          $packages | ForEach-Object { .\eng\Invoke-Wack.ps1 -PackagePath $_.FullName -Execute }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: uia-wack-arm64
+          path: |
+            artifacts/uia
+            artifacts/release/**/wack-report.xml

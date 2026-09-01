@@ -1,0 +1,64 @@
+name: Release Signing
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Exact release tag to build and sign, for example v1.2.3 or v1.2.3-preview.4
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_ROLL_FORWARD: Disable
+  ELLIEPDF_RELEASE_SIGNING: '1'
+  ELLIEPDF_RELEASE_ENVIRONMENT: release-signing
+
+jobs:
+  build-sign-and-validate:
+    if: github.event_name == 'push' || github.ref == 'refs/heads/master'
+    runs-on: [self-hosted, windows, x64, elliepdf-signing]
+    environment: release-signing
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.release_tag || github.ref_name }}
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          global-json-file: global.json
+      - name: Sign exact tagged release
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+          ELLIEPDF_RUNNER_ENVIRONMENT: ${{ runner.environment }}
+          ELLIEPDF_SIGNING_EPHEMERAL_RUNNER: ${{ vars.ELLIEPDF_SIGNING_EPHEMERAL_RUNNER }}
+          ELLIEPDF_PRODUCTION_PUBLISHER: ${{ vars.ELLIEPDF_PRODUCTION_PUBLISHER }}
+          ELLIEPDF_PRODUCTION_IDENTITY_NAME: ${{ vars.ELLIEPDF_PRODUCTION_IDENTITY_NAME }}
+          ELLIEPDF_SIGNING_CERT_THUMBPRINT: ${{ vars.ELLIEPDF_SIGNING_CERT_THUMBPRINT }}
+          ELLIEPDF_TIMESTAMP_URL: ${{ vars.ELLIEPDF_TIMESTAMP_URL }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:ELLIEPDF_PRODUCTION_PUBLISHER)) { throw 'ELLIEPDF_PRODUCTION_PUBLISHER must be set on the protected environment.' }
+          if ([string]::IsNullOrWhiteSpace($env:ELLIEPDF_PRODUCTION_IDENTITY_NAME)) { throw 'ELLIEPDF_PRODUCTION_IDENTITY_NAME must be set on the protected environment.' }
+          if ([string]::IsNullOrWhiteSpace($env:ELLIEPDF_SIGNING_CERT_THUMBPRINT)) { throw 'ELLIEPDF_SIGNING_CERT_THUMBPRINT must be set on the protected environment.' }
+          .\eng\Invoke-ProtectedRelease.ps1 `
+            -Tag $env:RELEASE_TAG `
+            -Publisher $env:ELLIEPDF_PRODUCTION_PUBLISHER `
+            -PackageIdentityName $env:ELLIEPDF_PRODUCTION_IDENTITY_NAME `
+            -CertificateThumbprint $env:ELLIEPDF_SIGNING_CERT_THUMBPRINT `
+            -TimestampUrl $env:ELLIEPDF_TIMESTAMP_URL
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: signed-release-${{ inputs.release_tag || github.ref_name }}
+          path: |
+            artifacts/release-candidate
+            THIRD_PARTY_NOTICES.md
+            SUPPORTED_WINDOWS.md
+            third_party/pdfium/154.0.8021/PROVENANCE.md
