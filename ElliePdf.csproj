@@ -161,4 +161,28 @@
     </ItemGroup>
   </Target>
 
+  <!-- Microsoft.AppXPackage.Targets reads the version from the manifest and does
+       not consume AppxPackageVersion itself.  Generate an intermediate manifest
+       so release builds can supply a monotonic CI version without modifying the
+       checked-in Package.appxmanifest. -->
+  <Target Name="PrepareVersionedPackageManifest"
+          BeforeTargets="_ValidatePresenceOfAppxManifestItems"
+          Condition="'$(AppxPackage)' == 'true' and '$(AppxPackageVersion)' != ''">
+    <PropertyGroup>
+      <_VersionedPackageManifest>$(IntermediateOutputPath)VersionedPackage.appxmanifest</_VersionedPackageManifest>
+    </PropertyGroup>
+    <MakeDir Directories="$(IntermediateOutputPath)" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\Package.appxmanifest"
+          DestinationFiles="$(_VersionedPackageManifest)" />
+    <XmlPoke XmlInputPath="$(_VersionedPackageManifest)"
+             Query="/*[local-name()='Package']/*[local-name()='Identity']/@Version"
+             Value="$(AppxPackageVersion)" />
+    <ItemGroup>
+      <AppxManifest Remove="@(AppxManifest)" />
+      <AppxManifest Include="$(_VersionedPackageManifest)" />
+      <Content Remove="Package.appxmanifest" />
+      <Content Remove="$(MSBuildProjectDirectory)\Package.appxmanifest" />
+    </ItemGroup>
+  </Target>
+
 </Project>

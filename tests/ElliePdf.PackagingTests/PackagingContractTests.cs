@@ -39,6 +39,17 @@ public sealed class PackagingContractTests
     }
 
     [Fact]
+    public void AppProjectAppliesRequestedVersionToAnIntermediateManifest()
+    {
+        var project = File.ReadAllText(RepoFile("ElliePdf.csproj"));
+        Assert.Contains("BeforeTargets=\"_ValidatePresenceOfAppxManifestItems\"", project, StringComparison.Ordinal);
+        Assert.Contains("VersionedPackage.appxmanifest", project, StringComparison.Ordinal);
+        Assert.Contains("<XmlPoke", project, StringComparison.Ordinal);
+        Assert.Contains("Value=\"$(AppxPackageVersion)\"", project, StringComparison.Ordinal);
+        Assert.Contains("<AppxManifest Remove=\"@(AppxManifest)\"", project, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void PublishScriptRestoresTheExactOptimizationGraphs()
     {
         var script = File.ReadAllText(RepoFile("eng", "Publish-ReleaseArtifacts.ps1"));
