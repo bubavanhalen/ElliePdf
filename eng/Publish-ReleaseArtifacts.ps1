@@ -74,9 +74,18 @@ foreach ($output in @($workerOut, $appOut, $packageOut, $symbolsOut, $packageBui
     Reset-RepositoryOutput $output
 }
 
+# Publish-only SDK packs are selected by configuration, RID, and optimization
+# properties. Restore those exact graphs here so every caller (including the
+# standalone documented command) can safely publish with --no-restore.
+dotnet restore $worker --locked-mode -p:Configuration=$Configuration -p:Platform=$Platform -p:RuntimeIdentifier=$RuntimeIdentifier -p:PublishReadyToRun=false
+if ($LASTEXITCODE -ne 0) { throw "Worker publish restore failed with exit code $LASTEXITCODE." }
+
 dotnet publish $worker -c $Configuration -p:Platform=$Platform -r $RuntimeIdentifier --self-contained true -p:PublishAot=true -p:PublishTrimmed=true -p:PublishReadyToRun=false -o $workerOut --no-restore
 if ($LASTEXITCODE -ne 0) { throw "Worker NativeAOT publish failed with exit code $LASTEXITCODE." }
 if (-not (Test-Path (Join-Path $workerOut 'ElliePdf.Pdfium.Worker.exe'))) { throw "Worker NativeAOT executable was not produced." }
+
+dotnet restore $app --locked-mode -p:Configuration=$Configuration -p:Platform=$Platform -p:RuntimeIdentifier=$RuntimeIdentifier -p:PublishReadyToRun=true
+if ($LASTEXITCODE -ne 0) { throw "Application publish restore failed with exit code $LASTEXITCODE." }
 
 $appArgs = @(
     'publish',

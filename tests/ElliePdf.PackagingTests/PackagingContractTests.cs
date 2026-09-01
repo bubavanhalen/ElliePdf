@@ -39,6 +39,17 @@ public sealed class PackagingContractTests
     }
 
     [Fact]
+    public void PublishScriptRestoresTheExactOptimizationGraphs()
+    {
+        var script = File.ReadAllText(RepoFile("eng", "Publish-ReleaseArtifacts.ps1"));
+        Assert.Contains("dotnet restore $worker --locked-mode", script, StringComparison.Ordinal);
+        Assert.Contains("-p:PublishReadyToRun=false", script, StringComparison.Ordinal);
+        Assert.Contains("dotnet restore $app --locked-mode", script, StringComparison.Ordinal);
+        Assert.Contains("-p:PublishReadyToRun=true", script, StringComparison.Ordinal);
+        Assert.Contains("Application publish restore failed", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ManifestPublisherScriptBacksUpAndRestoresDevelopmentManifest()
     {
         var script = File.ReadAllText(RepoFile("eng", "Set-ManifestPublisher.ps1"));
