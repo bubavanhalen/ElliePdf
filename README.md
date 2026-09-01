@@ -10,16 +10,6 @@ A Windows native PDF reader and organizer built with **WinUI 3** and **PDFium**.
 - **Password-protected PDFs** — Prompts for a password when opening encrypted files
 - **File association** — Double-click a `.pdf` to open in ElliePdf
 
-## Design
-
-The UI follows Fluent 2 with an Ellie-branded `#dcae96` accent system (`Themes/ElliePdf.xaml`):
-
-- Custom title bar with integrated document tabs, a Read/Organize workspace switcher, and settings
-- Chromeless reader with floating pill toolbars that auto-hide while reading
-- Floating Pages/Outline/Search panels with slide-in animations and shadows
-- Drop-zone empty state with rich recent-file cards and drag & drop support
-- Card-based, instant-apply Settings page with theme picker
-
 ## Requirements
 
 - Windows 11, build 26100 or later

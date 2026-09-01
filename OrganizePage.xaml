@@ -10,7 +10,7 @@
     Background="Transparent"
     mc:Ignorable="d">
 
-    <Grid Padding="24,60,24,0" RowSpacing="12">
+    <Grid Padding="24,64,24,24" RowSpacing="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -22,53 +22,19 @@
             Style="{StaticResource TitleTextBlockStyle}" />
 
         <InfoBar
-            x:Name="StatusInfoBar"
             Grid.Row="1"
+            x:Name="StatusInfoBar"
             AutomationProperties.AutomationId="OrganizeStatus"
             IsClosable="True"
             IsOpen="{x:Bind ViewModel.IsStatusOpen, Mode=OneWay}"
             Message="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
             Severity="{x:Bind ViewModel.StatusSeverity, Mode=OneWay}" />
 
-        <!--  Empty state  -->
-        <StackPanel
-            x:Name="EmptyState"
-            Grid.Row="2"
-            HorizontalAlignment="Center"
-            Spacing="14"
-            VerticalAlignment="Center"
-            Visibility="Collapsed">
-            <Border
-                Width="64"
-                Height="64"
-                HorizontalAlignment="Center"
-                Style="{StaticResource EllieIconWellStyle}">
-                <FontIcon
-                    FontSize="26"
-                    Foreground="{ThemeResource EllieAccentStrongBrush}"
-                    Glyph="&#xE8A9;" />
-            </Border>
-            <StackPanel Spacing="4">
-                <TextBlock
-                    HorizontalAlignment="Center"
-                    Style="{StaticResource SubtitleTextBlockStyle}"
-                    Text="Nothing to organize yet" />
-                <TextBlock
-                    HorizontalAlignment="Center"
-                    Opacity="0.65"
-                    Style="{StaticResource BodyTextBlockStyle}"
-                    Text="Import PDFs to reorder, rotate, and merge their pages" />
-            </StackPanel>
-            <Button
-                HorizontalAlignment="Center"
-                Click="ImportButton_Click"
-                Style="{StaticResource AccentButtonStyle}">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <FontIcon FontSize="14" Glyph="&#xE8B5;" />
-                    <TextBlock Text="Import PDFs" />
-                </StackPanel>
-            </Button>
-        </StackPanel>
+        <Grid Grid.Row="2" RowSpacing="16">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
 
             <CommandBar
                 AutomationProperties.AutomationId="OrganizeCommandBar"
@@ -158,8 +124,7 @@
                                     Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                                     CornerRadius="4">
                                     <Image
-                                        Height="222"
-                                        Margin="4"
+                                        Height="220"
                                         Source="{x:Bind Thumbnail, Mode=OneWay}"
                                         Stretch="Uniform">
                                         <Image.RenderTransform>
@@ -168,11 +133,22 @@
                                     </Image>
                                 </Border>
 
-                                <!--  Hover actions  -->
-                                <Border
-                                    x:Name="CardActions"
-                                    Margin="0,0,0,8"
-                                    Padding="4,2"
+                                <StackPanel Grid.Row="1" Spacing="4">
+                                    <TextBlock
+                                        HorizontalAlignment="Center"
+                                        Style="{StaticResource BodyStrongTextBlockStyle}"
+                                        Text="{x:Bind DisplayName, Mode=OneWay}" />
+                                    <TextBlock
+                                        HorizontalAlignment="Center"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Text="{x:Bind SourceLabel, Mode=OneWay}"
+                                        TextAlignment="Center"
+                                        TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+
+                                <StackPanel
+                                    Grid.Row="2"
+                                    Orientation="Horizontal"
                                     HorizontalAlignment="Center"
                                     Spacing="8">
                                     <Button
@@ -214,24 +190,10 @@
                                     </Button>
                                 </StackPanel>
                             </Grid>
-
-                            <StackPanel Grid.Row="1" Spacing="2">
-                                <TextBlock
-                                    HorizontalAlignment="Center"
-                                    Style="{StaticResource BodyStrongTextBlockStyle}"
-                                    Text="{x:Bind DisplayName, Mode=OneWay}" />
-                                <TextBlock
-                                    HorizontalAlignment="Center"
-                                    Opacity="0.6"
-                                    Style="{StaticResource CaptionTextBlockStyle}"
-                                    Text="{x:Bind SourceLabel, Mode=OneWay}"
-                                    TextAlignment="Center"
-                                    TextTrimming="CharacterEllipsis" />
-                            </StackPanel>
-                        </Grid>
-                    </Border>
-                </DataTemplate>
-            </GridView.ItemTemplate>
-        </GridView>
+                        </Border>
+                    </DataTemplate>
+                </GridView.ItemTemplate>
+            </GridView>
+        </Grid>
     </Grid>
 </Page>

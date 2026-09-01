@@ -1,20 +1,14 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using ElliePdf;
 using ElliePdf.Diagnostics;
 using ElliePdf.Services;
+using Microsoft.UI.Xaml.Controls;
 
 namespace ElliePdf.ViewModels;
 
 public sealed partial class SettingsViewModel : ObservableObject
 {
-    private static readonly PdfZoomMode[] ZoomModes =
-    [
-        PdfZoomMode.FitWidth,
-        PdfZoomMode.FitPage,
-        PdfZoomMode.ActualSize,
-        PdfZoomMode.Custom
-    ];
-
     private readonly IUserSettingsService _settingsService;
     private readonly IRecentFilesService _recentFilesService;
     private readonly ISessionStateStore _sessionStateStore;
@@ -37,10 +31,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     }
 
     [ObservableProperty]
-    public partial int ThemeIndex { get; set; }
-
-    [ObservableProperty]
-    public partial int DefaultZoomModeIndex { get; set; }
+    public partial PdfZoomMode DefaultZoomMode { get; set; }
 
     [ObservableProperty]
     public partial bool ConfirmOverwriteSave { get; set; }
@@ -75,11 +66,22 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     public partial bool IsStatusOpen { get; private set; }
 
-    public List<string> ZoomModeOptions { get; } = ["Fit width", "Fit page", "Actual size", "Custom"];
+    [ObservableProperty]
+    public partial string StatusMessage { get; private set; } = string.Empty;
 
-    public string AppVersion { get; }
+    [ObservableProperty]
+    public partial InfoBarSeverity StatusSeverity { get; private set; } = InfoBarSeverity.Informational;
 
-    partial void OnThemeIndexChanged(int value)
+    public IReadOnlyList<PdfZoomMode> ZoomModeOptions { get; } =
+    [
+        PdfZoomMode.FitWidth,
+        PdfZoomMode.FitPage,
+        PdfZoomMode.ActualSize,
+        PdfZoomMode.Custom
+    ];
+
+    [RelayCommand]
+    private async Task SaveAsync()
     {
         var settings = _settingsService.Settings;
         settings.DefaultZoomMode = DefaultZoomMode;
@@ -114,44 +116,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         IsStatusOpen = true;
     }
 
-    partial void OnDefaultZoomModeIndexChanged(int value) => ApplyAndSave();
-
-    partial void OnConfirmOverwriteSaveChanged(bool value) => ApplyAndSave();
-
-    partial void OnConfirmOrganizeSaveChanged(bool value) => ApplyAndSave();
-
-    partial void OnRecentFilesMaxCountChanged(int value) => ApplyAndSave();
-
-    private void ApplyAndSave()
-    {
-        if (_isLoading)
-        {
-            return;
-        }
-
-        var settings = _settingsService.Settings;
-        settings.AppTheme = ThemeIndexToName(ThemeIndex);
-        settings.DefaultZoomMode = ZoomModes[Math.Clamp(DefaultZoomModeIndex, 0, ZoomModes.Length - 1)];
-        settings.ConfirmOverwriteSave = ConfirmOverwriteSave;
-        settings.ConfirmOrganizeSave = ConfirmOrganizeSave;
-        settings.RecentFilesMaxCount = Math.Clamp(RecentFilesMaxCount, 1, 50);
-
-        _ = _settingsService.SaveAsync();
-    }
-
-    private static string ThemeIndexToName(int index) => index switch
-    {
-        1 => "Light",
-        2 => "Dark",
-        _ => "System"
-    };
-
-    private static int ThemeNameToIndex(string? name) => name switch
-    {
-        "Light" => 1,
-        "Dark" => 2,
-        _ => 0
-    };
+    public void DismissStatus() => IsStatusOpen = false;
 
     [RelayCommand]
     private async Task ClearRecentFilesAsync()

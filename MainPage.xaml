@@ -4,7 +4,6 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-    xmlns:helpers="using:ElliePdf.Helpers"
     xmlns:local="using:ElliePdf"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     Background="Transparent"
@@ -76,85 +75,8 @@
                 Click="BackButton_Click"
                 Style="{StaticResource SubtleButtonStyle}"
                 Visibility="Collapsed">
-                <FontIcon FontSize="14" Glyph="&#xE72B;" />
+                <SymbolIcon Symbol="Back" />
             </Button>
-
-            <!--  Brand  -->
-            <StackPanel
-                Grid.Column="1"
-                Margin="12,0,8,0"
-                Orientation="Horizontal"
-                Spacing="8"
-                VerticalAlignment="Center">
-                <Image
-                    Width="20"
-                    Height="20"
-                    Source="ms-appx:///Assets/Brand/elliepdf-logo-master.png" />
-                <TextBlock
-                    FontWeight="SemiBold"
-                    Style="{StaticResource CaptionTextBlockStyle}"
-                    Text="ElliePdf"
-                    VerticalAlignment="Center" />
-            </StackPanel>
-
-            <!--  Document tabs, integrated into the title bar  -->
-            <TabView
-                x:Name="DocumentTabs"
-                Grid.Column="2"
-                MaxWidth="640"
-                Margin="4,4,0,0"
-                VerticalAlignment="Bottom"
-                AddTabButtonClick="DocumentTabs_AddTabButtonClick"
-                AutomationProperties.AutomationId="DocumentTabs"
-                Background="Transparent"
-                CanDragTabs="True"
-                CanReorderTabs="True"
-                IsAddTabButtonVisible="True"
-                SelectionChanged="DocumentTabs_SelectionChanged"
-                TabCloseRequested="DocumentTabs_TabCloseRequested"
-                TabWidthMode="SizeToContent"
-                Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(Reader.ShowTabBar), Mode=OneWay}" />
-
-            <!--  Workspace switcher + settings  -->
-            <StackPanel
-                Grid.Column="4"
-                Margin="0,0,4,0"
-                Orientation="Horizontal"
-                Spacing="4"
-                VerticalAlignment="Center">
-                <SelectorBar x:Name="WorkspaceSwitcher" SelectionChanged="WorkspaceSwitcher_SelectionChanged">
-                    <SelectorBarItem
-                        x:Name="ReadWorkspaceItem"
-                        AutomationProperties.AutomationId="NavItemRead"
-                        Tag="read"
-                        Text="Read">
-                        <SelectorBarItem.Icon>
-                            <FontIcon FontSize="14" Glyph="&#xE736;" />
-                        </SelectorBarItem.Icon>
-                    </SelectorBarItem>
-                    <SelectorBarItem
-                        x:Name="OrganizeWorkspaceItem"
-                        AutomationProperties.AutomationId="NavItemOrganize"
-                        Tag="organize"
-                        Text="Organize">
-                        <SelectorBarItem.Icon>
-                            <FontIcon FontSize="14" Glyph="&#xE8A9;" />
-                        </SelectorBarItem.Icon>
-                    </SelectorBarItem>
-                </SelectorBar>
-                <Border Height="20" Style="{StaticResource EllieDividerStyle}" />
-                <Button
-                    x:Name="SettingsButton"
-                    Width="36"
-                    Height="34"
-                    AutomationProperties.AutomationId="NavItemSettings"
-                    AutomationProperties.Name="Settings"
-                    Click="SettingsButton_Click"
-                    Style="{StaticResource EllieToolButtonStyle}"
-                    ToolTipService.ToolTip="Settings">
-                    <FontIcon FontSize="15" Glyph="&#xE713;" />
-                </Button>
-            </StackPanel>
-        </Grid>
+        </StackPanel>
     </Grid>
 </Page>

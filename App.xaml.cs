@@ -73,8 +73,6 @@ public partial class App : Microsoft.UI.Xaml.Application
         services.AddSingleton<DocumentWorkspace>();
         services.AddSingleton<IRecentFilesService, RecentFilesService>();
         services.AddSingleton<IAnnotationStore, AnnotationStore>();
-        services.AddSingleton<IOverlayHistory, OverlayHistory>();
-        services.AddSingleton<IDocumentSaveService, DocumentSaveService>();
         services.AddSingleton<IEditSaveService, EditSaveService>();
         services.AddSingleton<ITabCloseService, TabCloseService>();
         services.AddSingleton<IDocumentTabService, DocumentTabService>();

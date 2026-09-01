@@ -238,15 +238,16 @@ internal static partial class WorkerAppContainerProcess
                 return new SafeSidHandle(sid);
             }
 
-            if (result != ErrorAlreadyExistsHResult)
-            {
-                Marshal.ThrowExceptionForHR(result);
-            }
-
+            var createResult = result;
             result = DeriveAppContainerSidFromAppContainerName(ProfileName, out sid);
             if (result != 0)
             {
-                Marshal.ThrowExceptionForHR(result);
+                // Profile creation can transiently report E_UNEXPECTED when another
+                // process has already completed the profile registration. Prefer the
+                // successfully derived existing profile, but retain the more useful
+                // creation error when no profile can be resolved.
+                Marshal.ThrowExceptionForHR(
+                    createResult == ErrorAlreadyExistsHResult ? result : createResult);
             }
 
             return new SafeSidHandle(sid);

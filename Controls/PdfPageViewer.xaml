@@ -34,7 +34,8 @@
                 <controls:PdfSemanticOverlay x:Name="SemanticOverlay" />
                 <controls:PdfEditSurface
                     x:Name="PageEditSurface"
-                    IsHitTestVisible="False" />
+                    IsHitTestVisible="False"
+                    Visibility="Collapsed" />
             </Grid>
         </Border>
     </ScrollViewer>

@@ -17,18 +17,13 @@ public interface IEditSaveService
 
 public sealed class EditSaveService : IEditSaveService
 {
-    private readonly IAnnotationStore _annotationStore;
-    private readonly IDocumentSaveService _saveService;
     private readonly IPdfService _pdfService;
+    private readonly IAnnotationStore _annotationStore;
 
-    public EditSaveService(
-        IAnnotationStore annotationStore,
-        IDocumentSaveService saveService,
-        IPdfService pdfService)
+    public EditSaveService(IPdfService pdfService, IAnnotationStore annotationStore)
     {
-        _annotationStore = annotationStore;
-        _saveService = saveService;
         _pdfService = pdfService;
+        _annotationStore = annotationStore;
     }
 
     public async Task SaveTabAsync(DocumentTab tab, string outputPath, CancellationToken cancellationToken = default)

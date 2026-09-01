@@ -176,46 +176,6 @@ public sealed class PdfService : IPdfService, IDisposable
 
     public async Task<RenderedPage> RenderPageAsync(
         PdfDocumentSession document,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(document);
-        ObjectDisposedException.ThrowIf(document.IsClosed, document);
-
-        return ExecutePdfiumCallAsync(
-            () =>
-            {
-                var overlays = PdfAnnotationReader.ExtractOwnAnnotations(document.Handle, document.PageCount);
-
-                // The page render must no longer include the annotations we just detached.
-                _renderCache.InvalidateDocument(document);
-                return overlays;
-            },
-            cancellationToken);
-    }
-
-    public Task ApplyOverlaysAsync(
-        PdfDocumentSession document,
-        PageOverlayDocument? overlays,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(document);
-        ObjectDisposedException.ThrowIf(document.IsClosed, document);
-
-        if (overlays is null || !overlays.Pages.Values.Any(PdfOverlayWriter.HasContent))
-        {
-            return Task.CompletedTask;
-        }
-
-        return ExecutePdfiumCallAsync(
-            () =>
-            {
-                PdfOverlayWriter.WriteDocument(document.Handle, overlays, document.PageCount);
-                _renderCache.InvalidateDocument(document);
-            },
-            cancellationToken);
-    }
-
-    public Task<RenderedPage> RenderPageAsync(        PdfDocumentSession document,
         int pageIndex,
         double scale,
         CancellationToken cancellationToken = default)

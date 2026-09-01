@@ -46,7 +46,10 @@ jobs:
         shell: pwsh
         run: .\eng\Verify-PdfiumNative.ps1
       - name: Build architecture
-        run: dotnet build ElliePdf.slnx -c Release -p:Platform=${{ matrix.platform }} -p:RuntimeIdentifier=${{ matrix.rid }} --no-restore
+        # .NET 11 preview rejects a solution-level RuntimeIdentifier (NETSDK1134).
+        # Platform selects the app/worker RID; restore, publish, and per-project
+        # execution keep the RID explicit.
+        run: dotnet build ElliePdf.slnx -c Release -p:Platform=${{ matrix.platform }} --no-restore
       - name: Run every test project (x64)
         if: matrix.execute_tests
         shell: pwsh
@@ -138,7 +141,7 @@ jobs:
       - name: Restore local tools
         run: dotnet tool restore
       - name: Build ARM64 test binaries
-        run: dotnet build ElliePdf.slnx -c Release -p:Platform=ARM64 -p:RuntimeIdentifier=win-arm64 --no-restore
+        run: dotnet build ElliePdf.slnx -c Release -p:Platform=ARM64 --no-restore
       - name: Run every test project on ARM64
         shell: pwsh
         run: |

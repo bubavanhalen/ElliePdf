@@ -8,40 +8,6 @@ using ElliePdf.Models;
 
 namespace ElliePdf.Services;
 
-/// <summary>
-/// Holds the annotations being edited, per tab and page.
-/// </summary>
-/// <remarks>
-/// Purely in-memory. Annotations are persisted by writing them into the PDF itself, so there is no
-/// companion file: a saved document carries everything it needs and can be shared as-is.
-/// </remarks>
-public interface IAnnotationStore
-{
-    PageOverlayState GetPageOverlay(Guid tabId, int pageIndex);
-
-    void SetPageOverlay(Guid tabId, int pageIndex, PageOverlayState state);
-
-    /// <summary>Replaces everything held for a tab, used when a document is opened or reloaded.</summary>
-    void SetOverlayDocument(Guid tabId, PageOverlayDocument document);
-
-    bool IsTabDirty(Guid tabId);
-
-    void MarkTabClean(Guid tabId);
-
-    void RemoveTab(Guid tabId);
-
-    /// <summary>Drops every overlay for a tab, e.g. once they have been written into the PDF.</summary>
-    void ClearOverlays(Guid tabId);
-
-    /// <summary>
-    /// Drops a page's overlays and shifts later pages down, keeping the store aligned with a
-    /// document whose page has been deleted.
-    /// </summary>
-    void RemovePage(Guid tabId, int pageIndex);
-
-    PageOverlayDocument? GetOverlayDocument(Guid tabId);
-}
-
 public sealed class AnnotationStore : IAnnotationStore
 {
     private const int MaximumRecoveryBytes = 16 * 1024 * 1024;

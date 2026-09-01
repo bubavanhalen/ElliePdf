@@ -33,7 +33,6 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
     private readonly ITabCloseService _tabCloseService;
     private readonly IAnnotationStore _annotationStore;
     private readonly IEditSaveService _editSaveService;
-    private readonly IOverlayHistory _history;
     private readonly DocumentCollectionViewModel _documentCollectionViewModel;
     private readonly IUserSettingsService _settingsService;
     private readonly BackgroundTaskSupervisor _backgroundTasks;
@@ -190,7 +189,7 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
 
     public bool ShowEmptyState => !HasDocument;
 
-    public bool ShowTabBar => TabCount > 0;
+    public bool ShowTabBar => TabCount > 1;
 
     public bool IsSidebarOpen => IsThumbnailPanelOpen || IsOutlinePanelOpen || IsSearchPanelOpen;
 
@@ -308,10 +307,6 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(IsTextToolActive))]
     [NotifyPropertyChangedFor(nameof(IsSignatureToolActive))]
     [NotifyPropertyChangedFor(nameof(IsEraserToolActive))]
-    [NotifyPropertyChangedFor(nameof(IsRectangleToolActive))]
-    [NotifyPropertyChangedFor(nameof(IsEllipseToolActive))]
-    [NotifyPropertyChangedFor(nameof(IsLineToolActive))]
-    [NotifyPropertyChangedFor(nameof(IsArrowToolActive))]
     public partial ReaderEditTool ActiveEditTool { get; private set; } = ReaderEditTool.Select;
 
     public bool IsSelectToolActive => ActiveEditTool == ReaderEditTool.Select;
@@ -323,20 +318,6 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
     public bool IsSignatureToolActive => ActiveEditTool == ReaderEditTool.Signature;
 
     public bool IsEraserToolActive => ActiveEditTool == ReaderEditTool.Eraser;
-
-    public bool IsRectangleToolActive => ActiveEditTool == ReaderEditTool.Rectangle;
-
-    public bool IsEllipseToolActive => ActiveEditTool == ReaderEditTool.Ellipse;
-
-    public bool IsLineToolActive => ActiveEditTool == ReaderEditTool.Line;
-
-    public bool IsArrowToolActive => ActiveEditTool == ReaderEditTool.Arrow;
-
-    [ObservableProperty]
-    public partial double EraserRadius { get; private set; } = 10;
-
-    [ObservableProperty]
-    public partial bool ErasePartially { get; private set; } = true;
 
     [ObservableProperty]
     public partial string InkColorHex { get; private set; } = "#000000";
@@ -673,7 +654,6 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         }
 
         IsSearchPanelOpen = false;
-        IsOutlinePanelOpen = false;
         IsThumbnailPanelOpen = true;
     }
 
@@ -901,20 +881,6 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         ScaleSinglePagePlaceholder(oldScale, ResolveRenderScale());
         NotifyZoomChanged();
         ObserveBackground(RefreshRenderedPagesAsync(navigateToCurrentPage: true), "reader-actual-size-render");
-    }
-
-    [RelayCommand]
-    private void SetZoomPercent(double percent)
-    {
-        if (!HasDocument)
-        {
-            return;
-        }
-
-        _tabService.ZoomMode = PdfZoomMode.Custom;
-        _tabService.ZoomScale = Math.Clamp(percent, 25, 400) / 100.0;
-        NotifyZoomChanged();
-        _ = RenderCurrentPageAsync();
     }
 
     [RelayCommand]
@@ -1456,7 +1422,7 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    private void EnterEditMode()
+    private async Task EnterEditModeAsync()
     {
         if (!IsLabsEnabled)
         {
@@ -1527,96 +1493,6 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    private void UseRectangleTool() => SetShapeTool(ReaderEditTool.Rectangle);
-
-    [RelayCommand]
-    private void UseEllipseTool() => SetShapeTool(ReaderEditTool.Ellipse);
-
-    [RelayCommand]
-    private void UseLineTool() => SetShapeTool(ReaderEditTool.Line);
-
-    [RelayCommand]
-    private void UseArrowTool() => SetShapeTool(ReaderEditTool.Arrow);
-
-    private void SetShapeTool(ReaderEditTool tool)
-    {
-        IsInkModeEnabled = false;
-        ActiveEditTool = tool;
-    }
-
-    [RelayCommand]
-    private void SetEraserRadius(double radius) =>
-        EraserRadius = Math.Clamp(radius, 2, 60);
-
-    [RelayCommand]
-    private void ToggleErasePartially() => ErasePartially = !ErasePartially;
-
-    // ═══════════ Undo and redo ═══════════
-
-    /// <summary>Records the state of the current page before an edit modifies it.</summary>
-    public void RecordHistory(PageOverlayState before)
-    {
-        if (_tabService.ActiveTab is not { } tab)
-        {
-            return;
-        }
-
-        _history.Record(tab.Id, _tabService.CurrentPageIndex, before);
-        NotifyHistoryChanged();
-    }
-
-    public bool CanUndoEdit => _tabService.ActiveTab is { } tab && _history.CanUndo(tab.Id);
-
-    public bool CanRedoEdit => _tabService.ActiveTab is { } tab && _history.CanRedo(tab.Id);
-
-    /// <summary>Raised when history rewinds to a page, so the view can reload the edit surface.</summary>
-    public event EventHandler<OverlaySnapshot>? HistoryApplied;
-
-    [RelayCommand]
-    private async Task UndoEditAsync() => await StepHistoryAsync(redo: false);
-
-    [RelayCommand]
-    private async Task RedoEditAsync() => await StepHistoryAsync(redo: true);
-
-    private async Task StepHistoryAsync(bool redo)
-    {
-        if (_tabService.ActiveTab is not { } tab)
-        {
-            return;
-        }
-
-        PageOverlayState Current(int pageIndex) => _annotationStore.GetPageOverlay(tab.Id, pageIndex);
-
-        var snapshot = redo ? _history.Redo(tab.Id, Current) : _history.Undo(tab.Id, Current);
-        if (snapshot is null)
-        {
-            return;
-        }
-
-        _annotationStore.SetPageOverlay(tab.Id, snapshot.PageIndex, snapshot.State);
-        tab.IsDirty = true;
-
-        // Undo has to take the user back to where the edit happened.
-        if (_tabService.CurrentPageIndex != snapshot.PageIndex)
-        {
-            _tabService.CurrentPageIndex = snapshot.PageIndex;
-            await RenderCurrentPageAsync();
-        }
-
-        OnPropertyChanged(nameof(CurrentOverlay));
-        HistoryApplied?.Invoke(this, snapshot);
-        NotifyHistoryChanged();
-    }
-
-    private void NotifyHistoryChanged()
-    {
-        OnPropertyChanged(nameof(CanUndoEdit));
-        OnPropertyChanged(nameof(CanRedoEdit));
-        UndoEditCommand.NotifyCanExecuteChanged();
-        RedoEditCommand.NotifyCanExecuteChanged();
-    }
-
-    [RelayCommand]
     private void SetInkColor(string? colorHex)
     {
         if (!string.IsNullOrWhiteSpace(colorHex))
@@ -1655,10 +1531,6 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         }
 
         await SaveToPathAsync(tab, tab.FilePath);
-
-        // The document was reopened from the flattened file; refresh the page and overlay surface.
-        NotifyDocumentChanged();
-        await RenderCurrentPageAsync();
     }
 
     [RelayCommand]
@@ -1726,48 +1598,6 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
     }
 
     public void DismissStatus() => IsStatusOpen = false;
-
-    // ═══════════ Signature library ═══════════
-
-    public IReadOnlyList<SavedSignature> GetSavedSignatures() =>
-        _settingsService.Settings.SavedSignatures.ToArray();
-
-    public void SaveSignature(string imageBase64, double aspectRatio)
-    {
-        if (string.IsNullOrWhiteSpace(imageBase64))
-        {
-            return;
-        }
-
-        var signatures = _settingsService.Settings.SavedSignatures;
-
-        // Re-saving an identical signature should just move it to the front.
-        signatures.RemoveAll(item => string.Equals(item.ImageBase64, imageBase64, StringComparison.Ordinal));
-        signatures.Insert(0, new SavedSignature
-        {
-            ImageBase64 = imageBase64,
-            AspectRatio = aspectRatio
-        });
-
-        const int maxSignatures = 12;
-        if (signatures.Count > maxSignatures)
-        {
-            signatures.RemoveRange(maxSignatures, signatures.Count - maxSignatures);
-        }
-
-        _ = _settingsService.SaveAsync();
-    }
-
-    public void DeleteSavedSignature(string id)
-    {
-        if (_settingsService.Settings.SavedSignatures.RemoveAll(item => item.Id == id) > 0)
-        {
-            _ = _settingsService.SaveAsync();
-        }
-    }
-
-    public void ReportSignatureImportFailed() =>
-        SetStatus("That image could not be read as a signature.", InfoBarSeverity.Error);
 
     public void Dispose()
     {
@@ -2426,8 +2256,6 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
             PageHeightPoints = _pageHeightPoints;
             UpdateSearchHighlights();
             OnPropertyChanged(nameof(DisplayScale));
-            PageImage = bitmap;
-            UpdateSearchHighlights();
             UpdateSelectedThumbnail(pageIndex);
             NotifyDocumentChanged();
             NotifyZoomChanged();
@@ -2629,14 +2457,6 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         {
             SetStatus(ex.Message, InfoBarSeverity.Error);
         }
-        catch (IOException ex)
-        {
-            SetStatus($"Could not write '{Path.GetFileName(outputPath)}': {ex.Message}", InfoBarSeverity.Error);
-        }
-        catch (UnauthorizedAccessException)
-        {
-            SetStatus($"Access denied writing '{Path.GetFileName(outputPath)}'.", InfoBarSeverity.Error);
-        }
         finally
         {
             IsBusy = false;
@@ -2722,22 +2542,6 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         StatusMessage = message;
         StatusSeverity = severity;
         IsStatusOpen = true;
-
-        // Errors stay until dismissed; everything else fades out on its own.
-        var version = ++_statusVersion;
-        if (severity != InfoBarSeverity.Error)
-        {
-            _ = AutoDismissStatusAsync(version);
-        }
-    }
-
-    private async Task AutoDismissStatusAsync(int version)
-    {
-        await Task.Delay(TimeSpan.FromSeconds(4));
-        if (version == _statusVersion)
-        {
-            IsStatusOpen = false;
-        }
     }
 
     private void ObserveBackground(Task task, string operationName) =>

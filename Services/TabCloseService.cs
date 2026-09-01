@@ -19,14 +19,12 @@ public sealed class TabCloseService : ITabCloseService
         IDocumentTabService tabService,
         IAnnotationStore annotationStore,
         IUnsavedChangesPrompt unsavedChangesPrompt,
-        IEditSaveService editSaveService,
-        IOverlayHistory history)
+        IEditSaveService editSaveService)
     {
         _tabService = tabService;
         _annotationStore = annotationStore;
         _unsavedChangesPrompt = unsavedChangesPrompt;
         _editSaveService = editSaveService;
-        _history = history;
     }
 
     public async Task<bool> TryCloseTabAsync(

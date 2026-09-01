@@ -30,7 +30,7 @@ public sealed class DocumentItemViewModel : ObservableObject
         DisplayName = AppResources.Format("Organize_PageName", pageIndex + 1);
     }
 
-    public PdfDocumentSession Document { get; internal set; }
+    public PdfDocumentSession Document { get; }
 
     public PageId PageId { get; }
 

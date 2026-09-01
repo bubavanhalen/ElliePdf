@@ -28,9 +28,6 @@ public sealed class PdfDocumentSession : IAsyncDisposable
 
     public string SourcePath { get; }
 
-    /// <summary>Stable identity for caching; PDFium recycles native handles across close/open.</summary>
-    internal Guid Id { get; } = Guid.NewGuid();
-
     public int PageCount { get; internal set; }
 
     public bool IsEncrypted { get; }

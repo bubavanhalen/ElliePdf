@@ -1,9 +1,9 @@
 using ElliePdf.Navigation;
 using ElliePdf.Pages;
+using ElliePdf.Services;
 using ElliePdf.ViewModels;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.Windows.Storage.Pickers;
 
 namespace ElliePdf;
 
@@ -58,8 +58,6 @@ public sealed partial class MainPage : Page
         SyncShellButtons();
     }
 
-    public ReaderViewModel Reader { get; }
-
     public async Task OpenFilesAsync(IReadOnlyList<string> filePaths)
     {
         if (filePaths.Count == 0)
@@ -82,7 +80,6 @@ public sealed partial class MainPage : Page
         _uiHost.SetTitleBar(WindowDragSurface);
         UpdateTitleBarDragRegion();
         SyncShellButtons();
-        SyncTabViewItems();
     }
 
     private void MainPage_SizeChanged(object sender, SizeChangedEventArgs e) => UpdateTitleBarDragRegion();
@@ -104,6 +101,9 @@ public sealed partial class MainPage : Page
         _navigation.WorkspaceRequested -= OnWorkspaceRequested;
         _navigation.ReaderPageRequested -= OnReaderPageRequested;
     }
+
+    private void PaneToggleButton_Click(object sender, RoutedEventArgs e) =>
+        NavView.IsPaneOpen = !NavView.IsPaneOpen;
 
     private void BackButton_Click(object sender, RoutedEventArgs e)
     {

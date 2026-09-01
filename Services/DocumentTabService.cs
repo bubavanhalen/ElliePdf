@@ -177,28 +177,6 @@ public sealed class DocumentTabService : IDocumentTabService, IAsyncDisposable
         return tab;
     }
 
-    /// <summary>
-    /// Pulls ElliePdf's annotations out of the document so they can be edited, and imports any
-    /// companion file left behind by an older build before deleting it.
-    /// </summary>
-    private async Task LoadAnnotationsAsync(DocumentTab tab, CancellationToken cancellationToken)
-    {
-        var overlays = await _pdfService.ExtractOverlaysAsync(tab.Session, cancellationToken);
-        var migrated = LegacyCompanionMigration.TryImport(tab.FilePath, overlays);
-
-        _annotationStore.SetOverlayDocument(tab.Id, overlays);
-
-        if (migrated)
-        {
-            // Imported annotations are not in the PDF yet, so the tab genuinely has unsaved work.
-            _annotationStore.SetPageOverlay(
-                tab.Id,
-                overlays.Pages.Keys.First(),
-                overlays.Pages.Values.First());
-            tab.IsDirty = true;
-        }
-    }
-
     public async Task<DocumentTab> OpenOrActivateTabAsync(string path, CancellationToken cancellationToken = default)
     {
         var existing = FindTabByPath(path);

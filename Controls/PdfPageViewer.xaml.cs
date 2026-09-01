@@ -334,10 +334,8 @@ public sealed partial class PdfPageViewer : UserControl
 
     private void ApplyOverlayEnabled()
     {
-        // The overlay always draws: annotations are held out of the page while a document is open,
-        // so hiding it would make them disappear whenever the user is not editing. Only pointer
-        // interaction is gated on edit mode.
         PageEditSurface.IsHitTestVisible = IsOverlayEnabled;
+        PageEditSurface.Visibility = IsOverlayEnabled ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)

@@ -13,39 +13,11 @@
         <StackPanel MaxWidth="640" Spacing="20">
             <TextBlock x:Uid="Settings_Title" Style="{StaticResource TitleTextBlockStyle}" />
 
-            <!--  Appearance  -->
-            <TextBlock Style="{StaticResource EllieSectionHeaderStyle}" Text="Appearance" />
-            <Border Style="{StaticResource EllieSettingsCardStyle}">
-                <Grid ColumnSpacing="14">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <Border Style="{StaticResource EllieIconWellStyle}" VerticalAlignment="Center">
-                        <FontIcon
-                            FontSize="16"
-                            Foreground="{ThemeResource EllieAccentStrongBrush}"
-                            Glyph="&#xE790;" />
-                    </Border>
-                    <StackPanel
-                        Grid.Column="1"
-                        Spacing="2"
-                        VerticalAlignment="Center">
-                        <TextBlock Style="{StaticResource BodyTextBlockStyle}" Text="App theme" />
-                        <TextBlock
-                            Opacity="0.6"
-                            Style="{StaticResource CaptionTextBlockStyle}"
-                            Text="Changes apply immediately" />
-                    </StackPanel>
-                    <ComboBox
-                        Grid.Column="2"
-                        MinWidth="180"
-                        ItemsSource="{x:Bind ViewModel.ThemeOptions}"
-                        SelectedIndex="{x:Bind ViewModel.ThemeIndex, Mode=TwoWay}"
-                        VerticalAlignment="Center" />
-                </Grid>
-            </Border>
+            <InfoBar
+                IsClosable="True"
+                IsOpen="{x:Bind ViewModel.IsStatusOpen, Mode=OneWay}"
+                Message="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
+                Severity="{x:Bind ViewModel.StatusSeverity, Mode=OneWay}" />
 
             <StackPanel Spacing="16">
                 <TextBlock x:Uid="Settings_Reading" Style="{StaticResource SubtitleTextBlockStyle}" />

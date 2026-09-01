@@ -410,34 +410,7 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
         }
         finally
         {
-            // Detach them again so the reader keeps editing them rather than seeing them twice.
-            await DetachOverlaysAfterExportAsync(cancellationToken);
             IsBusy = false;
-        }
-    }
-
-    /// <summary>Temporarily writes each tab's annotations back into its shared session.</summary>
-    private async Task RestoreOverlaysForExportAsync(CancellationToken cancellationToken)
-    {
-        foreach (var document in _sourceDocuments.ToArray())
-        {
-            if (OverlaysFor(document) is { } overlays)
-            {
-                await _pdfService.ApplyOverlaysAsync(document, overlays, cancellationToken);
-            }
-        }
-    }
-
-    private async Task DetachOverlaysAfterExportAsync(CancellationToken cancellationToken)
-    {
-        foreach (var document in _sourceDocuments.ToArray())
-        {
-            if (document.IsClosed || OverlaysFor(document) is null)
-            {
-                continue;
-            }
-
-            await _pdfService.ExtractOverlaysAsync(document, cancellationToken);
         }
     }
 
@@ -641,22 +614,6 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
         StatusMessage = message;
         StatusSeverity = severity;
         IsStatusOpen = true;
-
-        // Errors stay until dismissed; everything else fades out on its own.
-        var version = ++_statusVersion;
-        if (severity != InfoBarSeverity.Error)
-        {
-            _ = AutoDismissStatusAsync(version);
-        }
-    }
-
-    private async Task AutoDismissStatusAsync(int version)
-    {
-        await Task.Delay(TimeSpan.FromSeconds(4));
-        if (version == _statusVersion)
-        {
-            IsStatusOpen = false;
-        }
     }
 
     private bool EnsureLabsEnabled()

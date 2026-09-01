@@ -12,14 +12,11 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Shapes;
-using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.Windows.Storage.Pickers;
 using System.Globalization;
 using System.Runtime.InteropServices.WindowsRuntime;
-using Windows.ApplicationModel.DataTransfer;
 using Windows.Foundation;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage;
@@ -31,14 +28,9 @@ namespace ElliePdf.Pages;
 
 public sealed partial class ReaderPage : Page
 {
+    private bool _isSyncingTabs;
     private readonly List<List<Point>> _signatureStrokes = [];
     private List<Point>? _currentSignatureStroke;
-    private (string Base64, double Aspect)? _typedSignature;
-    private (string Base64, double Aspect)? _importedSignature;
-
-    /// <summary>Script-like faces that ship with Windows, in order of preference.</summary>
-    private static readonly string[] SignatureFontCandidates =
-        ["Segoe Script", "Gabriola", "Ink Free", "Brush Script MT", "Segoe UI"];
 
     private int? _pendingContinuousPageIndex;
     private ReaderFocusZone _focusZone = ReaderFocusZone.Document;
@@ -103,8 +95,6 @@ public sealed partial class ReaderPage : Page
         SignatureCanvas.PointerMoved += SignatureCanvas_PointerMoved;
         SignatureCanvas.PointerPressed += SignatureCanvas_PointerPressed;
         SignatureCanvas.PointerReleased += SignatureCanvas_PointerReleased;
-        SignatureCanvas.PointerCaptureLost += SignatureCanvas_PointerCaptureLost;
-        _chromeIdleTimer.Tick += ChromeIdleTimer_Tick;
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
     }
@@ -129,6 +119,7 @@ public sealed partial class ReaderPage : Page
         }
 
         await ViewModel.LoadFilesAsync(filePaths);
+        SyncTabViewItems();
     }
 
     public void GoToPage(int pageIndex) => ViewModel.GoToPage(pageIndex);
@@ -748,24 +739,14 @@ public sealed partial class ReaderPage : Page
         }
 
         if (e.PropertyName is nameof(ReaderViewModel.PageImage)
-            or nameof(ReaderViewModel.CurrentOverlay))
+            or nameof(ReaderViewModel.CurrentOverlay)
+            or nameof(ReaderViewModel.IsEditMode))
         {
-            LoadEditSurface();
-        }
-        else if (e.PropertyName is nameof(ReaderViewModel.IsEditMode))
-        {
-            if (!ViewModel.IsEditMode)
-            {
-                PageViewer.EditSurface.CommitActiveEdits();
-            }
-
             LoadEditSurface();
         }
         else if (e.PropertyName is nameof(ReaderViewModel.ActiveEditTool)
             or nameof(ReaderViewModel.InkColorHex)
-            or nameof(ReaderViewModel.InkThickness)
-            or nameof(ReaderViewModel.EraserRadius)
-            or nameof(ReaderViewModel.ErasePartially))
+            or nameof(ReaderViewModel.InkThickness))
         {
             ApplyEditSurfaceState();
             UpdateInkPaletteSelection();
@@ -794,23 +775,7 @@ public sealed partial class ReaderPage : Page
     {
         if (!_isSyncingTabs)
         {
-            AnimatePanelIn(ThumbnailsPanel, -24);
-            ShowChrome();
-        }
-        else if (e.PropertyName == nameof(ReaderViewModel.IsOutlinePanelOpen) && ViewModel.IsOutlinePanelOpen)
-        {
-            AnimatePanelIn(OutlinePanel, -24);
-            ShowChrome();
-        }
-        else if (e.PropertyName == nameof(ReaderViewModel.IsSearchPanelOpen) && ViewModel.IsSearchPanelOpen)
-        {
-            AnimatePanelIn(SearchPanel, 24);
-            ShowChrome();
-            SearchBox.Focus(FocusState.Programmatic);
-        }
-        else if (e.PropertyName == nameof(ReaderViewModel.ToolMode))
-        {
-            ShowChrome();
+            SyncTabViewItems();
         }
     }
 
@@ -1269,41 +1234,18 @@ public sealed partial class ReaderPage : Page
         PageViewer.EditSurface.ActiveTool = ViewModel.ActiveEditTool;
         PageViewer.EditSurface.InkColorHex = ViewModel.InkColorHex;
         PageViewer.EditSurface.InkThickness = ViewModel.InkThickness;
-        PageViewer.EditSurface.EraserRadius = ViewModel.EraserRadius;
-        PageViewer.EditSurface.ErasePartially = ViewModel.ErasePartially;
     }
-
-    private void EditSurface_EditRecording(object? sender, PageOverlayState before) =>
-        ViewModel.RecordHistory(before);
-
-    private void ViewModel_HistoryApplied(object? sender, Services.OverlaySnapshot snapshot) =>
-        PageViewer.EditSurface.ApplyHistoryState(snapshot.State);
 
     private void EditSurface_OverlayChanged(object? sender, PageOverlayState overlay) =>
         ViewModel.PersistCurrentOverlay(overlay);
 
     private void EditSurface_ActiveToolChangeRequested(object? sender, ReaderEditTool tool)
     {
-        switch (tool)
+        if (tool == ReaderEditTool.Select)
         {
-            case ReaderEditTool.Select:
-                ViewModel.UseSelectToolCommand.Execute(null);
-                break;
-            case ReaderEditTool.Text:
-                ViewModel.UseTextToolCommand.Execute(null);
-                break;
-            case ReaderEditTool.Ink:
-                ViewModel.UseInkToolCommand.Execute(null);
-                break;
-            case ReaderEditTool.Eraser:
-                ViewModel.UseEraserToolCommand.Execute(null);
-                break;
-            case ReaderEditTool.Signature:
-                ViewModel.UseSignatureToolCommand.Execute(null);
-                break;
+            ViewModel.UseSelectToolCommand.Execute(null);
+            ApplyEditSurfaceState();
         }
-
-        ApplyEditSurfaceState();
     }
 
     private void SaveButton_Click(object sender, RoutedEventArgs e)
@@ -1344,20 +1286,17 @@ public sealed partial class ReaderPage : Page
         OpenInkPalette();
     }
 
-    private void OpenInkPalette() => OpenPalette(InkPalettePopup, InkPalette, InkToolButton);
-
-    /// <summary>Anchors a palette popup above the tool button that opened it.</summary>
-    private void OpenPalette(Popup popup, FrameworkElement palette, FrameworkElement anchorElement)
+    private void OpenInkPalette()
     {
-        palette.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        var desired = palette.DesiredSize;
-        var anchor = anchorElement.TransformToVisual(RootGrid).TransformPoint(new Point(0, 0));
-        var left = anchor.X + (anchorElement.ActualWidth / 2) - (desired.Width / 2);
+        InkPalette.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        var desired = InkPalette.DesiredSize;
+        var anchor = InkToolButton.TransformToVisual(RootGrid).TransformPoint(new Point(0, 0));
+        var left = anchor.X + InkToolButton.ActualWidth / 2 - desired.Width / 2;
         var top = anchor.Y - desired.Height - 10;
 
-        popup.HorizontalOffset = Math.Clamp(left, 8, Math.Max(8, RootGrid.ActualWidth - desired.Width - 8));
-        popup.VerticalOffset = Math.Max(8, top);
-        popup.IsOpen = true;
+        InkPalettePopup.HorizontalOffset = Math.Clamp(left, 8, Math.Max(8, RootGrid.ActualWidth - desired.Width - 8));
+        InkPalettePopup.VerticalOffset = Math.Max(8, top);
+        InkPalettePopup.IsOpen = true;
     }
 
     private void InkColorSwatch_Click(object sender, RoutedEventArgs e)
@@ -1389,33 +1328,6 @@ public sealed partial class ReaderPage : Page
         UpdatePaletteButton(InkThinButton, Math.Abs(ViewModel.InkThickness - 2) < 0.1);
         UpdatePaletteButton(InkMediumButton, Math.Abs(ViewModel.InkThickness - 5) < 0.1);
         UpdatePaletteButton(InkThickButton, Math.Abs(ViewModel.InkThickness - 9) < 0.1);
-        UpdatePaletteButton(EraserSmallButton, Math.Abs(ViewModel.EraserRadius - 6) < 0.1);
-        UpdatePaletteButton(EraserMediumButton, Math.Abs(ViewModel.EraserRadius - 14) < 0.1);
-        UpdatePaletteButton(EraserLargeButton, Math.Abs(ViewModel.EraserRadius - 26) < 0.1);
-    }
-
-    private void EraserToolButton_Click(object sender, RoutedEventArgs e)
-    {
-        ApplyEditSurfaceState();
-        UpdateInkPaletteSelection();
-        OpenPalette(EraserPalettePopup, EraserPalette, EraserToolButton);
-    }
-
-    private void EraserRadiusButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is Button { Tag: string value } &&
-            double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var radius))
-        {
-            ViewModel.SetEraserRadiusCommand.Execute(radius);
-            ApplyEditSurfaceState();
-            UpdateInkPaletteSelection();
-        }
-    }
-
-    private void ErasePartialToggle_Click(object sender, RoutedEventArgs e)
-    {
-        ViewModel.ToggleErasePartiallyCommand.Execute(null);
-        ApplyEditSurfaceState();
     }
 
     private static void UpdatePaletteButton(Button button, bool isSelected)
@@ -1433,10 +1345,7 @@ public sealed partial class ReaderPage : Page
     }
 
     private void UndoEditButton_Click(object sender, RoutedEventArgs e) =>
-        ViewModel.UndoEditCommand.Execute(null);
-
-    private void RedoEditButton_Click(object sender, RoutedEventArgs e) =>
-        ViewModel.RedoEditCommand.Execute(null);
+        PageViewer.EditSurface.Undo();
 
     private void DeleteEditButton_Click(object sender, RoutedEventArgs e) =>
         PageViewer.EditSurface.DeleteSelection();
@@ -1455,138 +1364,10 @@ public sealed partial class ReaderPage : Page
     {
         _signatureStrokes.Clear();
         _currentSignatureStroke = null;
-        _importedSignature = null;
-        _typedSignature = null;
         SignatureCanvas.Children.Clear();
         SignatureNameBox.Text = string.Empty;
         SignatureDialog.XamlRoot = XamlRoot;
         await SignatureDialog.ShowAsync();
-    }
-
-    private void InitializeSignatureFonts()
-    {
-        if (TypedSignatureFontBox.Items.Count > 0)
-        {
-            return;
-        }
-
-        foreach (var family in SignatureFontCandidates)
-        {
-            TypedSignatureFontBox.Items.Add(family);
-        }
-
-        TypedSignatureFontBox.SelectedIndex = 0;
-    }
-
-    private async Task LoadSavedSignaturesAsync()
-    {
-        var saved = ViewModel.GetSavedSignatures();
-        var items = new List<SavedSignatureViewModel>();
-
-        foreach (var signature in saved)
-        {
-            BitmapImage? preview = null;
-            try
-            {
-                preview = await Helpers.BitmapHelper.CreateBitmapAsync(Convert.FromBase64String(signature.ImageBase64));
-            }
-            catch (FormatException)
-            {
-                // A corrupt entry simply does not get a thumbnail.
-            }
-
-            items.Add(new SavedSignatureViewModel(signature, preview));
-        }
-
-        SavedSignaturesGrid.ItemsSource = items;
-        NoSavedSignaturesText.Visibility = items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        SavedSignaturesGrid.Visibility = items.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
-    }
-
-    private async void SavedSignaturesGrid_ItemClick(object sender, ItemClickEventArgs e)
-    {
-        if (e.ClickedItem is not SavedSignatureViewModel item)
-        {
-            return;
-        }
-
-        SignatureDialog.Hide();
-        PlaceSignature(item.ImageBase64, item.AspectRatio);
-        await Task.CompletedTask;
-    }
-
-    private async void DeleteSavedSignature_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is Button { Tag: string id })
-        {
-            ViewModel.DeleteSavedSignature(id);
-            await LoadSavedSignaturesAsync();
-        }
-    }
-
-    private async void TypedSignatureBox_TextChanged(object sender, TextChangedEventArgs e) =>
-        await RefreshTypedSignatureAsync();
-
-    private async void TypedSignatureFontBox_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
-        await RefreshTypedSignatureAsync();
-
-    private async Task RefreshTypedSignatureAsync()
-    {
-        var text = TypedSignatureBox.Text;
-        var font = TypedSignatureFontBox.SelectedItem as string ?? SignatureFontCandidates[0];
-
-        if (!Helpers.SignatureRenderer.TryRenderTyped(text, font, out var png, out var aspect))
-        {
-            _typedSignature = null;
-            TypedSignaturePreview.Source = null;
-            return;
-        }
-
-        _typedSignature = (Convert.ToBase64String(png), aspect);
-        TypedSignaturePreview.Source = await Helpers.BitmapHelper.CreateBitmapAsync(png);
-    }
-
-    private async void ImportSignatureButton_Click(object sender, RoutedEventArgs e)
-    {
-        var picker = new FileOpenPicker(XamlRoot.ContentIslandEnvironment.AppWindowId)
-        {
-            SuggestedStartLocation = PickerLocationId.PicturesLibrary
-        };
-
-        foreach (var extension in new[] { ".png", ".jpg", ".jpeg", ".bmp" })
-        {
-            picker.FileTypeFilter.Add(extension);
-        }
-
-        var file = await picker.PickSingleFileAsync();
-        if (file is null)
-        {
-            return;
-        }
-
-        try
-        {
-            var bytes = await File.ReadAllBytesAsync(file.Path);
-
-            // Decoding and alpha-keying a photo is slow enough to freeze the window.
-            var result = await Task.Run(() =>
-                Helpers.SignatureRenderer.TryImport(bytes, out var png, out var aspect)
-                    ? (Png: png, Aspect: aspect)
-                    : ((byte[] Png, double Aspect)?)null);
-
-            if (result is not { } imported)
-            {
-                ViewModel.ReportSignatureImportFailed();
-                return;
-            }
-
-            _importedSignature = (Convert.ToBase64String(imported.Png), imported.Aspect);
-            ImportedSignaturePreview.Source = await Helpers.BitmapHelper.CreateBitmapAsync(imported.Png);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            ViewModel.ReportSignatureImportFailed();
-        }
     }
 
     private void BtnClearSignature_Click(object sender, RoutedEventArgs e)
@@ -1613,14 +1394,7 @@ public sealed partial class ReaderPage : Page
             return;
         }
 
-        var point = e.GetCurrentPoint(SignatureCanvas).Position;
-        var last = _currentSignatureStroke[^1];
-        if (Math.Abs(point.X - last.X) + Math.Abs(point.Y - last.Y) < 1.0)
-        {
-            return;
-        }
-
-        _currentSignatureStroke.Add(point);
+        _currentSignatureStroke.Add(e.GetCurrentPoint(SignatureCanvas).Position);
         RedrawSignatureCanvas();
         e.Handled = true;
     }
@@ -1634,12 +1408,8 @@ public sealed partial class ReaderPage : Page
 
         SignatureCanvas.ReleasePointerCapture(e.Pointer);
         _currentSignatureStroke = null;
-        RedrawSignatureCanvas();
         e.Handled = true;
     }
-
-    private void SignatureCanvas_PointerCaptureLost(object sender, PointerRoutedEventArgs e) =>
-        _currentSignatureStroke = null;
 
     private void RedrawSignatureCanvas()
     {
@@ -1660,7 +1430,7 @@ public sealed partial class ReaderPage : Page
             SignatureCanvas.Children.Add(new Polyline
             {
                 Stroke = new SolidColorBrush(Microsoft.UI.Colors.Black),
-                StrokeThickness = 2.4,
+                StrokeThickness = 2,
                 StrokeStartLineCap = PenLineCap.Round,
                 StrokeEndLineCap = PenLineCap.Round,
                 StrokeLineJoin = PenLineJoin.Round,
@@ -1675,15 +1445,6 @@ public sealed partial class ReaderPage : Page
         var typedSignature = SignatureNameBox.Text.Trim();
         if (!hasDrawnSignature && string.IsNullOrWhiteSpace(typedSignature))
         {
-            0 => CaptureDrawnSignature(),
-            1 => _typedSignature is { } typed ? (typed.Base64, typed.Aspect, SaveTypedSignatureCheckBox.IsChecked == true) : null,
-            3 => _importedSignature is { } imported ? (imported.Base64, imported.Aspect, SaveImportedSignatureCheckBox.IsChecked == true) : null,
-            _ => null
-        };
-
-        if (selection is not { } chosen)
-        {
-            // Nothing usable on the active tab, so keep the dialog open.
             args.Cancel = true;
             return;
         }
@@ -1706,28 +1467,30 @@ public sealed partial class ReaderPage : Page
         ObserveBackground(PlaceSignatureAsync(), "reader-place-signature");
     }
 
-    private (string Base64, double Aspect, bool Save)? CaptureDrawnSignature()
+    private async Task PlaceSignatureAsync()
     {
-        // Rasterize while the strokes are still in hand; the canvas leaves the tree as the dialog closes.
-        var strokes = _signatureStrokes
-            .Select(stroke => (IReadOnlyList<Helpers.StrokePoint>)stroke
-                .Select(point => new Helpers.StrokePoint(point.X, point.Y))
-                .ToList())
-            .ToList();
+        var renderTarget = new RenderTargetBitmap();
+        await renderTarget.RenderAsync(SignatureCanvas);
+        using var stream = new InMemoryRandomAccessStream();
+        var encoder = await Windows.Graphics.Imaging.BitmapEncoder.CreateAsync(
+            Windows.Graphics.Imaging.BitmapEncoder.PngEncoderId,
+            stream);
+        encoder.SetPixelData(
+            Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8,
+            Windows.Graphics.Imaging.BitmapAlphaMode.Premultiplied,
+            (uint)renderTarget.PixelWidth,
+            (uint)renderTarget.PixelHeight,
+            96,
+            96,
+            (await renderTarget.GetPixelsAsync()).ToArray());
+        await encoder.FlushAsync();
+        stream.Seek(0);
+        using var memory = new MemoryStream();
+        await stream.AsStreamForRead().CopyToAsync(memory);
 
-        if (!Helpers.SignatureRenderer.TryRender(strokes, out var pngBytes, out var aspectRatio))
-        {
-            return null;
-        }
-
-        return (Convert.ToBase64String(pngBytes), aspectRatio, SaveSignatureCheckBox.IsChecked == true);
-    }
-
-    private void PlaceSignature(string base64, double aspectRatio)
-    {
-        ViewModel.UseSelectToolCommand.Execute(null);
+        ViewModel.UseSignatureToolCommand.Execute(null);
         ApplyEditSurfaceState();
-        PageViewer.EditSurface.PlaceSignature(base64, aspectRatio);
+        PageViewer.EditSurface.PlaceSignature(Convert.ToBase64String(memory.ToArray()));
     }
 
     private void ReaderPage_KeyDown(object sender, KeyRoutedEventArgs e)
@@ -1765,25 +1528,7 @@ public sealed partial class ReaderPage : Page
 
             if (controlDown && e.Key == VirtualKey.Z)
             {
-                var shiftDown = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift)
-                    .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
-
-                if (shiftDown)
-                {
-                    ViewModel.RedoEditCommand.Execute(null);
-                }
-                else
-                {
-                    ViewModel.UndoEditCommand.Execute(null);
-                }
-
-                e.Handled = true;
-                return;
-            }
-
-            if (controlDown && e.Key == VirtualKey.Y)
-            {
-                ViewModel.RedoEditCommand.Execute(null);
+                PageViewer.EditSurface.Undo();
                 e.Handled = true;
                 return;
             }
@@ -2096,246 +1841,12 @@ public sealed partial class ReaderPage : Page
             return;
         }
 
-        await ViewModel.TryCloseTabAsync(tabId);
-    }
-
-    // ═══════════ Chrome auto-hide ═══════════
-
-    private void RootGrid_PointerMoved(object sender, PointerRoutedEventArgs e) => ShowChrome();
-
-    private void ChromeIdleTimer_Tick(object? sender, object e)
-    {
-        _chromeIdleTimer.Stop();
-
-        var canHide = ViewModel.HasDocument
-            && ViewModel.IsReadMode
-            && _openFlyoutCount == 0
-            && !ViewModel.IsThumbnailPanelOpen
-            && !ViewModel.IsOutlinePanelOpen
-            && !ViewModel.IsSearchPanelOpen;
-
-        if (!canHide)
+        if (!await ViewModel.TryCloseTabAsync(tabId))
         {
             return;
         }
 
-        _isChromeHidden = true;
-        FadeChrome(ReadToolbar, 0, 12);
-        FadeChrome(TopCommandBar, 0, -12);
-        ReadToolbar.IsHitTestVisible = false;
-        TopCommandBar.IsHitTestVisible = false;
-    }
-
-    private void ShowChrome()
-    {
-        if (_isChromeHidden)
-        {
-            _isChromeHidden = false;
-            FadeChrome(ReadToolbar, 1, 0);
-            FadeChrome(TopCommandBar, 1, 0);
-            ReadToolbar.IsHitTestVisible = true;
-            TopCommandBar.IsHitTestVisible = true;
-        }
-
-        RestartChromeTimer();
-    }
-
-    private void RestartChromeTimer()
-    {
-        _chromeIdleTimer.Stop();
-        _chromeIdleTimer.Start();
-    }
-
-    private static void FadeChrome(FrameworkElement element, double toOpacity, double toOffsetY)
-    {
-        if (element.RenderTransform is not TranslateTransform transform)
-        {
-            transform = new TranslateTransform();
-            element.RenderTransform = transform;
-        }
-
-        var duration = new Duration(TimeSpan.FromMilliseconds(260));
-        var storyboard = new Storyboard();
-
-        var fade = new DoubleAnimation
-        {
-            To = toOpacity,
-            Duration = duration,
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-        };
-        Storyboard.SetTarget(fade, element);
-        Storyboard.SetTargetProperty(fade, "Opacity");
-        storyboard.Children.Add(fade);
-
-        var slide = new DoubleAnimation
-        {
-            To = toOffsetY,
-            Duration = duration,
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-        };
-        Storyboard.SetTarget(slide, transform);
-        Storyboard.SetTargetProperty(slide, "Y");
-        storyboard.Children.Add(slide);
-
-        storyboard.Begin();
-    }
-
-    private static void AnimatePanelIn(FrameworkElement panel, double fromOffsetX)
-    {
-        if (panel.RenderTransform is not TranslateTransform transform)
-        {
-            transform = new TranslateTransform();
-            panel.RenderTransform = transform;
-        }
-
-        panel.Opacity = 0;
-        transform.X = fromOffsetX;
-
-        var duration = new Duration(TimeSpan.FromMilliseconds(240));
-        var storyboard = new Storyboard();
-
-        var fade = new DoubleAnimation
-        {
-            From = 0,
-            To = 1,
-            Duration = duration,
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-        };
-        Storyboard.SetTarget(fade, panel);
-        Storyboard.SetTargetProperty(fade, "Opacity");
-        storyboard.Children.Add(fade);
-
-        var slide = new DoubleAnimation
-        {
-            From = fromOffsetX,
-            To = 0,
-            Duration = duration,
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-        };
-        Storyboard.SetTarget(slide, transform);
-        Storyboard.SetTargetProperty(slide, "X");
-        storyboard.Children.Add(slide);
-
-        storyboard.Begin();
-    }
-
-    // ═══════════ Flyouts ═══════════
-
-    private void Flyout_Opening(object? sender, object e)
-    {
-        _openFlyoutCount++;
-        ShowChrome();
-    }
-
-    private void Flyout_Closed(object? sender, object e)
-    {
-        _openFlyoutCount = Math.Max(0, _openFlyoutCount - 1);
-        RestartChromeTimer();
-    }
-
-    private void ZoomFlyout_Opening(object? sender, object e)
-    {
-        Flyout_Opening(sender, e);
-        _isSyncingZoomSlider = true;
-        ZoomSlider.Value = Math.Clamp(Math.Round(ViewModel.EffectiveZoomScale * 100), 25, 400);
-        _isSyncingZoomSlider = false;
-    }
-
-    private void ZoomSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
-    {
-        // ViewModel is null while InitializeComponent coerces the slider's initial value.
-        if (!_isSyncingZoomSlider && ViewModel is not null)
-        {
-            ViewModel.SetZoomPercentCommand.Execute(e.NewValue);
-        }
-    }
-
-    private void ZoomPreset_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is not Button { Tag: string preset })
-        {
-            return;
-        }
-
-        switch (preset)
-        {
-            case "fitwidth":
-                ViewModel.ZoomFitWidthCommand.Execute(null);
-                break;
-            case "fitpage":
-                ViewModel.ZoomFitPageCommand.Execute(null);
-                break;
-            default:
-                ViewModel.ZoomActualSizeCommand.Execute(null);
-                break;
-        }
-
-        ZoomFlyout.Hide();
-    }
-
-    private void GoToPageFlyout_Opening(object? sender, object e)
-    {
-        Flyout_Opening(sender, e);
-        GoToPageBox.Maximum = Math.Max(1, ViewModel.DocumentPageCount);
-        GoToPageBox.Value = ViewModel.CurrentPageIndex + 1;
-    }
-
-    private void GoToPageBox_KeyDown(object sender, KeyRoutedEventArgs e)
-    {
-        if (e.Key == VirtualKey.Enter)
-        {
-            CommitGoToPage();
-            e.Handled = true;
-        }
-    }
-
-    private void GoToPageButton_Click(object sender, RoutedEventArgs e) => CommitGoToPage();
-
-    private void CommitGoToPage()
-    {
-        if (!double.IsNaN(GoToPageBox.Value) && ViewModel.DocumentPageCount > 0)
-        {
-            var pageIndex = (int)Math.Clamp(GoToPageBox.Value, 1, ViewModel.DocumentPageCount) - 1;
-            ViewModel.GoToPage(pageIndex);
-        }
-
-        GoToPageFlyout.Hide();
-    }
-
-    // ═══════════ Drag & drop ═══════════
-
-    private void RootGrid_DragOver(object sender, DragEventArgs e)
-    {
-        if (e.DataView.Contains(StandardDataFormats.StorageItems))
-        {
-            e.AcceptedOperation = DataPackageOperation.Copy;
-            if (e.DragUIOverride is not null)
-            {
-                e.DragUIOverride.Caption = "Open in ElliePdf";
-            }
-        }
-    }
-
-    private async void RootGrid_Drop(object sender, DragEventArgs e)
-    {
-        if (!e.DataView.Contains(StandardDataFormats.StorageItems))
-        {
-            return;
-        }
-
-        var items = await e.DataView.GetStorageItemsAsync();
-        var paths = items
-            .OfType<Windows.Storage.StorageFile>()
-            .Where(file => string.Equals(file.FileType, ".pdf", StringComparison.OrdinalIgnoreCase))
-            .Select(file => file.Path)
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .ToArray();
-
-        if (paths.Length > 0)
-        {
-            ViewModel.ClosePanels();
-            await ViewModel.LoadFilesAsync(paths);
-        }
+        SyncTabViewItems();
     }
 
     private sealed class ContinuousElementWork(int pageIndex, CancellationTokenSource cancellation)

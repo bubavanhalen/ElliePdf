@@ -57,17 +57,10 @@
         </ContentDialog>
     </Page.Resources>
 
-    <Grid
-        x:Name="RootGrid"
-        AllowDrop="True"
-        Background="Transparent"
-        DragOver="RootGrid_DragOver"
-        Drop="RootGrid_Drop"
-        PointerMoved="RootGrid_PointerMoved">
-
+    <Grid x:Name="RootGrid" Background="Transparent">
         <controls:PdfPageViewer
             x:Name="PageViewer"
-            Margin="56,48,56,0"
+            Margin="56,0,56,0"
             Canvas.ZIndex="0"
             AutomationProperties.Name="{x:Bind ViewModel.PageLabel, Mode=OneWay}"
             ContentBottomInset="112"
@@ -143,15 +136,15 @@
             </ItemsRepeater>
         </ScrollViewer>
 
-        <!--  ═══════════ Empty state ═══════════  -->
-        <ScrollViewer
+        <!-- Empty state -->
+        <Grid
+            Padding="48"
             Canvas.ZIndex="5"
-            Padding="48,72,48,24"
             Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.ShowEmptyState), Mode=OneWay}">
             <StackPanel
-                MaxWidth="620"
+                MaxWidth="420"
                 HorizontalAlignment="Center"
-                Spacing="24"
+                Spacing="16"
                 VerticalAlignment="Center">
                 <TextBlock
                     x:Uid="Reader_EmptyStateTitle"
@@ -169,61 +162,21 @@
                         <SymbolIcon Symbol="OpenFile" />
                         <TextBlock x:Uid="Reader_OpenPdfText" />
                     </StackPanel>
-                </Grid>
-
-                <!--  Recent files  -->
-                <StackPanel Spacing="8" Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.ShowRecentFiles), Mode=OneWay}">
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <FontIcon
-                            FontSize="14"
-                            Opacity="0.7"
-                            Glyph="&#xE823;" />
-                        <TextBlock Style="{StaticResource EllieSectionHeaderStyle}" Text="Recent" Margin="0" />
-                    </StackPanel>
-                    <GridView
-                        IsItemClickEnabled="True"
-                        ItemClick="RecentFiles_ItemClick"
-                        ItemsSource="{x:Bind ViewModel.RecentFiles, Mode=OneWay}"
-                        SelectionMode="None">
-                        <GridView.ItemTemplate>
-                            <DataTemplate x:DataType="vm:RecentFileItemViewModel">
-                                <Border
-                                    Width="284"
-                                    Padding="12,10"
-                                    Style="{StaticResource EllieCardStyle}">
-                                    <Grid ColumnSpacing="12">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
-                                        <Border Style="{StaticResource EllieIconWellStyle}" VerticalAlignment="Center">
-                                            <FontIcon
-                                                FontSize="16"
-                                                Foreground="{ThemeResource EllieAccentStrongBrush}"
-                                                Glyph="&#xE8A5;" />
-                                        </Border>
-                                        <StackPanel
-                                            Grid.Column="1"
-                                            Spacing="2"
-                                            VerticalAlignment="Center">
-                                            <TextBlock
-                                                Style="{StaticResource BodyStrongTextBlockStyle}"
-                                                Text="{x:Bind DisplayName}"
-                                                TextTrimming="CharacterEllipsis" />
-                                            <TextBlock
-                                                Opacity="0.6"
-                                                Style="{StaticResource CaptionTextBlockStyle}"
-                                                Text="{x:Bind FolderName}"
-                                                TextTrimming="CharacterEllipsis" />
-                                        </StackPanel>
-                                    </Grid>
-                                </Border>
-                            </DataTemplate>
-                        </GridView.ItemTemplate>
-                    </GridView>
-                </StackPanel>
+                </Button>
+                <ListView
+                    IsItemClickEnabled="True"
+                    ItemClick="RecentFiles_ItemClick"
+                    ItemsSource="{x:Bind ViewModel.RecentFiles, Mode=OneWay}"
+                    SelectionMode="None"
+                    Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.ShowRecentFiles), Mode=OneWay}">
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="vm:RecentFileItemViewModel">
+                            <TextBlock Padding="8,6" Text="{x:Bind DisplayName, Mode=OneTime}" />
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
             </StackPanel>
-        </ScrollViewer>
+        </Grid>
 
         <!-- Unified responsive sidebar: docked at >=1000 epx, overlay below it. -->
         <Border
@@ -657,7 +610,6 @@
             </CommandBar.SecondaryCommands>
         </CommandBar>
 
-        <!--  Ink palette  -->
         <Popup
             x:Name="InkPalettePopup"
             Canvas.ZIndex="40"
@@ -674,6 +626,7 @@
                     <TextBlock
                         x:Uid="Reader_InkPaletteLabel"
                         Margin="2,0,4,0"
+                        VerticalAlignment="Center"
                         Opacity="0.75"
                         Style="{StaticResource CaptionTextBlockStyle}" />
                     <Button
@@ -763,100 +716,13 @@
             </Border>
         </Popup>
 
-        <!--  Eraser options  -->
-        <Popup
-            x:Name="EraserPalettePopup"
-            Canvas.ZIndex="40"
-            IsLightDismissEnabled="True">
-            <Border
-                x:Name="EraserPalette"
-                Padding="10,8"
-                Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
-                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                BorderThickness="1"
-                CornerRadius="20"
-                Opacity="0.98">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <TextBlock
-                        Margin="2,0,4,0"
-                        Opacity="0.75"
-                        Style="{StaticResource CaptionTextBlockStyle}"
-                        Text="Size"
-                        VerticalAlignment="Center" />
-                    <Button
-                        x:Name="EraserSmallButton"
-                        Width="34"
-                        Height="30"
-                        Padding="0"
-                        Background="Transparent"
-                        BorderThickness="2"
-                        Click="EraserRadiusButton_Click"
-                        Tag="6"
-                        ToolTipService.ToolTip="Small">
-                        <Ellipse
-                            Width="10"
-                            Height="10"
-                            Stroke="{ThemeResource TextFillColorPrimaryBrush}"
-                            StrokeThickness="1" />
-                    </Button>
-                    <Button
-                        x:Name="EraserMediumButton"
-                        Width="34"
-                        Height="30"
-                        Padding="0"
-                        Background="Transparent"
-                        BorderThickness="2"
-                        Click="EraserRadiusButton_Click"
-                        Tag="14"
-                        ToolTipService.ToolTip="Medium">
-                        <Ellipse
-                            Width="16"
-                            Height="16"
-                            Stroke="{ThemeResource TextFillColorPrimaryBrush}"
-                            StrokeThickness="1" />
-                    </Button>
-                    <Button
-                        x:Name="EraserLargeButton"
-                        Width="34"
-                        Height="30"
-                        Padding="0"
-                        Background="Transparent"
-                        BorderThickness="2"
-                        Click="EraserRadiusButton_Click"
-                        Tag="26"
-                        ToolTipService.ToolTip="Large">
-                        <Ellipse
-                            Width="22"
-                            Height="22"
-                            Stroke="{ThemeResource TextFillColorPrimaryBrush}"
-                            StrokeThickness="1" />
-                    </Button>
-                    <Border
-                        Width="1"
-                        Height="24"
-                        Margin="4,0"
-                        Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
-                    <ToggleButton
-                        x:Name="ErasePartialToggle"
-                        Height="30"
-                        Padding="10,0"
-                        Click="ErasePartialToggle_Click"
-                        IsChecked="{x:Bind ViewModel.ErasePartially, Mode=OneWay}"
-                        ToolTipService.ToolTip="Cut strokes where you erase instead of deleting them whole">
-                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="Partial" />
-                    </ToggleButton>
-                </StackPanel>
-            </Border>
-        </Popup>
-
-        <!--  Status + busy indicator  -->
+        <!-- Minimal status + page indicator -->
         <StackPanel
-            MaxWidth="520"
-            Margin="0,58,0,0"
-            Canvas.ZIndex="40"
+            Margin="0,0,0,64"
+            Canvas.ZIndex="30"
             HorizontalAlignment="Center"
-            Spacing="8"
-            VerticalAlignment="Top">
+            Spacing="4"
+            VerticalAlignment="Bottom">
             <InfoBar
                 x:Name="ReaderStatus"
                 AutomationProperties.AutomationId="ReaderStatus"
@@ -866,9 +732,8 @@
                 Message="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
                 Severity="{x:Bind ViewModel.StatusSeverity, Mode=OneWay}" />
             <ProgressRing
-                Width="20"
-                Height="20"
-                HorizontalAlignment="Center"
+                Width="18"
+                Height="18"
                 IsActive="{x:Bind ViewModel.IsBusy, Mode=OneWay}"
                 Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.IsBusy), Mode=OneWay}" />
         </StackPanel>
