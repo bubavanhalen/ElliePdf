@@ -1,0 +1,21 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+    <PdfiumNativeVersion>154.0.8021</PdfiumNativeVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="11.0.0-preview.7.26381.103" />
+    <PackageVersion Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="3.2.6" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+    <PackageVersion Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.29648.1000-preview" />
+    <PackageVersion Include="Microsoft.Windows.SDK.BuildTools.WinApp" Version="0.6.1" />
+    <PackageVersion Include="Microsoft.WindowsAppSDK" Version="2.4.1-experimental" />
+    <PackageVersion Include="bblanchon.PDFium.Win32" Version="$(PdfiumNativeVersion)" />
+    <PackageVersion Include="System.Drawing.Common" Version="11.0.0-preview.7.26381.103" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.0" />
+  </ItemGroup>
+</Project>

@@ -2,11 +2,15 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net11.0-windows10.0.26100.0</TargetFramework>
-    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <TargetPlatformMinVersion>10.0.26100.0</TargetPlatformMinVersion>
     <RootNamespace>ElliePdf</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Platforms>x64;ARM64</Platforms>
-    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant())</RuntimeIdentifier>
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == '' and '$(Platform)' == 'ARM64'">win-arm64</RuntimeIdentifier>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
+    <PlatformTarget Condition="'$(RuntimeIdentifier)' == 'win-arm64' or '$(Platform)' == 'ARM64'">ARM64</PlatformTarget>
+    <PlatformTarget Condition="'$(PlatformTarget)' == ''">x64</PlatformTarget>
     <PublishProfile Condition="Exists('Properties\PublishProfiles\win-$(Platform).pubxml')">win-$(Platform).pubxml</PublishProfile>
     <UseWinUI>true</UseWinUI>
     <WinUISDKReferences>false</WinUISDKReferences>
@@ -14,24 +18,57 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <DefaultLanguage>en-US</DefaultLanguage>
   </PropertyGroup>
 
   <ItemGroup>
     <Compile Remove="ElliePdf.Tests\**" />
     <Compile Remove="ElliePdf.Core\**" />
+    <Compile Remove="Benchmark\**" />
+    <Compile Remove="eng\**" />
+    <Compile Remove="src\**" />
+    <Compile Remove="tests\**" />
     <Compile Remove="tools\**" />
     <Content Remove="ElliePdf.Tests\**" />
     <Content Remove="ElliePdf.Core\**" />
+    <Content Remove="Benchmark\**" />
+    <Content Remove="eng\**" />
+    <Content Remove="src\**" />
+    <Content Remove="tests\**" />
     <EmbeddedResource Remove="ElliePdf.Tests\**" />
     <EmbeddedResource Remove="ElliePdf.Core\**" />
+    <EmbeddedResource Remove="Benchmark\**" />
+    <EmbeddedResource Remove="eng\**" />
+    <EmbeddedResource Remove="src\**" />
+    <EmbeddedResource Remove="tests\**" />
     <None Remove="ElliePdf.Tests\**" />
     <None Remove="ElliePdf.Core\**" />
+    <None Remove="Benchmark\**" />
+    <None Remove="eng\**" />
+    <None Remove="src\**" />
+    <None Remove="tests\**" />
     <Page Remove="ElliePdf.Tests\**" />
     <Page Remove="ElliePdf.Core\**" />
+    <Page Remove="Benchmark\**" />
+    <Page Remove="eng\**" />
+    <Page Remove="src\**" />
+    <Page Remove="tests\**" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="ElliePdf.Core\ElliePdf.Core.csproj" />
+    <ProjectReference Include="src\ElliePdf.Domain\ElliePdf.Domain.csproj" />
+    <ProjectReference Include="src\ElliePdf.Application\ElliePdf.Application.csproj" />
+    <ProjectReference Include="src\ElliePdf.Diagnostics\ElliePdf.Diagnostics.csproj" />
+    <ProjectReference Include="src\ElliePdf.Infrastructure\ElliePdf.Infrastructure.csproj" />
+    <ProjectReference Include="src\ElliePdf.Pdf.Contracts\ElliePdf.Pdf.Contracts.csproj" />
+    <ProjectReference Include="src\ElliePdf.Pdf.Client\ElliePdf.Pdf.Client.csproj" />
+    <ProjectReference Include="src\ElliePdf.Printing\ElliePdf.Printing.csproj" />
+    <ProjectReference Include="src\ElliePdf.Rendering\ElliePdf.Rendering.csproj" />
+    <ProjectReference Include="src\ElliePdf.Semantics\ElliePdf.Semantics.csproj" />
+    <ProjectReference Include="src\ElliePdf.Pdfium.Worker\ElliePdf.Pdfium.Worker.csproj"
+                      ReferenceOutputAssembly="false"
+                      Private="false" />
   </ItemGroup>
 
   <ItemGroup>
@@ -58,13 +95,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.8" />
-    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.1839" />
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.1.3" />
-    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
-    <PackageReference Include="Microsoft.Windows.SDK.BuildTools.WinApp" Version="0.3.2" />
-    <PackageReference Include="PDFium.WindowsV2" Version="1.1.4" GeneratePathProperty="true" />
-    <PackageReference Include="System.Drawing.Common" Version="9.0.8" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools.WinApp" />
+    <PackageReference Include="System.Drawing.Common" />
   </ItemGroup>
 
   <PropertyGroup Condition="'$(DisableHasPackageAndPublishMenuAddedByProject)'!='true' and '$(EnableMsixTooling)'=='true'">
@@ -81,20 +117,51 @@
     <PublishAot>true</PublishAot>
     <SelfContained Condition="'$(Configuration)' == 'Release'">true</SelfContained>
   </PropertyGroup>
-  
-  <Target Name="SyncPdfiumBinary" BeforeTargets="PrepareForBuild">
-    <Copy
-      SourceFiles="$(PkgPDFium_WindowsV2)\build\pdfium_x64.dll"
-      DestinationFiles="runtimes\win-x64\native\pdfium.dll"
-      SkipUnchangedFiles="true"
-      Condition="Exists('$(PkgPDFium_WindowsV2)\build\pdfium_x64.dll')" />
+
+  <Target Name="CopyPdfWorkerBundle" AfterTargets="Build">
+    <ItemGroup>
+      <_PdfWorkerBundle Include="$(MSBuildProjectDirectory)\src\ElliePdf.Pdfium.Worker\bin\$(Platform)\$(Configuration)\$(TargetFramework)\$(RuntimeIdentifier)\**\*"
+                        Condition="'$(RuntimeIdentifier)' != ''" />
+      <_PdfWorkerBundle Include="$(MSBuildProjectDirectory)\src\ElliePdf.Pdfium.Worker\bin\$(Platform)\$(Configuration)\$(TargetFramework)\*"
+                        Condition="'$(RuntimeIdentifier)' == ''" />
+    </ItemGroup>
+    <Error Condition="'@(_PdfWorkerBundle)' == ''"
+           Text="The isolated PDF worker output was not produced for $(Platform) $(Configuration)." />
+    <MakeDir Directories="$(OutDir)PdfWorker" />
+    <Copy SourceFiles="@(_PdfWorkerBundle)"
+          DestinationFiles="@(_PdfWorkerBundle->'$(OutDir)PdfWorker\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
   </Target>
 
-  <ItemGroup>
-    <Content Include="runtimes\win-x64\native\pdfium.dll">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-      <IncludeInPublish>true</IncludeInPublish>
-      <TreatAsContent>true</TreatAsContent>
-    </Content>
+  <!-- Release packaging runs the worker's NativeAOT publish as a separate, deterministic
+       step because the worker is intentionally not a managed project reference.  The
+       publish target then carries that already-published payload into the app payload. -->
+  <PropertyGroup>
+    <PdfWorkerPublishDirectory Condition="'$(PdfWorkerPublishDirectory)' == ''">$(MSBuildProjectDirectory)\src\ElliePdf.Pdfium.Worker\bin\$(Platform)\$(Configuration)\$(TargetFramework)\$(RuntimeIdentifier)\publish</PdfWorkerPublishDirectory>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(GenerateAppxPackageOnBuild)' == 'true' and Exists('$(PdfWorkerPublishDirectory)')">
+    <AppxPackagePayload
+      Include="$(PdfWorkerPublishDirectory)\**\*"
+      Exclude="$(PdfWorkerPublishDirectory)\**\*.pdb">
+      <TargetPath>PdfWorker\%(RecursiveDir)%(Filename)%(Extension)</TargetPath>
+    </AppxPackagePayload>
   </ItemGroup>
+  <Target Name="CopyPdfWorkerBundleToPublish" AfterTargets="ComputeFilesToPublish" Condition="'$(RuntimeIdentifier)' != '' and '$(PublishAot)' == 'true'">
+    <ItemGroup>
+      <_PdfWorkerPublishFiles Include="$(PdfWorkerPublishDirectory)\**\*" Exclude="$(PdfWorkerPublishDirectory)\**\*.pdb" />
+    </ItemGroup>
+    <Error Condition="'@(_PdfWorkerPublishFiles)' == ''" Text="NativeAOT PDF worker publish output was not found: $(PdfWorkerPublishDirectory). Publish the worker before publishing the app." />
+    <Copy SourceFiles="@(_PdfWorkerPublishFiles)"
+          DestinationFiles="@(_PdfWorkerPublishFiles->'$(PublishDir)PdfWorker\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="ExcludePrivateSymbolsFromMsix"
+          BeforeTargets="_EnsurePdbCmfExeFullPath"
+          Condition="'$(AppxPackageIncludePrivateSymbols)' != 'true'">
+    <ItemGroup>
+      <PDBPayload Remove="@(PDBPayload)" />
+    </ItemGroup>
+  </Target>
+
 </Project>

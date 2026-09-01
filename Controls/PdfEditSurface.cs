@@ -374,14 +374,41 @@ public sealed partial class PdfEditSurface : Canvas
 
     private void AddOverlayChrome()
     {
-        Children.Add(_inkPreviewLine);
-        Children.Add(_inkPreview);
-        Children.Add(_shapePreview);
-        Children.Add(_eraserCursor);
-        Children.Add(_selectionAdorner);
-        Children.Add(_resizeHandle);
-        Children.Add(_textToolbar);
-        Children.Add(_styleToolbar);
+        PushUndo();
+        var text = new TextOverlay
+        {
+            X = canvasPoint.X / DisplayScale,
+            Y = canvasPoint.Y / DisplayScale,
+            Text = AppResources.Get("Reader_EditTextPlaceholder"),
+            Width = 160,
+            Height = 40
+        };
+
+        Overlay.TextItems.Add(text);
+        RenderOverlay();
+        SelectItem(SelectionKind.Text, text.Id);
+        NotifyOverlayChanged(pushUndo: false);
+
+        if (TryGetSelectedElement() is not { } selected)
+        {
+            return;
+        }
+
+        _dragMode = DragMode.Resize;
+        _isPlacingText = true;
+        _dragStart = canvasPoint;
+        _startWidth = selected.Width;
+        _startHeight = selected.Height;
+        if (pointer is not null)
+        {
+            CapturePointer(pointer);
+        }
+
+        if (selected is TextBox box)
+        {
+            box.Focus(FocusState.Programmatic);
+            box.SelectAll();
+        }
     }
 
     private void RenderOverlay()
@@ -2203,7 +2230,52 @@ public sealed partial class PdfEditSurface : Canvas
         }
     }
 
-    private static Button CreateToolbarButton(string text, RoutedEventHandler? click = null)
+    private void NotifyOverlayChanged(bool pushUndo = true)
+    {
+        OverlayChanged?.Invoke(this, CloneOverlay(Overlay));
+    }
+
+    private static PageOverlayState CloneOverlay(PageOverlayState source) =>
+        new()
+        {
+            InkStrokes = source.InkStrokes
+                .Select(stroke => new InkStrokeOverlay
+                {
+                    Id = stroke.Id,
+                    ColorHex = stroke.ColorHex,
+                    Thickness = stroke.Thickness,
+                    Points = stroke.Points.Select(point => new PointOverlay { X = point.X, Y = point.Y }).ToList()
+                })
+                .ToList(),
+            TextItems = source.TextItems
+                .Select(text => new TextOverlay
+                {
+                    Id = text.Id,
+                    X = text.X,
+                    Y = text.Y,
+                    Text = text.Text,
+                    FontSize = text.FontSize,
+                    Width = text.Width,
+                    Height = text.Height,
+                    ColorHex = text.ColorHex,
+                    IsBold = text.IsBold,
+                    IsItalic = text.IsItalic
+                })
+                .ToList(),
+            Signatures = source.Signatures
+                .Select(signature => new SignatureOverlay
+                {
+                    Id = signature.Id,
+                    X = signature.X,
+                    Y = signature.Y,
+                    ImageBase64 = signature.ImageBase64,
+                    Width = signature.Width,
+                    Height = signature.Height
+                })
+                .ToList()
+        };
+
+    private Button CreateToolbarButton(string text, RoutedEventHandler? click = null)
     {
         var button = new Button
         {

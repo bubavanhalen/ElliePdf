@@ -1,6 +1,10 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
+using ElliePdf.Domain.Documents;
 using ElliePdf.Helpers;
+using ElliePdf.Navigation;
+using ElliePdf.Pdf.Client;
+using ElliePdf.Pdf.Contracts;
 using ElliePdf.Services;
 using Microsoft.UI.Xaml.Controls;
 
@@ -12,41 +16,28 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
     private readonly IDocumentOpenService _documentOpenService;
     private readonly IDocumentTabService _tabService;
     private readonly IUserSettingsService _settingsService;
-    private readonly IDocumentSaveService _saveService;
-    private readonly IAnnotationStore _annotationStore;
+    private readonly AppNavigation _navigation;
     private readonly List<PdfDocumentSession> _sourceDocuments = [];
+    private readonly Dictionary<PageId, DocumentItemViewModel> _itemsById = [];
     private ObservableCollection<DocumentItemViewModel> _pages = [];
     private bool _isBusy;
     private bool _isStatusOpen;
     private string _statusMessage = string.Empty;
     private InfoBarSeverity _statusSeverity = InfoBarSeverity.Informational;
-    private int _statusVersion;
+    private OrganizerPagePlan _plan = OrganizerPagePlan.Empty;
 
     public DocumentCollectionViewModel(
         IPdfService pdfService,
         IDocumentOpenService documentOpenService,
         IDocumentTabService tabService,
         IUserSettingsService settingsService,
-        IDocumentSaveService saveService,
-        IAnnotationStore annotationStore)
+        AppNavigation navigation)
     {
         _pdfService = pdfService;
         _documentOpenService = documentOpenService;
         _tabService = tabService;
         _settingsService = settingsService;
-        _saveService = saveService;
-        _annotationStore = annotationStore;
-        _saveService.SessionReplaced += (_, args) => RemapSession(args.OldSession, args.NewSession);
-    }
-
-    /// <summary>
-    /// Annotations are held out of the document while a reader tab has it open, so a save started
-    /// from Organize has to put that tab's annotations back or they would be dropped.
-    /// </summary>
-    private Models.PageOverlayDocument? OverlaysFor(PdfDocumentSession session)
-    {
-        var tab = _tabService.Tabs.FirstOrDefault(item => ReferenceEquals(item.Session, session));
-        return tab is null ? null : _annotationStore.GetOverlayDocument(tab.Id);
+        _navigation = navigation;
     }
 
     public ObservableCollection<DocumentItemViewModel> Pages
@@ -81,6 +72,16 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
 
     public int SourceDocumentCount => _sourceDocuments.Count;
 
+    public long PlanRevision => _plan.Revision;
+
+    public OrganizerPagePlan Plan => _plan;
+
+    public bool CanUndo => _plan.CanUndo;
+
+    public bool CanRedo => _plan.CanRedo;
+
+    public bool HasPendingChanges => _plan.IsDirty;
+
     public event EventHandler<string>? MergeCompleted;
 
     public async Task ImportDocumentsAsync(
@@ -88,37 +89,79 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
         bool append = false,
         CancellationToken cancellationToken = default)
     {
+        if (!EnsureLabsEnabled())
+        {
+            return;
+        }
+
         if (filePaths.Count == 0)
         {
             return;
         }
 
-        if (!append)
-        {
-            await ClearDocumentsAsync(cancellationToken);
-        }
-
         IsBusy = true;
         DismissStatus();
+        var stagedDocuments = new List<PdfDocumentSession>();
+        var stagedItems = new List<DocumentItemViewModel>();
+        var stagedPages = new List<OrganizerPage>();
 
         try
         {
             foreach (var filePath in filePaths)
             {
-                await AddDocumentAsync(filePath, cancellationToken);
+                await AddDocumentAsync(
+                    filePath,
+                    stagedDocuments,
+                    stagedItems,
+                    stagedPages,
+                    cancellationToken);
             }
+
+            if (!append)
+            {
+                // All input work succeeded; commit the preview swap as one
+                // in-memory state transition and do not let cancellation
+                // leave a half-cleared working set.
+                await ClearDocumentsAsync(CancellationToken.None);
+            }
+
+            _sourceDocuments.AddRange(stagedDocuments);
+            stagedDocuments.Clear();
+            _plan = append
+                ? _plan.Insert(stagedPages, _plan.Pages.Length)
+                : OrganizerPagePlan.Create(stagedPages);
+            PublishPlan();
+            foreach (var item in stagedItems)
+            {
+                _itemsById[item.PageId] = item;
+                Pages.Add(item);
+            }
+
+            SetStatus(
+                append
+                    ? AppResources.Format("Organize_StatusAdded", filePaths.Count, Pages.Count)
+                    : AppResources.Format("Organize_StatusLoaded", Pages.Count, SourceDocumentCount),
+                InfoBarSeverity.Success);
         }
         catch (PdfiumDependencyException ex)
         {
+            await DisposeStagedDocumentsAsync(stagedDocuments);
             SetStatus(ex.Message, InfoBarSeverity.Error);
         }
         catch (InvalidOperationException ex)
         {
+            await DisposeStagedDocumentsAsync(stagedDocuments);
             SetStatus(ex.Message, InfoBarSeverity.Error);
         }
         catch (OperationCanceledException)
         {
-            // User cancelled the import; no status needed.
+            await DisposeStagedDocumentsAsync(stagedDocuments);
+            SetStatus(AppResources.Get("Organize_StatusImportCancelled"), InfoBarSeverity.Informational);
+        }
+        catch (Exception ex) when (ex is PdfResourceLimitException or PdfWorkerUnavailableException)
+        {
+            await DisposeStagedDocumentsAsync(stagedDocuments);
+            SetStatus(ex.Message, InfoBarSeverity.Error);
         }
         finally
         {
@@ -131,12 +174,67 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
         ArgumentNullException.ThrowIfNull(item);
         await _tabService.LoadDocumentSessionAsync(item.Document, cancellationToken);
         _tabService.CurrentPageIndex = item.PageIndex;
-        Navigation.AppNavigation.RequestWorkspace("read");
-        Navigation.AppNavigation.RequestReaderAtPage(item.PageIndex);
+        _navigation.RequestWorkspace("read");
+        _navigation.RequestReaderAtPage(item.PageIndex);
+    }
+
+    /// <summary>Stages and inserts documents at a plan boundary.</summary>
+    public async Task InsertDocumentsAsync(
+        IReadOnlyList<string> filePaths,
+        int index,
+        CancellationToken cancellationToken = default)
+    {
+        if (!EnsureLabsEnabled() || filePaths.Count == 0)
+            return;
+        ArgumentOutOfRangeException.ThrowIfNegative(index);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(index, Pages.Count);
+
+        IsBusy = true;
+        var stagedDocuments = new List<PdfDocumentSession>();
+        var stagedItems = new List<DocumentItemViewModel>();
+        var stagedPages = new List<OrganizerPage>();
+        try
+        {
+            foreach (var filePath in filePaths)
+            {
+                await AddDocumentAsync(filePath, stagedDocuments, stagedItems, stagedPages, cancellationToken);
+            }
+
+            _sourceDocuments.AddRange(stagedDocuments);
+            stagedDocuments.Clear();
+            _plan = _plan.Insert(stagedPages, index);
+            for (var offset = 0; offset < stagedItems.Count; offset++)
+            {
+                _itemsById[stagedItems[offset].PageId] = stagedItems[offset];
+                Pages.Insert(index + offset, stagedItems[offset]);
+            }
+            RefreshPageLabels();
+            PublishPlan();
+            SetStatus(AppResources.Format("Organize_StatusAdded", filePaths.Count, Pages.Count), InfoBarSeverity.Success);
+        }
+        catch (OperationCanceledException)
+        {
+            await DisposeStagedDocumentsAsync(stagedDocuments);
+            SetStatus(AppResources.Get("Organize_StatusImportCancelled"), InfoBarSeverity.Informational);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or NotSupportedException)
+        {
+            await DisposeStagedDocumentsAsync(stagedDocuments);
+            SetStatus(ex.Message, InfoBarSeverity.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
     }
 
     public async Task RotatePageAsync(DocumentItemViewModel? item, CancellationToken cancellationToken = default)
     {
+        if (!EnsureLabsEnabled())
+        {
+            return;
+        }
+
         if (item is null)
         {
             return;
@@ -146,9 +244,11 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
 
         try
         {
-            await _pdfService.RotatePageAsync(item.Document, item.PageIndex, 1, cancellationToken);
-            var thumbnailBytes = await _pdfService.RenderPageThumbnailAsync(item.Document, item.PageIndex, 240, 320, cancellationToken);
-            item.Thumbnail = await BitmapHelper.CreateBitmapAsync(thumbnailBytes);
+            cancellationToken.ThrowIfCancellationRequested();
+            _plan = _plan.Rotate(item.PageId);
+            item.Rotation = _plan.Pages.First(page => page.PageId == item.PageId).Rotation;
+            PublishPlan();
+            SetStatus(AppResources.Format("Organize_StatusRotated", item.DisplayName), InfoBarSeverity.Success);
         }
         catch (PdfiumDependencyException ex)
         {
@@ -157,6 +257,10 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
         catch (InvalidOperationException ex)
         {
             SetStatus(ex.Message, InfoBarSeverity.Error);
+        }
+        catch (OperationCanceledException)
+        {
+            SetStatus(AppResources.Get("Organize_StatusImportCancelled"), InfoBarSeverity.Informational);
         }
         finally
         {
@@ -166,6 +270,11 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
 
     public async Task DeletePageAsync(DocumentItemViewModel? item, CancellationToken cancellationToken = default)
     {
+        if (!EnsureLabsEnabled())
+        {
+            return;
+        }
+
         if (item is null)
         {
             return;
@@ -175,32 +284,13 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
 
         try
         {
-            await _pdfService.DeletePageAsync(item.Document, item.PageIndex, cancellationToken);
-
-            // Keep any reader tab's annotations aligned with the pages that remain.
-            foreach (var tab in _tabService.Tabs.Where(tab => ReferenceEquals(tab.Session, item.Document)))
-            {
-                _annotationStore.RemovePage(tab.Id, item.PageIndex);
-            }
-
-            var itemsInDocument = Pages
-                .Where(page => ReferenceEquals(page.Document, item.Document))
-                .OrderBy(page => page.PageIndex)
-                .ToList();
-
+            var deletedDisplayName = item.DisplayName;
+            cancellationToken.ThrowIfCancellationRequested();
+            _plan = _plan.Delete(item.PageId);
             Pages.Remove(item);
-
-            foreach (var remainingPage in itemsInDocument.Where(page => page.PageIndex > item.PageIndex))
-            {
-                remainingPage.PageIndex -= 1;
-                remainingPage.DisplayName = $"Page {remainingPage.PageIndex + 1}";
-            }
-
-            if (item.Document.PageCount == 0)
-            {
-                _sourceDocuments.Remove(item.Document);
-                await item.Document.DisposeAsync();
-            }
+            RefreshPageLabels();
+            PublishPlan();
+            SetStatus(AppResources.Format("Organize_StatusDeleted", deletedDisplayName), InfoBarSeverity.Warning);
         }
         catch (PdfiumDependencyException ex)
         {
@@ -209,6 +299,10 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
         catch (InvalidOperationException ex)
         {
             SetStatus(ex.Message, InfoBarSeverity.Error);
+        }
+        catch (OperationCanceledException)
+        {
+            SetStatus(AppResources.Get("Organize_StatusImportCancelled"), InfoBarSeverity.Informational);
         }
         finally
         {
@@ -218,115 +312,46 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
 
     public async Task SaveDocumentsAsync(CancellationToken cancellationToken = default)
     {
-        if (_sourceDocuments.Count == 0)
-        {
-            SetStatus("Import a PDF before saving.", InfoBarSeverity.Informational);
-            return;
-        }
-
-        if (_settingsService.Settings.ConfirmOrganizeSave)
-        {
-            var confirmed = await ConfirmOrganizeSaveAsync(cancellationToken);
-            if (!confirmed)
-            {
-                return;
-            }
-        }
-
-        IsBusy = true;
-
-        try
-        {
-            var saved = 0;
-            var failures = new List<string>();
-
-            foreach (var document in _sourceDocuments.ToArray())
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var sourcePath = document.SourcePath;
-                var result = await _saveService.SaveAsync(
-                    document,
-                    OverlaysFor(document),
-                    document.SourcePath,
-                    cancellationToken);
-
-                if (result.Session is null)
-                {
-                    // The handle is gone, so the pages backed by it can no longer be rendered.
-                    DropDocument(document);
-                }
-
-                if (result.Saved && result.Session is not null)
-                {
-                    saved++;
-                }
-                else
-                {
-                    failures.Add($"{Path.GetFileName(sourcePath)}: {result.ErrorMessage}");
-                }
-            }
-
-            if (failures.Count > 0)
-            {
-                SetStatus($"Could not save {string.Join("; ", failures)}", InfoBarSeverity.Error);
-            }
-            else
-            {
-                SetStatus($"Saved {saved} document(s).", InfoBarSeverity.Success);
-            }
-        }
-        catch (PdfiumDependencyException ex)
-        {
-            SetStatus(ex.Message, InfoBarSeverity.Error);
-        }
-        catch (InvalidOperationException ex)
-        {
-            SetStatus(ex.Message, InfoBarSeverity.Error);
-        }
-        finally
-        {
-            IsBusy = false;
-        }
-    }
-
-    /// <summary>Removes a document whose handle is no longer usable, along with its pages.</summary>
-    private void DropDocument(PdfDocumentSession document)
-    {
-        _sourceDocuments.RemoveAll(item => ReferenceEquals(item, document));
-
-        foreach (var page in Pages.Where(page => ReferenceEquals(page.Document, document)).ToArray())
-        {
-            Pages.Remove(page);
-        }
-    }
-
-    /// <summary>Swaps every reference to a replaced session after an in-place save.</summary>
-    private void RemapSession(PdfDocumentSession oldSession, PdfDocumentSession newSession)
-    {
-        if (ReferenceEquals(oldSession, newSession))
+        if (!EnsureLabsEnabled())
         {
             return;
         }
-
-        for (var index = 0; index < _sourceDocuments.Count; index++)
-        {
-            if (ReferenceEquals(_sourceDocuments[index], oldSession))
-            {
-                _sourceDocuments[index] = newSession;
-            }
-        }
-
-        foreach (var page in Pages.Where(page => ReferenceEquals(page.Document, oldSession)))
-        {
-            page.Document = newSession;
-        }
+        SetStatus(
+            AppResources.Get("Organize_StatusSaveAsRequired"),
+            InfoBarSeverity.Informational);
+        await Task.CompletedTask;
     }
+
+    /// <summary>Commits the current plan to a newly selected destination.</summary>
+    public Task SaveDocumentsAsAsync(string outputPath, CancellationToken cancellationToken = default) =>
+        MergeDocumentsAsync(outputPath, cancellationToken);
+
+    /// <summary>
+    /// Explicit advanced export that may replace one existing destination. The
+    /// destination version is captured and revalidated by the atomic store, so
+    /// a file changed after confirmation is reported as a conflict.
+    /// </summary>
+    public Task<string?> OverwriteDocumentsAsync(
+        string outputPath,
+        CancellationToken cancellationToken = default) =>
+        MergeDocumentsCoreAsync(outputPath, overwriteExisting: true, cancellationToken);
 
     public async Task<string?> MergeDocumentsAsync(string outputPath, CancellationToken cancellationToken = default)
+        => await MergeDocumentsCoreAsync(outputPath, overwriteExisting: false, cancellationToken);
+
+    private async Task<string?> MergeDocumentsCoreAsync(
+        string outputPath,
+        bool overwriteExisting,
+        CancellationToken cancellationToken)
     {
-        if (Pages.Count < 1)
+        if (!EnsureLabsEnabled())
         {
-            SetStatus("Import at least one page before merging.", InfoBarSeverity.Informational);
+            return null;
+        }
+
+        if (_plan.Pages.Length < 1)
+        {
+            SetStatus(AppResources.Get("Organize_StatusImportBeforeMerge"), InfoBarSeverity.Informational);
             return null;
         }
 
@@ -334,24 +359,32 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
 
         try
         {
-            // Sessions shared with a reader tab have had their annotations detached for editing, so
-            // put them back before exporting or the merged file would lose them.
-            await RestoreOverlaysForExportAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            var itemsById = Pages.ToDictionary(item => item.PageId);
+            var orderedPages = _plan.Pages
+                .Select(page =>
+                {
+                    if (!itemsById.TryGetValue(page.PageId, out var item))
+                        throw new InvalidOperationException("The Organizer preview is out of sync.");
 
-            var orderedPages = Pages
-                .Select(page => (page.Document, page.PageIndex))
-                .ToList();
+                    return new PdfExportPage(
+                        item.Document,
+                        page.SourcePageIndex,
+                        page.SourcePageId,
+                        page.SourceContentRevision,
+                        page.SourceStructureRevision,
+                        page.SourcePageContentRevision,
+                        page.Rotation);
+                })
+                .ToArray();
 
-            if (orderedPages.Count == 1 && _sourceDocuments.Count == 1)
-            {
-                await _pdfService.SaveDocumentAsync(_sourceDocuments[0], outputPath, cancellationToken);
-            }
-            else
-            {
-                await _pdfService.MergeOrderedPagesAsync(orderedPages, outputPath, cancellationToken);
-            }
+            await _pdfService.MergeOrderedPagesAsync(
+                orderedPages,
+                outputPath,
+                cancellationToken,
+                overwriteExisting);
 
-            // The export-complete dialog confirms the result; no toast needed.
+            SetStatus(AppResources.Format("Organize_StatusExported", orderedPages.Length, Path.GetFileName(outputPath)), InfoBarSeverity.Success);
             MergeCompleted?.Invoke(this, outputPath);
             return outputPath;
         }
@@ -363,6 +396,16 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
         catch (InvalidOperationException ex)
         {
             SetStatus(ex.Message, InfoBarSeverity.Error);
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            SetStatus(ex.Message, InfoBarSeverity.Error);
+            return null;
+        }
+        catch (OperationCanceledException)
+        {
+            SetStatus(AppResources.Get("Organize_StatusExportCancelled"), InfoBarSeverity.Informational);
             return null;
         }
         finally
@@ -400,28 +443,70 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
 
     public void DismissStatus() => IsStatusOpen = false;
 
+    /// <summary>Discards the in-memory plan without writing any PDF.</summary>
+    public Task CancelAsync() => ClearDocumentsAsync(CancellationToken.None);
+
     public async ValueTask DisposeAsync() => await ClearDocumentsAsync();
 
-    private async Task AddDocumentAsync(string filePath, CancellationToken cancellationToken)
+    private async Task AddDocumentAsync(
+        string filePath,
+        ICollection<PdfDocumentSession> stagedDocuments,
+        ICollection<DocumentItemViewModel> stagedItems,
+        ICollection<OrganizerPage> stagedPages,
+        CancellationToken cancellationToken)
     {
         var document = await _documentOpenService.OpenAsync(filePath, cancellationToken);
-        _sourceDocuments.Add(document);
-
-        for (var pageIndex = 0; pageIndex < document.PageCount; pageIndex++)
+        stagedDocuments.Add(document);
+        try
         {
-            var thumbnailBytes = await _pdfService.RenderPageThumbnailAsync(document, pageIndex, 240, 320, cancellationToken);
-            var item = new DocumentItemViewModel(document, filePath, pageIndex)
-            {
-                Thumbnail = await BitmapHelper.CreateBitmapAsync(thumbnailBytes)
-            };
+            if (document.EngineSession is not IPdfPageMutationSession mutable)
+                throw new NotSupportedException("This PDF session cannot provide stable Organizer page identities.");
 
-            Pages.Add(item);
+            var snapshot = mutable.Snapshot;
+            for (var pageIndex = 0; pageIndex < document.PageCount; pageIndex++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var metadata = await document.EngineSession
+                    .GetPageMetadataAsync(pageIndex, cancellationToken);
+                var thumbnailBytes = await _pdfService
+                    .RenderPageThumbnailAsync(document, pageIndex, 240, 320, cancellationToken);
+                var item = new DocumentItemViewModel(
+                    document,
+                    filePath,
+                    pageIndex,
+                    metadata.Id,
+                    metadata.Geometry.Rotation)
+                {
+                    Thumbnail = await BitmapHelper.CreateBitmapAsync(thumbnailBytes)
+                };
+
+                stagedItems.Add(item);
+                stagedPages.Add(new OrganizerPage(
+                    snapshot.Id,
+                    metadata.Id,
+                    filePath,
+                    pageIndex,
+                    metadata.Geometry.Rotation,
+                    metadata.Label,
+                    snapshot.ContentRevision,
+                    snapshot.StructureRevision,
+                    metadata.ContentRevision));
+            }
+        }
+        catch
+        {
+            stagedDocuments.Remove(document);
+            await document.DisposeAsync();
+            throw;
         }
     }
 
     private async Task ClearDocumentsAsync(CancellationToken cancellationToken = default)
     {
-        var tabSessions = _tabService.Tabs.Select(tab => tab.Session).ToHashSet();
+        var tabSessions = _tabService.Tabs
+            .Select(static tab => tab.OpenSession)
+            .OfType<PdfDocumentSession>()
+            .ToHashSet();
         foreach (var sourceDocument in _sourceDocuments.ToArray())
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -432,8 +517,123 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
         }
 
         _sourceDocuments.Clear();
+        _itemsById.Clear();
         Pages.Clear();
+        _plan = OrganizerPagePlan.Empty;
+        PublishPlan();
         DismissStatus();
+    }
+
+    private async Task DisposeStagedDocumentsAsync(IEnumerable<PdfDocumentSession> documents)
+    {
+        foreach (var document in documents.ToArray())
+        {
+            await document.DisposeAsync();
+        }
+    }
+
+    private void PublishPlan()
+    {
+        OnPropertyChanged(nameof(PlanRevision));
+        OnPropertyChanged(nameof(Plan));
+        OnPropertyChanged(nameof(CanUndo));
+        OnPropertyChanged(nameof(CanRedo));
+        OnPropertyChanged(nameof(HasPendingChanges));
+    }
+
+    private void RefreshPageLabels()
+    {
+        for (var index = 0; index < Pages.Count; index++)
+        {
+            Pages[index].PageIndex = _plan.Pages[index].SourcePageIndex;
+            Pages[index].DisplayName = AppResources.Format("Organize_PageName", index + 1);
+        }
+    }
+
+    public void ReorderPage(DocumentItemViewModel? item, int targetIndex)
+    {
+        if (!EnsureLabsEnabled() || item is null)
+            return;
+
+        try
+        {
+            _plan = _plan.Reorder(item.PageId, targetIndex);
+            var ordered = _plan.Pages
+                .Select(page => Pages.First(candidate => candidate.PageId == page.PageId))
+                .ToArray();
+            Pages.Clear();
+            foreach (var page in ordered)
+                Pages.Add(page);
+            RefreshPageLabels();
+            PublishPlan();
+        }
+        catch (InvalidOperationException ex)
+        {
+            SetStatus(ex.Message, InfoBarSeverity.Error);
+        }
+    }
+
+    public void DuplicatePage(DocumentItemViewModel? item)
+    {
+        if (!EnsureLabsEnabled() || item is null)
+            return;
+
+        try
+        {
+            var source = _plan.Pages.First(page => page.PageId == item.PageId);
+            _plan = _plan.Duplicate(item.PageId);
+            var duplicatePage = _plan.Pages.First(page =>
+                page.PageId != source.PageId
+                && page.DocumentId == source.DocumentId
+                && page.SourcePageIndex == source.SourcePageIndex
+                && !Pages.Any(candidate => candidate.PageId == page.PageId));
+            var duplicate = new DocumentItemViewModel(
+                item.Document,
+                item.FilePath,
+                item.PageIndex,
+                duplicatePage.PageId,
+                duplicatePage.Rotation)
+            {
+                Thumbnail = item.Thumbnail,
+                SourceLabel = item.SourceLabel
+            };
+            _itemsById[duplicate.PageId] = duplicate;
+            var position = Pages.IndexOf(item) + 1;
+            Pages.Insert(position, duplicate);
+            RefreshPageLabels();
+            PublishPlan();
+        }
+        catch (InvalidOperationException ex)
+        {
+            SetStatus(ex.Message, InfoBarSeverity.Error);
+        }
+    }
+
+    public void Undo() => RestoreHistory(redo: false);
+
+    public void Redo() => RestoreHistory(redo: true);
+
+    /// <summary>Returns two immutable previews at a page boundary without changing this plan.</summary>
+    public (OrganizerPagePlan Before, OrganizerPagePlan After) SplitPlan(int index) => _plan.SplitAt(index);
+
+    private void RestoreHistory(bool redo)
+    {
+        if (!EnsureLabsEnabled())
+            return;
+        var next = redo ? _plan.Redo() : _plan.Undo();
+        if (ReferenceEquals(next, _plan))
+            return;
+        _plan = next;
+        Pages.Clear();
+        foreach (var page in _plan.Pages)
+        {
+            if (!_itemsById.TryGetValue(page.PageId, out var item))
+                continue;
+            item.Rotation = page.Rotation;
+            Pages.Add(item);
+        }
+        RefreshPageLabels();
+        PublishPlan();
     }
 
     private void SetStatus(string message, InfoBarSeverity severity)
@@ -459,28 +659,17 @@ public sealed class DocumentCollectionViewModel : ObservableObject, IAsyncDispos
         }
     }
 
-    private static async Task<bool> ConfirmOrganizeSaveAsync(CancellationToken cancellationToken)
+    private bool EnsureLabsEnabled()
     {
-        var xamlRoot = GetXamlRoot();
-        if (xamlRoot is null)
+        if (_settingsService.Settings.EnableLabs)
         {
-            return false;
+            return true;
         }
 
-        var dialog = new ContentDialog
-        {
-            Title = "Save changes to original files?",
-            Content = "This will overwrite the original PDF files with your organize changes. This cannot be undone.",
-            PrimaryButtonText = "Save",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Close,
-            XamlRoot = xamlRoot
-        };
-
-        cancellationToken.ThrowIfCancellationRequested();
-        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+        SetStatus(
+            AppResources.Get("Organize_StatusLabsDisabled"),
+            InfoBarSeverity.Informational);
+        return false;
     }
 
-    private static Microsoft.UI.Xaml.XamlRoot? GetXamlRoot() =>
-        App.Window.Content is Microsoft.UI.Xaml.FrameworkElement root ? root.XamlRoot : null;
 }

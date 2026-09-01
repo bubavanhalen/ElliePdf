@@ -1,0 +1,13 @@
+<Project>
+  <Target Name="ValidateElliePdfArchitecture" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(RuntimeIdentifier)' != '' and '$(RuntimeIdentifier)' != 'win-x64' and '$(RuntimeIdentifier)' != 'win-arm64'" Text="Unsupported RuntimeIdentifier '$(RuntimeIdentifier)'. ElliePdf supports only win-x64 and win-arm64." />
+    <Error Condition="'$(TargetPlatformMinVersion)' != '10.0.26100.0'" Text="ElliePdf requires Windows 11 build 26100 (TargetPlatformMinVersion=10.0.26100.0)." />
+  </Target>
+
+  <Target Name="ValidatePdfiumNativeAssetForPublish" BeforeTargets="ComputeFilesToPublish;Publish">
+    <PropertyGroup>
+      <PdfiumNativeAsset Condition="'$(MSBuildProjectName)' == 'ElliePdf' and '$(RuntimeIdentifier)' != ''">$(NuGetPackageRoot)bblanchon.pdfium.win32\$(PdfiumNativeVersion)\runtimes\$(RuntimeIdentifier)\native\pdfium.dll</PdfiumNativeAsset>
+    </PropertyGroup>
+    <Error Condition="'$(MSBuildProjectName)' == 'ElliePdf' and '$(RuntimeIdentifier)' != '' and !Exists('$(PdfiumNativeAsset)')" Text="PDFium package asset missing for $(RuntimeIdentifier): $(PdfiumNativeAsset)." />
+  </Target>
+</Project>

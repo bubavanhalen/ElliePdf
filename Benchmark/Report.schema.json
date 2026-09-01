@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ElliePdf benchmark report",
+  "type": "object",
+  "required": ["schemaVersion", "runId", "machineClass", "powerMode", "temperature", "startedUtc", "metrics"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "runId": { "type": "string", "pattern": "^[a-f0-9]{32}$" },
+    "machineClass": { "type": "string", "minLength": 1 },
+    "powerMode": { "type": "string", "minLength": 1 },
+    "temperature": { "enum": ["cold", "warm", "unspecified"] },
+    "startedUtc": { "type": "string", "format": "date-time" },
+    "metrics": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/metric" } }
+  },
+  "$defs": {
+    "metric": {
+      "type": "object", "required": ["name", "unit", "statistics"], "additionalProperties": false,
+      "properties": { "name": { "type": "string" }, "unit": { "type": "string" }, "statistics": { "$ref": "#/$defs/statistics" } }
+    },
+    "statistics": {
+      "type": "object", "required": ["sampleCount", "median", "p95", "p99", "maximum", "bootstrap95"], "additionalProperties": false,
+      "properties": {
+        "sampleCount": { "type": "integer", "minimum": 30 }, "median": { "type": "number" }, "p95": { "type": "number" }, "p99": { "type": "number" }, "maximum": { "type": "number" },
+        "bootstrap95": { "type": "object", "required": ["lower", "upper", "width"], "additionalProperties": false, "properties": { "lower": { "type": "number" }, "upper": { "type": "number" }, "width": { "type": "number" } } },
+        "isStable": { "type": "boolean" }
+      }
+    }
+  }
+}

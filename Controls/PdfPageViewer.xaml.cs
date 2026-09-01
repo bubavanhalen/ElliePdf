@@ -3,19 +3,37 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Shapes;
+using ElliePdf.ViewModels;
+using Windows.Foundation;
+using ElliePdf.Semantics;
 
 namespace ElliePdf.Controls;
 
 public sealed partial class PdfPageViewer : UserControl
 {
-    public static readonly DependencyProperty PageSourceProperty =
+    private readonly CompositeTransform _pinchTransform = new();
+    private bool _pinchCenterInitialized;
+    public static readonly DependencyProperty PageTilesProperty =
         DependencyProperty.Register(
-            nameof(PageSource),
-            typeof(BitmapImage),
+            nameof(PageTiles),
+            typeof(object),
             typeof(PdfPageViewer),
-            new PropertyMetadata(null, OnPageSourceChanged));
+            new PropertyMetadata(null, OnPageTilesChanged));
+
+    public static readonly DependencyProperty PageDisplayWidthProperty =
+        DependencyProperty.Register(
+            nameof(PageDisplayWidth),
+            typeof(double),
+            typeof(PdfPageViewer),
+            new PropertyMetadata(1d, OnPageGeometryChanged));
+
+    public static readonly DependencyProperty PageDisplayHeightProperty =
+        DependencyProperty.Register(
+            nameof(PageDisplayHeight),
+            typeof(double),
+            typeof(PdfPageViewer),
+            new PropertyMetadata(1d, OnPageGeometryChanged));
 
     public static readonly DependencyProperty IsChromelessProperty =
         DependencyProperty.Register(
@@ -59,20 +77,49 @@ public sealed partial class PdfPageViewer : UserControl
             typeof(PdfPageViewer),
             new PropertyMetadata(1.0, OnSearchHighlightsChanged));
 
+    public static readonly DependencyProperty SemanticPageProperty = DependencyProperty.Register(
+        nameof(SemanticPage), typeof(object), typeof(PdfPageViewer),
+        new PropertyMetadata(null, OnSemanticProjectionChanged));
+
+    public static readonly DependencyProperty CanCopyProperty = DependencyProperty.Register(
+        nameof(CanCopy), typeof(bool), typeof(PdfPageViewer),
+        new PropertyMetadata(false, OnSemanticProjectionChanged));
+
     public PdfPageViewer()
     {
         InitializeComponent();
         Loaded += OnLoaded;
         SizeChanged += OnSizeChanged;
         PageScrollViewer.PointerWheelChanged += OnPointerWheelChanged;
-        PageImage.SizeChanged += (_, _) => UpdateSearchHighlights();
+        PageScrollViewer.ViewChanged += OnViewChanged;
+        PageHost.RenderTransform = _pinchTransform;
+        PageHost.ManipulationMode = ManipulationModes.Scale;
+        PageHost.ManipulationStarting += OnPinchStarting;
+        PageHost.ManipulationDelta += OnPinchDelta;
+        PageHost.ManipulationCompleted += OnPinchCompleted;
+        TileSurface.SizeChanged += (_, _) => UpdateSearchHighlights();
+        SemanticOverlay.LinkInvoked += (_, args) => LinkInvoked?.Invoke(this, args);
+        SemanticOverlay.FormValueCommitted += (_, args) => FormValueCommitted?.Invoke(this, args);
+        SemanticOverlay.PushButtonInvoked += (_, args) => PushButtonInvoked?.Invoke(this, args);
         ApplyChromeless();
     }
 
-    public BitmapImage? PageSource
+    public IEnumerable<RenderedTileViewModel>? PageTiles
     {
-        get => (BitmapImage?)GetValue(PageSourceProperty);
-        set => SetValue(PageSourceProperty, value);
+        get => GetValue(PageTilesProperty) as IEnumerable<RenderedTileViewModel>;
+        set => SetValue(PageTilesProperty, value);
+    }
+
+    public double PageDisplayWidth
+    {
+        get => (double)GetValue(PageDisplayWidthProperty);
+        set => SetValue(PageDisplayWidthProperty, value);
+    }
+
+    public double PageDisplayHeight
+    {
+        get => (double)GetValue(PageDisplayHeightProperty);
+        set => SetValue(PageDisplayHeightProperty, value);
     }
 
     public bool IsChromeless
@@ -111,6 +158,18 @@ public sealed partial class PdfPageViewer : UserControl
         set => SetValue(DisplayScaleProperty, value);
     }
 
+    public SemanticPageSnapshot? SemanticPage
+    {
+        get => GetValue(SemanticPageProperty) as SemanticPageSnapshot;
+        set => SetValue(SemanticPageProperty, value);
+    }
+
+    public bool CanCopy
+    {
+        get => (bool)GetValue(CanCopyProperty);
+        set => SetValue(CanCopyProperty, value);
+    }
+
     public PdfEditSurface EditSurface => PageEditSurface;
 
     public event EventHandler<double>? ViewportWidthChanged;
@@ -121,13 +180,89 @@ public sealed partial class PdfPageViewer : UserControl
 
     public event EventHandler? ZoomOutRequested;
 
+    public event EventHandler<PageZoomRequestEventArgs>? ZoomRequested;
+
+    public event EventHandler<PageZoomFactorRequestEventArgs>? ZoomFactorRequested;
+
     public event EventHandler? PagePointerPressed;
 
-    private static void OnPageSourceChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    public event EventHandler<PageViewport>? ViewportChanged;
+
+    public event EventHandler<SemanticLinkInvokedEventArgs>? LinkInvoked;
+
+    public event EventHandler<SemanticFormValueEventArgs>? FormValueCommitted;
+
+    public event EventHandler<SemanticPushButtonInvokedEventArgs>? PushButtonInvoked;
+
+    public bool ScrollByViewport(bool forward, bool disableAnimation)
+    {
+        if (PageScrollViewer.ScrollableHeight <= 0)
+        {
+            return false;
+        }
+
+        var distance = Math.Max(44, PageScrollViewer.ViewportHeight * 0.9);
+        var target = Math.Clamp(
+            PageScrollViewer.VerticalOffset + (forward ? distance : -distance),
+            0,
+            PageScrollViewer.ScrollableHeight);
+        PageScrollViewer.ChangeView(null, target, null, disableAnimation);
+        return true;
+    }
+
+    public void ScrollToEdge(bool end, bool disableAnimation) =>
+        PageScrollViewer.ChangeView(
+            null,
+            end ? PageScrollViewer.ScrollableHeight : 0,
+            null,
+            disableAnimation);
+
+    public PageZoomAnchor CaptureZoomAnchor(Point focalPoint)
+    {
+        var origin = PageHost.TransformToVisual(PageScrollViewer).TransformPoint(new Point());
+        return new PageZoomAnchor(
+            PageDisplayWidth <= 0 ? 0.5 : Math.Clamp((focalPoint.X - origin.X) / PageDisplayWidth, 0, 1),
+            PageDisplayHeight <= 0 ? 0.5 : Math.Clamp((focalPoint.Y - origin.Y) / PageDisplayHeight, 0, 1),
+            focalPoint);
+    }
+
+    public void RestoreZoomAnchor(PageZoomAnchor anchor, bool disableAnimation = true)
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            var origin = PageHost.TransformToVisual(PageScrollViewer).TransformPoint(new Point());
+            var pageX = anchor.NormalizedX * PageDisplayWidth;
+            var pageY = anchor.NormalizedY * PageDisplayHeight;
+            var deltaX = origin.X + pageX - anchor.FocalPoint.X;
+            var deltaY = origin.Y + pageY - anchor.FocalPoint.Y;
+            PageScrollViewer.ChangeView(
+                Math.Clamp(PageScrollViewer.HorizontalOffset + deltaX, 0, PageScrollViewer.ScrollableWidth),
+                Math.Clamp(PageScrollViewer.VerticalOffset + deltaY, 0, PageScrollViewer.ScrollableHeight),
+                null,
+                disableAnimation);
+            ReportViewportSize();
+        });
+    }
+
+    private static void OnPageTilesChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         if (d is PdfPageViewer viewer)
         {
-            viewer.PageImage.Source = e.NewValue as BitmapImage;
+            viewer.TileSurface.Tiles = e.NewValue as IEnumerable<RenderedTileViewModel>;
+        }
+    }
+
+    private static void OnPageGeometryChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is PdfPageViewer viewer)
+        {
+            var width = Math.Max(1, viewer.PageDisplayWidth);
+            var height = Math.Max(1, viewer.PageDisplayHeight);
+            viewer.PageHost.Width = width;
+            viewer.PageHost.Height = height;
+            viewer.TileSurface.Width = width;
+            viewer.TileSurface.Height = height;
+            viewer.DispatcherQueue.TryEnqueue(viewer.ReportViewportSize);
         }
     }
 
@@ -161,7 +296,18 @@ public sealed partial class PdfPageViewer : UserControl
         if (d is PdfPageViewer viewer)
         {
             viewer.UpdateSearchHighlights();
+            viewer.SemanticOverlay.PageHeightPoints = viewer.PageHeightPoints;
+            viewer.SemanticOverlay.DisplayScale = viewer.DisplayScale;
         }
+    }
+
+    private static void OnSemanticProjectionChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is not PdfPageViewer viewer) return;
+        viewer.SemanticOverlay.SemanticPage = viewer.SemanticPage;
+        viewer.SemanticOverlay.CanCopy = viewer.CanCopy;
+        viewer.SemanticOverlay.PageHeightPoints = viewer.PageHeightPoints;
+        viewer.SemanticOverlay.DisplayScale = viewer.DisplayScale;
     }
 
     private void ApplyChromeless()
@@ -177,9 +323,9 @@ public sealed partial class PdfPageViewer : UserControl
         }
 
         PageChrome.Padding = new Thickness(24);
-        PageChrome.Background = (Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"];
+        PageChrome.Background = (Brush)Microsoft.UI.Xaml.Application.Current.Resources["CardBackgroundFillColorDefaultBrush"];
         PageChrome.CornerRadius = new CornerRadius(4);
-        PageScrollViewer.Background = (Brush)Application.Current.Resources["LayerFillColorDefaultBrush"];
+        PageScrollViewer.Background = (Brush)Microsoft.UI.Xaml.Application.Current.Resources["LayerFillColorDefaultBrush"];
         ApplyContentInset();
     }
 
@@ -212,6 +358,29 @@ public sealed partial class PdfPageViewer : UserControl
         var height = Math.Max(0, PageScrollViewer.ActualHeight - chromePadding);
         ViewportWidthChanged?.Invoke(this, width);
         ViewportHeightChanged?.Invoke(this, height);
+        var viewport = GetPageViewport();
+        if (viewport.Width > 0 && viewport.Height > 0)
+        {
+            ViewportChanged?.Invoke(this, viewport);
+        }
+    }
+
+    private void OnViewChanged(object? sender, ScrollViewerViewChangedEventArgs e) => ReportViewportSize();
+
+    private PageViewport GetPageViewport()
+    {
+        if (PageDisplayWidth <= 0 || PageDisplayHeight <= 0
+            || PageScrollViewer.ViewportWidth <= 0 || PageScrollViewer.ViewportHeight <= 0)
+        {
+            return new PageViewport(0, 0, 1, 1);
+        }
+
+        var origin = PageHost.TransformToVisual(PageScrollViewer).TransformPoint(new Point());
+        var x = Math.Clamp(-origin.X, 0, PageDisplayWidth);
+        var y = Math.Clamp(-origin.Y, 0, PageDisplayHeight);
+        var width = Math.Max(1, Math.Min(PageDisplayWidth - x, PageScrollViewer.ViewportWidth));
+        var height = Math.Max(1, Math.Min(PageDisplayHeight - y, PageScrollViewer.ViewportHeight));
+        return new PageViewport(x, y, width, height);
     }
 
     private void OnPointerWheelChanged(object sender, PointerRoutedEventArgs e)
@@ -222,18 +391,66 @@ public sealed partial class PdfPageViewer : UserControl
             var ctrl = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control);
             if (ctrl.HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down))
             {
-                if (properties.MouseWheelDelta > 0)
+                var focalPoint = e.GetCurrentPoint(PageScrollViewer).Position;
+                if (ZoomRequested is not null)
                 {
-                    ZoomInRequested?.Invoke(this, EventArgs.Empty);
+                    ZoomRequested.Invoke(
+                        this,
+                        new PageZoomRequestEventArgs(properties.MouseWheelDelta > 0, focalPoint));
                 }
                 else
                 {
-                    ZoomOutRequested?.Invoke(this, EventArgs.Empty);
+                    if (properties.MouseWheelDelta > 0)
+                    {
+                        ZoomInRequested?.Invoke(this, EventArgs.Empty);
+                    }
+                    else
+                    {
+                        ZoomOutRequested?.Invoke(this, EventArgs.Empty);
+                    }
                 }
 
                 e.Handled = true;
             }
         }
+    }
+
+    private void OnPinchStarting(object sender, ManipulationStartingRoutedEventArgs e)
+    {
+        e.Mode = ManipulationModes.Scale;
+        _pinchCenterInitialized = false;
+    }
+
+    private void OnPinchDelta(object sender, ManipulationDeltaRoutedEventArgs e)
+    {
+        if (!_pinchCenterInitialized)
+        {
+            _pinchTransform.CenterX = e.Position.X;
+            _pinchTransform.CenterY = e.Position.Y;
+            _pinchCenterInitialized = true;
+        }
+
+        var scale = Math.Clamp(e.Cumulative.Scale, 0.1, 10.0);
+        _pinchTransform.ScaleX = scale;
+        _pinchTransform.ScaleY = scale;
+        e.Handled = true;
+    }
+
+    private void OnPinchCompleted(object sender, ManipulationCompletedRoutedEventArgs e)
+    {
+        var scale = Math.Clamp(e.Cumulative.Scale, 0.1, 10.0);
+        var focalPoint = PageHost.TransformToVisual(PageScrollViewer).TransformPoint(e.Position);
+        if (Math.Abs(scale - 1.0) >= 0.01)
+        {
+            ZoomFactorRequested?.Invoke(
+                this,
+                new PageZoomFactorRequestEventArgs(scale, focalPoint));
+        }
+
+        _pinchTransform.ScaleX = 1;
+        _pinchTransform.ScaleY = 1;
+        _pinchCenterInitialized = false;
+        e.Handled = true;
     }
 
     private void UpdateSearchHighlights()
@@ -250,9 +467,9 @@ public sealed partial class PdfPageViewer : UserControl
         foreach (var rect in SearchHighlights)
         {
             var left = rect.Left * DisplayScale;
-            var top = (PageHeightPoints - rect.Top) * DisplayScale;
+            var top = (PageHeightPoints - rect.Bottom) * DisplayScale;
             var width = Math.Max(1, (rect.Right - rect.Left) * DisplayScale);
-            var height = Math.Max(1, (rect.Top - rect.Bottom) * DisplayScale);
+            var height = Math.Max(1, (rect.Bottom - rect.Top) * DisplayScale);
 
             SearchHighlightCanvas.Children.Add(new Rectangle
             {
@@ -267,4 +484,18 @@ public sealed partial class PdfPageViewer : UserControl
             Canvas.SetTop(SearchHighlightCanvas.Children[^1], top);
         }
     }
+}
+
+public readonly record struct PageZoomAnchor(double NormalizedX, double NormalizedY, Point FocalPoint);
+
+public sealed class PageZoomRequestEventArgs(bool zoomIn, Point focalPoint) : EventArgs
+{
+    public bool ZoomIn { get; } = zoomIn;
+    public Point FocalPoint { get; } = focalPoint;
+}
+
+public sealed class PageZoomFactorRequestEventArgs(double factor, Point focalPoint) : EventArgs
+{
+    public double Factor { get; } = factor;
+    public Point FocalPoint { get; } = focalPoint;
 }

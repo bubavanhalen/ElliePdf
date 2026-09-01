@@ -5,7 +5,7 @@ namespace ElliePdf.Services;
 
 [JsonSerializable(typeof(List<string>))]
 [JsonSerializable(typeof(PageOverlayDocument))]
-[JsonSerializable(typeof(AnnotationPayload))]
+[JsonSerializable(typeof(RecoveryEnvelope))]
 [JsonSerializable(typeof(UserSettings))]
 internal sealed partial class ElliePdfJsonContext : JsonSerializerContext
 {

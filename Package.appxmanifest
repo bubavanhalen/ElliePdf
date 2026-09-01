@@ -2,7 +2,6 @@
 
 <Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
-  xmlns:mp="http://schemas.microsoft.com/appx/2014/phone/manifest"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
   xmlns:uap18="http://schemas.microsoft.com/appx/manifest/uap/windows10/18"
@@ -10,20 +9,18 @@
 
   <Identity
     Name="4CA650B6-56EA-4FD0-963D-286139752A0B"
-    Publisher="CN=AppPublisher"
+    Publisher="CN=ElliePdf Development"
     Version="1.0.0.0" />
 
-  <mp:PhoneIdentity PhoneProductId="4CA650B6-56EA-4FD0-963D-286139752A0B" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
-
   <Properties>
-    <DisplayName>ElliePdf</DisplayName>
-    <PublisherDisplayName>AppPublisher</PublisherDisplayName>
+    <DisplayName>ms-resource:App_Name</DisplayName>
+    <PublisherDisplayName>ms-resource:App_Publisher</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
 
   <Dependencies>
-    <TargetDeviceFamily Name="Windows.Universal" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26226.0" />
-    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26226.0" />
+    <TargetDeviceFamily Name="Windows.Universal" MinVersion="10.0.26100.0" MaxVersionTested="10.0.26100.0" />
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.26100.0" MaxVersionTested="10.0.26100.0" />
   </Dependencies>
 
   <Resources>
@@ -35,8 +32,8 @@
       Executable="$targetnametoken$.exe"
       EntryPoint="$targetentrypoint$" >
       <uap:VisualElements
-        DisplayName="Ellie PDF"
-        Description="ElliePdf"
+        DisplayName="ms-resource:App_Name"
+        Description="ms-resource:App_Description"
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png">
@@ -46,7 +43,7 @@
       <Extensions>
         <uap:Extension Category="windows.fileTypeAssociation">
           <uap:FileTypeAssociation Name="pdf">
-            <uap:DisplayName>ElliePdf PDF Document</uap:DisplayName>
+            <uap:DisplayName>ms-resource:App_PdfAssociation</uap:DisplayName>
             <uap:Logo>Assets\Square44x44Logo.png</uap:Logo>
             <uap:SupportedFileTypes>
               <uap:FileType>.pdf</uap:FileType>

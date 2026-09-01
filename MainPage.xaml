@@ -8,48 +8,73 @@
     xmlns:local="using:ElliePdf"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     Background="Transparent"
+    FlowDirection="{x:Bind UiFlowDirection, Mode=OneTime}"
+    SizeChanged="MainPage_SizeChanged"
     mc:Ignorable="d">
 
-    <Grid x:Name="RootGrid" Background="Transparent">
-        <!--  Content fills the window edge-to-edge; pages manage their own top inset  -->
-        <Frame
-            x:Name="ContentFrame"
-            AutomationProperties.AutomationId="ContentFrame"
-            Background="Transparent" />
+    <Grid Background="Transparent">
+        <NavigationView
+            x:Name="NavView"
+            AutomationProperties.AutomationId="NavView"
+            AlwaysShowHeader="False"
+            Background="Transparent"
+            IsBackButtonVisible="Collapsed"
+            IsPaneOpen="False"
+            IsPaneToggleButtonVisible="False"
+            IsTitleBarAutoPaddingEnabled="False"
+            PaneDisplayMode="LeftMinimal"
+            SelectionChanged="NavView_SelectionChanged">
+            <NavigationView.Resources>
+                <SolidColorBrush x:Key="NavigationViewDefaultPaneBackground" Color="Transparent" />
+                <Thickness x:Key="NavigationViewContentGridBorderThickness">0</Thickness>
+            </NavigationView.Resources>
+            <NavigationView.PaneHeader>
+                <Border Height="48" />
+            </NavigationView.PaneHeader>
+            <NavigationView.MenuItems>
+                <NavigationViewItem x:Uid="MainPage_Read" AutomationProperties.AutomationId="NavItemRead" Icon="Document" Tag="read" />
+                <NavigationViewItem x:Name="OrganizeNavItem" x:Uid="MainPage_Organize" AutomationProperties.AutomationId="NavItemOrganize" Icon="Library" Tag="organize" />
+                <NavigationViewItem x:Uid="MainPage_Settings" AutomationProperties.AutomationId="NavItemSettings" Icon="Setting" Tag="settings" />
+            </NavigationView.MenuItems>
+            <Frame x:Name="ContentFrame" AutomationProperties.AutomationId="ContentFrame" Background="Transparent" />
+        </NavigationView>
 
-        <!--  ═══════════ Custom title bar ═══════════  -->
-        <Grid
-            x:Name="AppTitleBar"
-            Height="48"
-            Canvas.ZIndex="100"
+        <Border
+            x:Name="WindowDragSurface"
+            x:Uid="MainPage_DragRegion"
+            Width="48"
+            Height="44"
+            Margin="0,0,152,0"
+            Canvas.ZIndex="40"
+            Background="Transparent"
+            HorizontalAlignment="Right"
+            VerticalAlignment="Top" />
+
+        <StackPanel
+            Margin="8,6,0,0"
+            Canvas.ZIndex="50"
+            HorizontalAlignment="Left"
+            Orientation="Horizontal"
+            Spacing="4"
             VerticalAlignment="Top">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" MinWidth="48" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="142" />
-            </Grid.ColumnDefinitions>
-
-            <!--  Drag surface underneath the interactive chrome; sized by the star column  -->
-            <Border
-                x:Name="DragRegion"
-                Grid.ColumnSpan="6"
-                Background="Transparent" />
-
-            <!--  Back  -->
+            <Button
+                x:Name="PaneToggleButton"
+                x:Uid="MainPage_Menu"
+                Width="44"
+                Height="44"
+                Padding="0"
+                Click="PaneToggleButton_Click"
+                Style="{StaticResource SubtleButtonStyle}">
+                <SymbolIcon Symbol="GlobalNavigationButton" />
+            </Button>
             <Button
                 x:Name="BackButton"
-                Grid.Column="0"
-                Width="36"
-                Height="34"
-                Margin="6,0,0,0"
-                VerticalAlignment="Center"
-                AutomationProperties.Name="Back"
+                x:Uid="MainPage_Back"
+                Width="44"
+                Height="44"
+                Padding="0"
                 Click="BackButton_Click"
-                Style="{StaticResource EllieToolButtonStyle}"
-                ToolTipService.ToolTip="Back"
+                Style="{StaticResource SubtleButtonStyle}"
                 Visibility="Collapsed">
                 <FontIcon FontSize="14" Glyph="&#xE72B;" />
             </Button>

@@ -6,9 +6,16 @@ namespace ElliePdf.Dialogs;
 
 public sealed class WinUiUnsavedChangesPrompt : IUnsavedChangesPrompt
 {
+    private readonly UiHostContext _uiHost;
+
+    public WinUiUnsavedChangesPrompt(UiHostContext uiHost)
+    {
+        _uiHost = uiHost;
+    }
+
     public async Task<UnsavedChangesChoice> PromptAsync(string fileName, CancellationToken cancellationToken = default)
     {
-        var xamlRoot = GetXamlRoot();
+        var xamlRoot = _uiHost.XamlRoot;
         if (xamlRoot is null)
         {
             return UnsavedChangesChoice.Cancel;
@@ -16,11 +23,11 @@ public sealed class WinUiUnsavedChangesPrompt : IUnsavedChangesPrompt
 
         var dialog = new ContentDialog
         {
-            Title = "Unsaved edits",
-            Content = $"'{fileName}' has unsaved annotations. What would you like to do?",
-            PrimaryButtonText = "Save",
-            SecondaryButtonText = "Discard",
-            CloseButtonText = "Cancel",
+            Title = AppResources.Get("Unsaved_Title"),
+            Content = AppResources.Format("Unsaved_Message", fileName),
+            PrimaryButtonText = AppResources.Get("Common_Save"),
+            SecondaryButtonText = AppResources.Get("Common_Discard"),
+            CloseButtonText = AppResources.Get("Common_Cancel"),
             DefaultButton = ContentDialogButton.Primary,
             XamlRoot = xamlRoot
         };
@@ -33,7 +40,4 @@ public sealed class WinUiUnsavedChangesPrompt : IUnsavedChangesPrompt
             _ => UnsavedChangesChoice.Cancel
         };
     }
-
-    private static XamlRoot? GetXamlRoot() =>
-        App.Window.Content is FrameworkElement root ? root.XamlRoot : null;
 }

@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net11.0-windows10.0.26100.0</TargetFramework>
+    <RootNamespace>ElliePdf.Pdfium.Worker</RootNamespace>
+    <AssemblyName>ElliePdf.Pdfium.Worker</AssemblyName>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <PublishAot>true</PublishAot>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier Condition="'$(Platform)' == 'ARM64'">win-arm64</RuntimeIdentifier>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
+    <_PdfiumRuntimeIdentifier Condition="'$(Platform)' == 'ARM64'">win-arm64</_PdfiumRuntimeIdentifier>
+    <_PdfiumRuntimeIdentifier Condition="'$(_PdfiumRuntimeIdentifier)' == ''">win-x64</_PdfiumRuntimeIdentifier>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Drawing.Common" />
+    <ProjectReference Include="..\ElliePdf.Domain\ElliePdf.Domain.csproj" />
+    <ProjectReference Include="..\ElliePdf.Pdf.Contracts\ElliePdf.Pdf.Contracts.csproj" />
+    <ProjectReference Include="..\ElliePdf.Pdf.Transport\ElliePdf.Pdf.Transport.csproj" />
+    <ProjectReference Include="..\ElliePdf.Pdfium\ElliePdf.Pdfium.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="$(NuGetPackageRoot)bblanchon.pdfium.win32\$(PdfiumNativeVersion)\runtimes\$(_PdfiumRuntimeIdentifier)\native\pdfium.dll"
+             Link="pdfium.dll"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

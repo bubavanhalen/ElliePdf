@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using ElliePdf.Domain.Documents;
 using ElliePdf.Services;
 using Microsoft.UI.Xaml.Media.Imaging;
 
@@ -11,17 +12,27 @@ public sealed class DocumentItemViewModel : ObservableObject
     private BitmapImage? _thumbnail;
     private string _displayName = string.Empty;
     private string _sourceLabel = string.Empty;
+    private PageRotation _rotation;
 
-    public DocumentItemViewModel(PdfDocumentSession document, string filePath, int pageIndex)
+    public DocumentItemViewModel(
+        PdfDocumentSession document,
+        string filePath,
+        int pageIndex,
+        PageId? pageId = null,
+        PageRotation rotation = PageRotation.None)
     {
         Document = document;
         FilePath = filePath;
         PageIndex = pageIndex;
+        PageId = pageId ?? PageId.New();
+        Rotation = rotation;
         SourceLabel = Path.GetFileName(filePath);
-        DisplayName = $"Page {pageIndex + 1}";
+        DisplayName = AppResources.Format("Organize_PageName", pageIndex + 1);
     }
 
     public PdfDocumentSession Document { get; internal set; }
+
+    public PageId PageId { get; }
 
     public string FilePath
     {
@@ -52,4 +63,20 @@ public sealed class DocumentItemViewModel : ObservableObject
         get => _sourceLabel;
         set => SetProperty(ref _sourceLabel, value);
     }
+
+    public PageRotation Rotation
+    {
+        get => _rotation;
+        set
+        {
+            if (!SetProperty(ref _rotation, value))
+            {
+                return;
+            }
+
+            OnPropertyChanged(nameof(RotationAngle));
+        }
+    }
+
+    public double RotationAngle => (int)Rotation * 90d;
 }

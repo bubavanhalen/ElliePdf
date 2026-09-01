@@ -7,4 +7,6 @@ public interface IRecentFilesService
     Task<IReadOnlyList<string>> GetRecentFilesAsync(CancellationToken cancellationToken = default);
 
     Task RecordOpenedAsync(string path, CancellationToken cancellationToken = default);
+
+    Task ClearAsync(CancellationToken cancellationToken = default);
 }

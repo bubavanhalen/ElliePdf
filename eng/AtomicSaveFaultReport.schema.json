@@ -1,0 +1,210 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://elliepdf.invalid/schemas/atomic-save-fault-report.schema.json",
+  "title": "ElliePdf atomic-save fault report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "suite",
+    "runId",
+    "result",
+    "startedAtUtc",
+    "completedAtUtc",
+    "durationMilliseconds",
+    "configuration",
+    "seed",
+    "iterationsRequested",
+    "iterationsCompleted",
+    "payloadBytes",
+    "parallelism",
+    "terminationMode",
+    "policy",
+    "totals",
+    "invariants",
+    "stageCoverage",
+    "cases",
+    "failures"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "suite": { "const": "atomic-save-fault-harness" },
+    "runId": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+    "result": { "enum": ["pass", "fail"] },
+    "startedAtUtc": { "type": "string", "format": "date-time" },
+    "completedAtUtc": { "type": "string", "format": "date-time" },
+    "durationMilliseconds": { "type": "integer", "minimum": 0 },
+    "configuration": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9._-]+$" },
+    "seed": { "type": "integer" },
+    "iterationsRequested": { "type": "integer", "minimum": 11 },
+    "iterationsCompleted": { "type": "integer", "minimum": 0 },
+    "payloadBytes": { "type": "integer", "minimum": 512, "maximum": 1048576 },
+    "parallelism": { "type": "integer", "minimum": 1, "maximum": 64 },
+    "terminationMode": { "const": "child-process-forced-termination" },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requiresCompleteOldOrNewDestination",
+        "requiresActualChildTermination",
+        "requiresEveryStageCovered",
+        "allowsOutcomeUnknown",
+        "includesUserDocumentData"
+      ],
+      "properties": {
+        "requiresCompleteOldOrNewDestination": { "const": true },
+        "requiresActualChildTermination": { "const": true },
+        "requiresEveryStageCovered": { "const": true },
+        "allowsOutcomeUnknown": { "const": false },
+        "includesUserDocumentData": { "const": false }
+      }
+    },
+    "totals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "failed", "oldOutcomes", "newOutcomes", "retainedFailureArtifacts"],
+      "properties": {
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "oldOutcomes": { "type": "integer", "minimum": 0 },
+        "newOutcomes": { "type": "integer", "minimum": 0 },
+        "retainedFailureArtifacts": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "invariants": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "invalidDestinationCount",
+        "missingDestinationCount",
+        "boundaryNotReachedCount",
+        "childTerminationFailureCount",
+        "journalParseFailureCount",
+        "outcomeUnknownCount"
+      ],
+      "properties": {
+        "invalidDestinationCount": { "type": "integer", "minimum": 0 },
+        "missingDestinationCount": { "type": "integer", "minimum": 0 },
+        "boundaryNotReachedCount": { "type": "integer", "minimum": 0 },
+        "childTerminationFailureCount": { "type": "integer", "minimum": 0 },
+        "journalParseFailureCount": { "type": "integer", "minimum": 0 },
+        "outcomeUnknownCount": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "stageCoverage": {
+      "type": "array",
+      "minItems": 11,
+      "maxItems": 11,
+      "items": { "$ref": "#/$defs/stageSummary" }
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 11,
+      "items": { "$ref": "#/$defs/caseEvidence" }
+    },
+    "failures": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/failure" }
+    }
+  },
+  "$defs": {
+    "stageName": {
+      "enum": [
+        "DestinationLockAcquired",
+        "DestinationVersionVerified",
+        "TemporaryFileCreated",
+        "TemporaryFileWritten",
+        "TemporaryFileFlushed",
+        "TemporaryFileValidated",
+        "DestinationVersionReverified",
+        "CommitStarted",
+        "CommitCompleted",
+        "CommittedFileValidated",
+        "CleanupCompleted"
+      ]
+    },
+    "stageSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stage", "iterations", "passed", "failed", "oldOutcomes", "newOutcomes", "invalidOutcomes"],
+      "properties": {
+        "stage": { "$ref": "#/$defs/stageName" },
+        "iterations": { "type": "integer", "minimum": 1 },
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "oldOutcomes": { "type": "integer", "minimum": 0 },
+        "newOutcomes": { "type": "integer", "minimum": 0 },
+        "invalidOutcomes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "caseEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "iteration",
+        "stage",
+        "artifactId",
+        "passed",
+        "boundaryReached",
+        "timedOut",
+        "childExitCode",
+        "outcome",
+        "destinationLength",
+        "destinationSha256",
+        "oldSha256",
+        "newSha256",
+        "journalStages",
+        "journalPresent",
+        "temporaryPresent",
+        "backupPresent",
+        "displacedPresent",
+        "journalParseFailed",
+        "durationMilliseconds",
+        "failureCode"
+      ],
+      "properties": {
+        "iteration": { "type": "integer", "minimum": 0 },
+        "stage": { "$ref": "#/$defs/stageName" },
+        "artifactId": { "type": "string", "pattern": "^case-[0-9]{6}$" },
+        "passed": { "type": "boolean" },
+        "boundaryReached": { "type": "boolean" },
+        "timedOut": { "type": "boolean" },
+        "childExitCode": { "type": ["integer", "null"] },
+        "outcome": { "enum": ["old", "new", "invalid", "missing"] },
+        "destinationLength": { "type": ["integer", "null"], "minimum": 0 },
+        "destinationSha256": { "type": ["string", "null"], "pattern": "^[0-9A-F]{64}$" },
+        "oldSha256": { "type": "string", "pattern": "^[0-9A-F]{64}$" },
+        "newSha256": { "type": "string", "pattern": "^[0-9A-F]{64}$" },
+        "journalStages": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/journalStage" } },
+        "journalPresent": { "type": "boolean" },
+        "temporaryPresent": { "type": "boolean" },
+        "backupPresent": { "type": "boolean" },
+        "displacedPresent": { "type": "boolean" },
+        "journalParseFailed": { "type": "boolean" },
+        "durationMilliseconds": { "type": "integer", "minimum": 0 },
+        "failureCode": { "type": ["string", "null"], "maxLength": 128, "pattern": "^[A-Za-z0-9_]+$" }
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["iteration", "stage", "artifactId", "failureCode"],
+      "properties": {
+        "iteration": { "type": "integer", "minimum": 0 },
+        "stage": { "$ref": "#/$defs/stageName" },
+        "artifactId": { "type": "string", "pattern": "^case-[0-9]{6}$" },
+        "failureCode": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9_]+$" }
+      }
+    },
+    "journalStage": {
+      "enum": [
+        "Prepared",
+        "CommitStarted",
+        "Committed",
+        "Validated",
+        "RolledBack",
+        "OutcomeUnknown"
+      ]
+    }
+  }
+}

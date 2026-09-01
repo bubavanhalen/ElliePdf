@@ -1,0 +1,29 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "serialNumber": "urn:uuid:4e2d8f31-8b65-4b2e-91d7-154080218021",
+  "version": 1,
+  "metadata": {
+    "component": {
+      "type": "library",
+      "bom-ref": "pkg:nuget/bblanchon.PDFium.Win32@154.0.8021",
+      "group": "bblanchon",
+      "name": "PDFium.Win32",
+      "version": "154.0.8021",
+      "purl": "pkg:nuget/bblanchon.PDFium.Win32@154.0.8021",
+      "licenses": [{ "license": { "id": "Apache-2.0" } }],
+      "externalReferences": [
+        { "type": "website", "url": "https://www.nuget.org/packages/bblanchon.PDFium.Win32/154.0.8021" },
+        { "type": "vcs", "url": "https://github.com/bblanchon/pdfium-binaries.git", "comment": "repository commit 9dd99a8991bed3a2f37658a31bcd5b403800fd03" },
+        { "type": "release-notes", "url": "https://github.com/bblanchon/pdfium-binaries/releases/tag/master" }
+      ],
+      "properties": [
+        { "name": "nuget:authors", "value": "Benoît Blanchon" },
+        { "name": "nuget:copyright", "value": "Copyright © Benoît Blanchon 2017-2025" },
+        { "name": "elliepdf:package-sha256", "value": "B5B3C4E567CDE273E745CCE45EBD8145DF08D49C2E1506F51F20822DEB06DCC7" },
+        { "name": "elliepdf:native-assets", "value": "win-x64;win-arm64" }
+      ]
+    }
+  },
+  "components": []
+}

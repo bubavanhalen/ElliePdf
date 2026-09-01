@@ -22,35 +22,81 @@ public sealed class RecentFilesService : IRecentFilesService
 
     public IReadOnlyList<string> GetRecentFiles()
     {
+        if (!_settingsService.Settings.KeepRecentFiles)
+        {
+            return [];
+        }
         EnsureLoaded();
-        return _entries;
+        return _entries.ToArray();
     }
 
     public async Task<IReadOnlyList<string>> GetRecentFilesAsync(CancellationToken cancellationToken = default)
     {
+        if (!_settingsService.Settings.KeepRecentFiles)
+        {
+            return [];
+        }
         await EnsureLoadedAsync(cancellationToken);
-        return _entries;
+        await _loadGate.WaitAsync(cancellationToken);
+        try
+        {
+            return _entries.ToArray();
+        }
+        finally
+        {
+            _loadGate.Release();
+        }
     }
 
     public async Task RecordOpenedAsync(string path, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        if (!_settingsService.Settings.KeepRecentFiles)
+        {
+            return;
+        }
         if (!File.Exists(path))
         {
             return;
         }
 
         await EnsureLoadedAsync(cancellationToken);
-        _entries.RemoveAll(entry => string.Equals(entry, path, StringComparison.OrdinalIgnoreCase));
-        _entries.Insert(0, path);
-
-        var maxEntries = Math.Clamp(_settingsService.Settings.RecentFilesMaxCount, 1, 50);
-        if (_entries.Count > maxEntries)
+        await _loadGate.WaitAsync(cancellationToken);
+        try
         {
-            _entries = _entries.Take(maxEntries).ToList();
-        }
+            _entries.RemoveAll(entry => string.Equals(entry, path, StringComparison.OrdinalIgnoreCase));
+            _entries.Insert(0, path);
 
-        await SaveToDiskAsync(cancellationToken);
+            var maxEntries = Math.Clamp(_settingsService.Settings.RecentFilesMaxCount, 1, 50);
+            if (_entries.Count > maxEntries)
+            {
+                _entries = _entries.Take(maxEntries).ToList();
+            }
+
+            await SaveToDiskAsync(cancellationToken);
+        }
+        finally
+        {
+            _loadGate.Release();
+        }
+    }
+
+    public async Task ClearAsync(CancellationToken cancellationToken = default)
+    {
+        await _loadGate.WaitAsync(cancellationToken);
+        try
+        {
+            _entries = [];
+            _loaded = true;
+            if (File.Exists(_storePath))
+            {
+                File.Delete(_storePath);
+            }
+        }
+        finally
+        {
+            _loadGate.Release();
+        }
     }
 
     private void EnsureLoaded()
@@ -148,12 +194,36 @@ public sealed class RecentFilesService : IRecentFilesService
     private async Task SaveToDiskAsync(CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(_storeFolder);
-        await using var stream = File.Create(_storePath);
-        await JsonSerializer.SerializeAsync(
-            stream,
-            _entries,
-            ElliePdfJsonContext.Default.ListString,
-            cancellationToken);
+        var temporaryPath = Path.Combine(_storeFolder, $"recent.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            await using (var stream = new FileStream(
+                temporaryPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                4096,
+                FileOptions.Asynchronous | FileOptions.WriteThrough))
+            {
+                await JsonSerializer.SerializeAsync(
+                    stream,
+                    _entries,
+                    ElliePdfJsonContext.Default.ListString,
+                    cancellationToken);
+                await stream.FlushAsync(cancellationToken);
+            }
+            File.Move(temporaryPath, _storePath, overwrite: true);
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+            }
+            catch (IOException)
+            {
+            }
+        }
     }
 
     private List<string> FilterEntries(List<string>? entries)

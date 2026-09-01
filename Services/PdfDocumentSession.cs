@@ -1,21 +1,29 @@
+using ElliePdf.Domain.Storage;
+using ElliePdf.Pdf.Contracts;
+
 namespace ElliePdf.Services;
 
 public sealed class PdfDocumentSession : IAsyncDisposable
 {
     private readonly IPdfService _pdfService;
+    private int _closed;
 
     internal PdfDocumentSession(
         IPdfService pdfService,
-        IntPtr handle,
+        IPdfEngineSession engineSession,
         string sourcePath,
         int pageCount,
-        PdfFormFillContext? formFill)
+        bool isEncrypted,
+        FileVersionStamp sourceVersion,
+        long openStartedTimestamp)
     {
         _pdfService = pdfService;
-        Handle = handle;
+        EngineSession = engineSession;
         SourcePath = sourcePath;
         PageCount = pageCount;
-        FormFill = formFill;
+        IsEncrypted = isEncrypted;
+        SourceVersion = sourceVersion;
+        OpenStartedTimestamp = openStartedTimestamp;
     }
 
     public string SourcePath { get; }
@@ -25,36 +33,38 @@ public sealed class PdfDocumentSession : IAsyncDisposable
 
     public int PageCount { get; internal set; }
 
-    internal IntPtr Handle { get; private set; }
+    public bool IsEncrypted { get; }
 
-    internal PdfFormFillContext? FormFill { get; private set; }
-
-    public bool IsClosed => Handle == IntPtr.Zero;
-
-    public ValueTask DisposeAsync()
-    {
-        if (IsClosed)
-        {
-            return ValueTask.CompletedTask;
-        }
-
-        return new ValueTask(_pdfService.CloseDocumentAsync(this));
-    }
-
-    internal void MarkClosed()
-    {
-        Handle = IntPtr.Zero;
-        FormFill = null;
-    }
+    public FileVersionStamp SourceVersion { get; private set; }
 
     /// <summary>
-    /// Releases the form-fill environment. It must go before <c>FPDF_CloseDocument</c>, because
-    /// tearing it down dereferences the document and its page views.
+    /// Process-local monotonic timestamp captured before source validation and worker open. It is
+    /// used only to emit aggregate open-to-first-presentation latency and is never persisted.
     /// </summary>
-    internal void ReleaseFormFill()
+    internal long OpenStartedTimestamp { get; }
+
+    internal IPdfEngineSession EngineSession { get; }
+
+    public bool IsClosed => Volatile.Read(ref _closed) != 0;
+
+    public ValueTask DisposeAsync() => IsClosed
+        ? ValueTask.CompletedTask
+        : new ValueTask(_pdfService.CloseDocumentAsync(this));
+
+    internal async Task CloseEngineSessionAsync()
     {
-        FormFill?.Dispose();
-        FormFill = null;
+        if (Interlocked.Exchange(ref _closed, 1) != 0)
+        {
+            return;
+        }
+
+        await EngineSession.DisposeAsync().ConfigureAwait(false);
+    }
+
+    internal void UpdateSourceVersion(FileVersionStamp sourceVersion)
+    {
+        ArgumentNullException.ThrowIfNull(sourceVersion);
+        SourceVersion = sourceVersion;
     }
 }
 

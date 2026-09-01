@@ -13,7 +13,7 @@ public sealed class TabCloseService : ITabCloseService
     private readonly IAnnotationStore _annotationStore;
     private readonly IUnsavedChangesPrompt _unsavedChangesPrompt;
     private readonly IEditSaveService _editSaveService;
-    private readonly IOverlayHistory _history;
+    private readonly SemaphoreSlim _closeGate = new(1, 1);
 
     public TabCloseService(
         IDocumentTabService tabService,
@@ -29,65 +29,160 @@ public sealed class TabCloseService : ITabCloseService
         _history = history;
     }
 
-    public async Task<bool> TryCloseTabAsync(Guid tabId, CancellationToken cancellationToken = default)
+    public async Task<bool> TryCloseTabAsync(
+        Guid tabId,
+        CancellationToken cancellationToken = default)
     {
-        var tab = _tabService.Tabs.FirstOrDefault(item => item.Id == tabId);
-        if (tab is null)
+        await _closeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            return true;
-        }
+            while (true)
+            {
+                var tab = _tabService.Tabs.FirstOrDefault(item => item.Id == tabId);
+                if (tab is null)
+                {
+                    return true;
+                }
 
-        if (!_annotationStore.IsTabDirty(tabId))
-        {
-            return await CloseTabCoreAsync(tabId, cancellationToken);
-        }
+                if (!tab.IsDirty)
+                {
+                    return await CloseTabCoreAsync(tab, cancellationToken).ConfigureAwait(false);
+                }
 
-        var choice = await _unsavedChangesPrompt.PromptAsync(tab.DisplayName, cancellationToken);
-        return choice switch
+                var choice = await _unsavedChangesPrompt
+                    .PromptAsync(tab.DisplayName, cancellationToken)
+                    .ConfigureAwait(false);
+                switch (choice)
+                {
+                    case UnsavedChangesChoice.Cancel:
+                        return false;
+
+                    case UnsavedChangesChoice.Discard:
+                        await _annotationStore.StopAndDeleteRecoveryAsync(
+                                tab.Id,
+                                tab.FilePath,
+                                cancellationToken)
+                            .ConfigureAwait(false);
+                        return await CloseTabCoreAsync(tab, cancellationToken).ConfigureAwait(false);
+
+                    case UnsavedChangesChoice.Save:
+                        await _editSaveService
+                            .SaveTabAsync(tab, tab.FilePath, cancellationToken)
+                            .ConfigureAwait(false);
+                        if (!tab.IsDirty)
+                        {
+                            return await CloseTabCoreAsync(tab, cancellationToken).ConfigureAwait(false);
+                        }
+
+                        // A newer revision appeared while the captured revision was saving.
+                        // Loop and ask about that newer revision instead of silently closing it.
+                        break;
+
+                    default:
+                        return false;
+                }
+            }
+        }
+        finally
         {
-            UnsavedChangesChoice.Cancel => false,
-            UnsavedChangesChoice.Discard => await CloseTabCoreAsync(tabId, cancellationToken),
-            UnsavedChangesChoice.Save => await SaveAndCloseTabCoreAsync(tab, cancellationToken),
-            _ => false
-        };
+            _closeGate.Release();
+        }
     }
 
-    public async Task<bool> TryCloseAllDirtyTabsAsync(CancellationToken cancellationToken = default)
+    public async Task<bool> TryCloseAllDirtyTabsAsync(
+        CancellationToken cancellationToken = default)
     {
-        foreach (var tab in _tabService.Tabs.Where(tab => _annotationStore.IsTabDirty(tab.Id)).ToArray())
+        await _closeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var choice = await _unsavedChangesPrompt.PromptAsync(tab.DisplayName, cancellationToken);
-            if (choice == UnsavedChangesChoice.Cancel)
+            var discardTabs = new Dictionary<Guid, DiscardDecision>();
+
+            while (true)
             {
-                return false;
+                var dirtyTabs = _tabService.Tabs
+                    .Where(tab => tab.IsDirty && !discardTabs.ContainsKey(tab.Id))
+                    .ToArray();
+                if (dirtyTabs.Length == 0)
+                {
+                    var changedDiscards = discardTabs
+                        .Where(pair => pair.Value.Tab.State.ContentRevision != pair.Value.DecidedRevision)
+                        .Select(static pair => pair.Key)
+                        .ToArray();
+                    if (changedDiscards.Length == 0)
+                    {
+                        break;
+                    }
+
+                    foreach (var changedTabId in changedDiscards)
+                    {
+                        discardTabs.Remove(changedTabId);
+                    }
+
+                    continue;
+                }
+
+                foreach (var tab in dirtyTabs)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var choice = await _unsavedChangesPrompt
+                        .PromptAsync(tab.DisplayName, cancellationToken)
+                        .ConfigureAwait(false);
+                    if (choice == UnsavedChangesChoice.Cancel)
+                    {
+                        return false;
+                    }
+
+                    if (choice == UnsavedChangesChoice.Discard)
+                    {
+                        discardTabs[tab.Id] = new DiscardDecision(tab, tab.State.ContentRevision);
+                        continue;
+                    }
+
+                    if (choice != UnsavedChangesChoice.Save)
+                    {
+                        return false;
+                    }
+
+                    await _editSaveService
+                        .SaveTabAsync(tab, tab.FilePath, cancellationToken)
+                        .ConfigureAwait(false);
+                    // The outer loop re-prompts if an edit arrived during this save.
+                }
             }
 
-            if (choice == UnsavedChangesChoice.Save)
+            // Defer destructive recovery cleanup until every prompt and save has
+            // completed, so cancelling a later tab cannot partially discard an earlier one.
+            foreach (var decision in discardTabs.Values)
             {
-                await _editSaveService.SaveTabAsync(tab, tab.FilePath, cancellationToken);
+                var tab = decision.Tab;
+                await _annotationStore.StopAndDeleteRecoveryAsync(
+                        tab.Id,
+                        tab.FilePath,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                await _annotationStore.RemoveTabAsync(tab.Id, CancellationToken.None)
+                    .ConfigureAwait(false);
             }
-            else if (choice == UnsavedChangesChoice.Discard)
-            {
-                _annotationStore.RemoveTab(tab.Id);
-                _history.Clear(tab.Id);
-            }
+
+            // Recheck after all asynchronous work. Any newly dirty tab must be
+            // handled on another pass before the window is allowed to close.
+            return !_tabService.Tabs.Any(tab => tab.IsDirty && !discardTabs.ContainsKey(tab.Id));
         }
+        finally
+        {
+            _closeGate.Release();
+        }
+    }
 
+    private async Task<bool> CloseTabCoreAsync(
+        DocumentTab tab,
+        CancellationToken cancellationToken)
+    {
+        await _tabService.CloseTabAsync(tab.Id, cancellationToken).ConfigureAwait(false);
         return true;
     }
 
-    private async Task<bool> SaveAndCloseTabCoreAsync(DocumentTab tab, CancellationToken cancellationToken)
-    {
-        await _editSaveService.SaveTabAsync(tab, tab.FilePath, cancellationToken);
-        return await CloseTabCoreAsync(tab.Id, cancellationToken);
-    }
-
-    private async Task<bool> CloseTabCoreAsync(Guid tabId, CancellationToken cancellationToken)
-    {
-        _annotationStore.RemoveTab(tabId);
-        _history.Clear(tabId);
-        await _tabService.CloseTabAsync(tabId, cancellationToken);
-        return true;
-    }
+    private sealed record DiscardDecision(
+        DocumentTab Tab,
+        ElliePdf.Domain.Documents.ContentRevision DecidedRevision);
 }

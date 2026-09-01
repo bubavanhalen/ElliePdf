@@ -23,11 +23,15 @@
             Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
             CornerRadius="4">
             <Grid x:Name="PageHost">
-                <Image
-                    x:Name="PageImage"
+                <controls:PdfTileSurface
+                    x:Name="TileSurface"
                     AutomationProperties.AutomationId="ReaderPageImage"
-                    Stretch="None" />
+                    AutomationProperties.AccessibilityView="Raw"
+                    Background="White"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Top" />
                 <Canvas x:Name="SearchHighlightCanvas" IsHitTestVisible="False" />
+                <controls:PdfSemanticOverlay x:Name="SemanticOverlay" />
                 <controls:PdfEditSurface
                     x:Name="PageEditSurface"
                     IsHitTestVisible="False" />
