@@ -1,0 +1,8 @@
+{
+  "version": 2,
+  "dependencies": {
+    "net11.0": {},
+    "net11.0/win-arm64": {},
+    "net11.0/win-x64": {}
+  }
+}

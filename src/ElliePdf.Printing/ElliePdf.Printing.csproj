@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <RootNamespace>ElliePdf.Printing</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ElliePdf.Domain\ElliePdf.Domain.csproj" />
+    <ProjectReference Include="..\ElliePdf.Pdf.Contracts\ElliePdf.Pdf.Contracts.csproj" />
+    <ProjectReference Include="..\ElliePdf.Rendering\ElliePdf.Rendering.csproj" />
+  </ItemGroup>
+</Project>

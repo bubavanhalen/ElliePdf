@@ -6,9 +6,16 @@ namespace ElliePdf.Dialogs;
 
 public sealed class WinUiPdfPasswordPrompt : IPdfPasswordPrompt
 {
+    private readonly UiHostContext _uiHost;
+
+    public WinUiPdfPasswordPrompt(UiHostContext uiHost)
+    {
+        _uiHost = uiHost;
+    }
+
     public async Task<string?> PromptAsync(PdfPasswordPromptRequest request, CancellationToken cancellationToken = default)
     {
-        var xamlRoot = GetXamlRoot();
+        var xamlRoot = _uiHost.XamlRoot;
         if (xamlRoot is null)
         {
             return null;
@@ -16,12 +23,12 @@ public sealed class WinUiPdfPasswordPrompt : IPdfPasswordPrompt
 
         var fileName = Path.GetFileName(request.FilePath);
         var message = request.IsRetry
-            ? $"The password for '{fileName}' was incorrect. Try again."
-            : $"'{fileName}' is protected. Enter the password to open it.";
+            ? AppResources.Format("PasswordPrompt_Incorrect", fileName)
+            : AppResources.Format("PasswordPrompt_Protected", fileName);
 
         var passwordBox = new PasswordBox
         {
-            PlaceholderText = "Password",
+            PlaceholderText = AppResources.Get("PasswordPrompt_Placeholder"),
             Width = 320
         };
 
@@ -31,10 +38,10 @@ public sealed class WinUiPdfPasswordPrompt : IPdfPasswordPrompt
 
         var dialog = new ContentDialog
         {
-            Title = "Password required",
+            Title = AppResources.Get("PasswordPrompt_Title"),
             Content = panel,
-            PrimaryButtonText = "Open",
-            CloseButtonText = "Cancel",
+            PrimaryButtonText = AppResources.Get("Common_Open"),
+            CloseButtonText = AppResources.Get("Common_Cancel"),
             DefaultButton = ContentDialogButton.Primary,
             XamlRoot = xamlRoot
         };
@@ -43,13 +50,4 @@ public sealed class WinUiPdfPasswordPrompt : IPdfPasswordPrompt
         return result == ContentDialogResult.Primary ? passwordBox.Password : null;
     }
 
-    private static XamlRoot? GetXamlRoot()
-    {
-        if (App.Window.Content is FrameworkElement root)
-        {
-            return root.XamlRoot;
-        }
-
-        return null;
-    }
 }

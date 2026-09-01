@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "1.0",
+  "licensePolicy": "Only synthetic or separately licensed fixtures; no proprietary PDFs are committed.",
+  "hashAlgorithm": "SHA-256",
+  "fixtures": [
+    { "id": "synthetic-vector-small", "file": "synthetic-vector-small.pdf", "kind": "vector", "pages": 3, "sha256": "AB36815E4ED19616F7E6C1CA05682717F87258D1BF6BF718EE35A079E726F2C3" },
+    { "id": "synthetic-photo-scan", "file": "synthetic-photo-scan.pdf", "kind": "photo-scan", "pages": 3, "sha256": "79D83ACA4FD8F2D9932B1CECD1C939397315DEDAB073A7611EC1C81DBB1FE58C" },
+    { "id": "synthetic-cjk-font-heavy", "file": "synthetic-cjk-font-heavy.pdf", "kind": "cjk-font-heavy", "pages": 2, "sha256": "812D04DA668130A1A9A76E7FEC9E858CCE43B557AB18E40295648BE55EF50D56" },
+    { "id": "synthetic-mixed-orientation-links-forms-outlines", "file": "synthetic-mixed-orientation-links-forms-outlines.pdf", "kind": "mixed-features", "pages": 8, "sha256": "7A7523F07A00BCC3043523A1289FAB50475BE949BE9F1CACF3FC23CE46C72D91" },
+    { "id": "synthetic-encrypted", "file": "synthetic-encrypted.pdf", "kind": "encryption", "pages": 2, "fixturePassword": "ellie-test", "sha256": "39F2B79A18FA70327E9EC14E8AA3D2AB6A8F50804A6925B1BF9A35B1BF43FB07" },
+    { "id": "synthetic-1000-pages", "file": "synthetic-1000-pages.pdf", "kind": "long-document", "pages": 1000, "sha256": "F88F048EB38F97A9CCE2AF6C55D9FA324053EEF04C7280A8237FC38B1180A998" },
+    { "id": "synthetic-10000-pages", "file": "synthetic-10000-pages.pdf", "kind": "long-document", "pages": 10000, "sha256": "91D192C921193CAAB4BD952B71D1A75765988A2E548D59E1C31B0F5FB48B04CA" },
+    { "id": "synthetic-huge-mediabox", "file": "synthetic-huge-mediabox.pdf", "kind": "huge-media-box", "pages": 1, "sha256": "F21C64CC2B6533FC07EB0EA1F43785F7BB804973D583D1E575E7F46B70DF22B4" },
+    { "id": "synthetic-corrupt", "file": "synthetic-corrupt.pdf", "kind": "corrupt-input", "pages": 0, "expectedOpenFailure": true, "sha256": "8EB7DC36B937F9E25E6055233415502D892D512A6EBBEE962A9F3CE3384AC635" },
+    { "id": "synthetic-parser-stress", "file": "synthetic-parser-stress.pdf", "kind": "parser-stress", "pages": 20, "sha256": "D21D38CF85210444173329F6E7BF0C38324DBBB85793FC91BCE10BA78198D2A1" }
+    ,{ "id": "synthetic-1gb-padded", "file": "synthetic-1gb-padded.pdf", "kind": "one-gigabyte-padded", "pages": 1, "sizeBytes": 1073741824, "generation": "Generate-TestCorpus.py --include-1gb", "sha256": "5A54A8E2725B76FF10D82623A25F6745105321B8DEB509A562FC28811C01ECF7" }
+  ]
+}

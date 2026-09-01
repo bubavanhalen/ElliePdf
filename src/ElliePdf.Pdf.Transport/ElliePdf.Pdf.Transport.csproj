@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <RootNamespace>ElliePdf.Pdf.Transport</RootNamespace>
+    <IsTrimmable>true</IsTrimmable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ElliePdf.Pdf.Contracts\ElliePdf.Pdf.Contracts.csproj" />
+  </ItemGroup>
+</Project>

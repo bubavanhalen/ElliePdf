@@ -1,35 +1,62 @@
 using ElliePdf.Navigation;
 using ElliePdf.Pages;
+using ElliePdf.Services;
 using ElliePdf.ViewModels;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.Windows.Storage.Pickers;
 
 namespace ElliePdf;
 
 public sealed partial class MainPage : Page
 {
-    private ReaderPage? _readerPage;
-    private bool _isSyncingTabs;
-    private bool _isSyncingWorkspace;
+    private readonly ReaderPage _readerPage;
+    private readonly OrganizePage _organizePage;
+    private readonly SettingsPage _settingsPage;
+    private readonly AppNavigation _navigation;
+    private readonly IUserSettingsService _settings;
+    private readonly DocumentCollectionViewModel _documentCollection;
+    private readonly UiHostContext _uiHost;
+    private readonly Stack<string> _workspaceHistory = [];
+    private string _currentWorkspace = "read";
+    private bool _isSelectingWorkspace;
 
-    public MainPage()
+    public FlowDirection UiFlowDirection => System.Globalization.CultureInfo.CurrentUICulture.TextInfo.IsRightToLeft
+        ? FlowDirection.RightToLeft
+        : FlowDirection.LeftToRight;
+
+    public MainPage(
+        ReaderPage readerPage,
+        OrganizePage organizePage,
+        SettingsPage settingsPage,
+        AppNavigation navigation,
+        IUserSettingsService settings,
+        DocumentCollectionViewModel documentCollection,
+        UiHostContext uiHost)
     {
-        Reader = App.Services.GetRequiredService<ReaderViewModel>();
+        _readerPage = readerPage;
+        _organizePage = organizePage;
+        _settingsPage = settingsPage;
+        _navigation = navigation;
+        _settings = settings;
+        _documentCollection = documentCollection;
+        _uiHost = uiHost;
+
         InitializeComponent();
+        OrganizeNavItem.Visibility = IsLabsEnabled() ? Visibility.Visible : Visibility.Collapsed;
         Loaded += MainPage_Loaded;
-        ContentFrame.Navigated += ContentFrame_Navigated;
-        Reader.TabItems.CollectionChanged += OnTabItemsChanged;
-        Reader.PropertyChanged += OnReaderPropertyChanged;
-        AppNavigation.WorkspaceRequested += OnWorkspaceRequested;
-        AppNavigation.ReaderPageRequested += OnReaderPageRequested;
+        _navigation.WorkspaceRequested += OnWorkspaceRequested;
+        _navigation.ReaderPageRequested += OnReaderPageRequested;
         Unloaded += OnUnloaded;
 
-        ContentFrame.Navigate(typeof(ReaderPage));
+        _isSelectingWorkspace = true;
+        ContentFrame.Content = _readerPage;
+        if (NavView.MenuItems[0] is NavigationViewItem readItem)
+        {
+            NavView.SelectedItem = readItem;
+        }
+        _isSelectingWorkspace = false;
+        SyncShellButtons();
     }
-
-    public ReaderViewModel Reader { get; }
 
     public async Task OpenFilesAsync(IReadOnlyList<string> filePaths)
     {
@@ -39,234 +66,138 @@ public sealed partial class MainPage : Page
         }
 
         SelectWorkspace("read");
+        await _readerPage.LoadFilesAsync(filePaths);
 
-        var readerPage = EnsureReaderPage();
-        await readerPage.LoadFilesAsync(filePaths);
-
-        if (filePaths.Count > 1)
+        if (filePaths.Count > 1 && IsLabsEnabled())
         {
-            await App.Services
-                .GetRequiredService<DocumentCollectionViewModel>()
-                .ImportDocumentsAsync(filePaths);
+            await _documentCollection.ImportDocumentsAsync(filePaths);
             SelectWorkspace("organize");
         }
     }
 
     private void MainPage_Loaded(object sender, RoutedEventArgs e)
     {
-        App.Window.SetTitleBar(DragRegion);
+        _uiHost.SetTitleBar(WindowDragSurface);
+        UpdateTitleBarDragRegion();
         SyncShellButtons();
-        SyncTabViewItems();
     }
 
-    private void OnUnloaded(object sender, RoutedEventArgs e)
+    private void MainPage_SizeChanged(object sender, SizeChangedEventArgs e) => UpdateTitleBarDragRegion();
+
+    private void UpdateTitleBarDragRegion()
     {
-        ContentFrame.Navigated -= ContentFrame_Navigated;
-        Reader.TabItems.CollectionChanged -= OnTabItemsChanged;
-        Reader.PropertyChanged -= OnReaderPropertyChanged;
-        AppNavigation.WorkspaceRequested -= OnWorkspaceRequested;
-        AppNavigation.ReaderPageRequested -= OnReaderPageRequested;
-    }
-
-    private void BackButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (ContentFrame.CanGoBack)
-        {
-            ContentFrame.GoBack();
-        }
-    }
-
-    private void SettingsButton_Click(object sender, RoutedEventArgs e) => SelectWorkspace("settings");
-
-    private void ContentFrame_Navigated(object sender, Microsoft.UI.Xaml.Navigation.NavigationEventArgs e) =>
-        SyncShellButtons();
-
-    private void SyncShellButtons()
-    {
-        BackButton.Visibility = ContentFrame.CanGoBack ? Visibility.Visible : Visibility.Collapsed;
-        SyncWorkspaceSwitcher();
-    }
-
-    private void SyncWorkspaceSwitcher()
-    {
-        _isSyncingWorkspace = true;
-        try
-        {
-            WorkspaceSwitcher.SelectedItem = ContentFrame.CurrentSourcePageType switch
-            {
-                var type when type == typeof(ReaderPage) => ReadWorkspaceItem,
-                var type when type == typeof(OrganizePage) => OrganizeWorkspaceItem,
-                _ => null
-            };
-        }
-        finally
-        {
-            _isSyncingWorkspace = false;
-        }
-    }
-
-    private void WorkspaceSwitcher_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
-    {
-        if (_isSyncingWorkspace || sender.SelectedItem?.Tag is not string tag)
+        if (ActualWidth <= 0)
         {
             return;
         }
 
-        SelectWorkspace(tag);
+        // The tab strip reserves 108 epx before this region. Keep the draggable
+        // element inside that reservation so caption hit testing never steals a tab.
+        WindowDragSurface.Width = Math.Clamp(48 + (ActualWidth - 500) * 0.12, 48, 96);
     }
+
+    private void OnUnloaded(object sender, RoutedEventArgs e)
+    {
+        _navigation.WorkspaceRequested -= OnWorkspaceRequested;
+        _navigation.ReaderPageRequested -= OnReaderPageRequested;
+    }
+
+    private void PaneToggleButton_Click(object sender, RoutedEventArgs e) =>
+        NavView.IsPaneOpen = !NavView.IsPaneOpen;
+
+    private void BackButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_workspaceHistory.TryPop(out var workspace))
+        {
+            SelectWorkspace(workspace, addToHistory: false);
+        }
+    }
+
+    private void SyncShellButtons() =>
+        BackButton.Visibility = _workspaceHistory.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
 
     private void OnWorkspaceRequested(string tag) => SelectWorkspace(tag);
 
     private void OnReaderPageRequested(int pageIndex)
     {
-        if (EnsureReaderPage() is { } readerPage)
-        {
-            readerPage.GoToPage(pageIndex);
-        }
+        SelectWorkspace("read");
+        _readerPage.GoToPage(pageIndex);
     }
 
-    private ReaderPage EnsureReaderPage()
+    internal ReaderPage BenchmarkReaderPage => _readerPage;
+
+    private void NavView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
-        if (_readerPage is not null)
+        if (_isSelectingWorkspace)
         {
-            return _readerPage;
+            return;
         }
 
-        if (ContentFrame.Content is ReaderPage currentReader)
+        if (args.SelectedItemContainer is NavigationViewItem item && item.Tag is string tag)
         {
-            _readerPage = currentReader;
-            return _readerPage;
-        }
-
-        ContentFrame.Navigate(typeof(ReaderPage));
-        _readerPage = (ReaderPage)ContentFrame.Content;
-        return _readerPage;
-    }
-
-    private void SelectWorkspace(string tag)
-    {
-        var targetType = tag switch
-        {
-            "organize" => typeof(OrganizePage),
-            "settings" => typeof(SettingsPage),
-            _ => typeof(ReaderPage)
-        };
-
-        if (ContentFrame.CurrentSourcePageType != targetType)
-        {
-            ContentFrame.Navigate(targetType);
-            if (targetType == typeof(ReaderPage))
+            if (tag == "read")
             {
-                _readerPage = (ReaderPage)ContentFrame.Content;
+                sender.IsPaneOpen = false;
             }
+
+            SelectWorkspace(tag);
+        }
+    }
+
+    private void SelectWorkspace(string tag, bool addToHistory = true)
+    {
+        if (tag == "organize" && !IsLabsEnabled())
+        {
+            tag = "read";
+        }
+
+        Page target;
+        int menuIndex;
+        switch (tag)
+        {
+            case "read":
+                target = _readerPage;
+                menuIndex = 0;
+                NavView.IsPaneOpen = false;
+                break;
+            case "organize":
+                target = _organizePage;
+                menuIndex = 1;
+                break;
+            case "settings":
+                target = _settingsPage;
+                menuIndex = 2;
+                break;
+            default:
+                return;
+        }
+
+        _isSelectingWorkspace = true;
+        try
+        {
+            if (NavView.MenuItems[menuIndex] is NavigationViewItem item)
+            {
+                NavView.SelectedItem = item;
+            }
+
+            if (!ReferenceEquals(ContentFrame.Content, target))
+            {
+                if (addToHistory && !string.Equals(_currentWorkspace, tag, StringComparison.Ordinal))
+                {
+                    _workspaceHistory.Push(_currentWorkspace);
+                }
+
+                ContentFrame.Content = target;
+                _currentWorkspace = tag;
+            }
+        }
+        finally
+        {
+            _isSelectingWorkspace = false;
         }
 
         SyncShellButtons();
     }
 
-    // ═══════════ Document tab strip ═══════════
-
-    private void OnReaderPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName is nameof(ReaderViewModel.SelectedTabId) or nameof(ReaderViewModel.TabCount))
-        {
-            SyncTabViewItems();
-        }
-    }
-
-    private void OnTabItemsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
-    {
-        if (!_isSyncingTabs)
-        {
-            SyncTabViewItems();
-        }
-    }
-
-    private void SyncTabViewItems()
-    {
-        _isSyncingTabs = true;
-        try
-        {
-            DocumentTabs.TabItems.Clear();
-
-            foreach (var tab in Reader.TabItems)
-            {
-                DocumentTabs.TabItems.Add(new TabViewItem
-                {
-                    Header = tab.Title,
-                    IsClosable = true,
-                    Tag = tab.TabId,
-                    IconSource = new FontIconSource { Glyph = "\uE8A5", FontSize = 14 }
-                });
-            }
-
-            if (Reader.SelectedTabId is Guid selectedId)
-            {
-                var selectedItem = DocumentTabs.TabItems
-                    .OfType<TabViewItem>()
-                    .FirstOrDefault(item => item.Tag is Guid id && id == selectedId);
-
-                if (selectedItem is not null)
-                {
-                    DocumentTabs.SelectedItem = selectedItem;
-                }
-            }
-        }
-        finally
-        {
-            _isSyncingTabs = false;
-        }
-    }
-
-    private async void DocumentTabs_AddTabButtonClick(TabView sender, object args)
-    {
-        var picker = new FileOpenPicker(XamlRoot.ContentIslandEnvironment.AppWindowId)
-        {
-            SuggestedStartLocation = PickerLocationId.DocumentsLibrary
-        };
-        picker.FileTypeFilter.Add(".pdf");
-
-        var file = await picker.PickSingleFileAsync();
-        if (file is null)
-        {
-            return;
-        }
-
-        SelectWorkspace("read");
-        Reader.ClosePanels();
-        await Reader.LoadDocumentAsync(file.Path);
-    }
-
-    private async void DocumentTabs_TabCloseRequested(TabView sender, TabViewTabCloseRequestedEventArgs args)
-    {
-        if (args.Tab?.Tag is not Guid tabId)
-        {
-            return;
-        }
-
-        var tabItem = args.Tab;
-        if (!await Reader.TryCloseTabAsync(tabId))
-        {
-            return;
-        }
-
-        if (sender.TabItems.Contains(tabItem))
-        {
-            sender.TabItems.Remove(tabItem);
-        }
-
-        SyncTabViewItems();
-    }
-
-    private async void DocumentTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_isSyncingTabs || DocumentTabs.SelectedItem is not TabViewItem item || item.Tag is not Guid tabId)
-        {
-            return;
-        }
-
-        SelectWorkspace("read");
-        Reader.ClosePanels();
-        await Reader.ActivateTabAsync(tabId);
-    }
+    private bool IsLabsEnabled() => _settings.Settings.EnableLabs;
 }

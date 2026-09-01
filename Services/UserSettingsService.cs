@@ -6,6 +6,7 @@ public sealed class UserSettingsService : IUserSettingsService
 {
     private readonly string _storeFolder;
     private readonly string _storePath;
+    private readonly SemaphoreSlim _saveGate = new(1, 1);
 
     public UserSettingsService()
     {
@@ -46,11 +47,37 @@ public sealed class UserSettingsService : IUserSettingsService
     public async Task SaveAsync(CancellationToken cancellationToken = default)
     {
         Directory.CreateDirectory(_storeFolder);
-        await using var stream = File.Create(_storePath);
-        await JsonSerializer.SerializeAsync(
-            stream,
-            Settings,
-            ElliePdfJsonContext.Default.UserSettings,
-            cancellationToken);
+        await _saveGate.WaitAsync(cancellationToken);
+        var temporaryPath = Path.Combine(_storeFolder, $"settings.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            await using (var stream = new FileStream(
+                temporaryPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                4096,
+                FileOptions.Asynchronous | FileOptions.WriteThrough))
+            {
+                await JsonSerializer.SerializeAsync(
+                    stream,
+                    Settings,
+                    ElliePdfJsonContext.Default.UserSettings,
+                    cancellationToken);
+                await stream.FlushAsync(cancellationToken);
+            }
+            File.Move(temporaryPath, _storePath, overwrite: true);
+        }
+        finally
+        {
+            _saveGate.Release();
+            try
+            {
+                if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+            }
+            catch (IOException)
+            {
+            }
+        }
     }
 }

@@ -10,240 +10,190 @@
     Background="Transparent"
     mc:Ignorable="d">
 
-    <Grid Padding="24,60,24,0" RowSpacing="12">
+    <Grid Padding="24,64,24,24" RowSpacing="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <!--  Header  -->
-        <Grid ColumnSpacing="16">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <StackPanel Spacing="2" VerticalAlignment="Center">
-                <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Organize" />
-                <TextBlock
-                    x:Name="PageCountText"
-                    Opacity="0.65"
-                    Style="{StaticResource CaptionTextBlockStyle}"
-                    Text="" />
-            </StackPanel>
-
-            <Border
-                Grid.Column="1"
-                Padding="6,4"
-                Shadow="{StaticResource EllieShadow}"
-                Style="{StaticResource ElliePillStyle}"
-                Translation="0,0,16"
-                VerticalAlignment="Center">
-                <StackPanel Orientation="Horizontal" Spacing="2">
-                    <Button
-                        x:Name="ImportButton"
-                        Padding="10,0"
-                        AutomationProperties.AutomationId="BtnImport"
-                        Click="ImportButton_Click"
-                        Style="{StaticResource EllieToolButtonStyle}"
-                        ToolTipService.ToolTip="Replace the workspace with new files">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon FontSize="14" Glyph="&#xE8B5;" />
-                            <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="Import" VerticalAlignment="Center" />
-                        </StackPanel>
-                    </Button>
-                    <Button
-                        x:Name="AddButton"
-                        Padding="10,0"
-                        AutomationProperties.AutomationId="BtnAdd"
-                        Click="AddButton_Click"
-                        Style="{StaticResource EllieToolButtonStyle}"
-                        ToolTipService.ToolTip="Append more files">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon FontSize="14" Glyph="&#xE710;" />
-                            <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="Add" VerticalAlignment="Center" />
-                        </StackPanel>
-                    </Button>
-                    <Border Style="{StaticResource EllieDividerStyle}" />
-                    <Button
-                        x:Name="SaveButton"
-                        Padding="10,0"
-                        AutomationProperties.AutomationId="BtnSave"
-                        Click="SaveButton_Click"
-                        Style="{StaticResource EllieToolButtonStyle}"
-                        ToolTipService.ToolTip="Save changes back to the original files">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon FontSize="14" Glyph="&#xE74E;" />
-                            <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="Save" VerticalAlignment="Center" />
-                        </StackPanel>
-                    </Button>
-                    <Button
-                        x:Name="MergeButton"
-                        Height="32"
-                        Padding="12,0"
-                        AutomationProperties.AutomationId="BtnMerge"
-                        Click="MergeButton_Click"
-                        Style="{StaticResource AccentButtonStyle}"
-                        ToolTipService.ToolTip="Export the pages below as a single PDF">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon FontSize="14" Glyph="&#xEDE1;" />
-                            <TextBlock Text="Export" VerticalAlignment="Center" />
-                        </StackPanel>
-                    </Button>
-                    <Border Style="{StaticResource EllieDividerStyle}" />
-                    <Button
-                        x:Name="BackToDocumentButton"
-                        AutomationProperties.AutomationId="BtnBackToDocument"
-                        AutomationProperties.Name="Back to document"
-                        Click="BackToDocumentButton_Click"
-                        Style="{StaticResource EllieToolButtonStyle}"
-                        ToolTipService.ToolTip="Back to the reader">
-                        <FontIcon FontSize="15" Glyph="&#xE736;" />
-                    </Button>
-                </StackPanel>
-            </Border>
-        </Grid>
+        <TextBlock
+            x:Uid="Organize_Title"
+            Style="{StaticResource TitleTextBlockStyle}" />
 
         <InfoBar
-            x:Name="StatusInfoBar"
             Grid.Row="1"
+            x:Name="StatusInfoBar"
             AutomationProperties.AutomationId="OrganizeStatus"
             IsClosable="True"
             IsOpen="{x:Bind ViewModel.IsStatusOpen, Mode=OneWay}"
             Message="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
             Severity="{x:Bind ViewModel.StatusSeverity, Mode=OneWay}" />
 
-        <!--  Empty state  -->
-        <StackPanel
-            x:Name="EmptyState"
-            Grid.Row="2"
-            HorizontalAlignment="Center"
-            Spacing="14"
-            VerticalAlignment="Center"
-            Visibility="Collapsed">
-            <Border
-                Width="64"
-                Height="64"
-                HorizontalAlignment="Center"
-                Style="{StaticResource EllieIconWellStyle}">
-                <FontIcon
-                    FontSize="26"
-                    Foreground="{ThemeResource EllieAccentStrongBrush}"
-                    Glyph="&#xE8A9;" />
-            </Border>
-            <StackPanel Spacing="4">
-                <TextBlock
-                    HorizontalAlignment="Center"
-                    Style="{StaticResource SubtitleTextBlockStyle}"
-                    Text="Nothing to organize yet" />
-                <TextBlock
-                    HorizontalAlignment="Center"
-                    Opacity="0.65"
-                    Style="{StaticResource BodyTextBlockStyle}"
-                    Text="Import PDFs to reorder, rotate, and merge their pages" />
-            </StackPanel>
-            <Button
-                HorizontalAlignment="Center"
-                Click="ImportButton_Click"
-                Style="{StaticResource AccentButtonStyle}">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <FontIcon FontSize="14" Glyph="&#xE8B5;" />
-                    <TextBlock Text="Import PDFs" />
-                </StackPanel>
-            </Button>
-        </StackPanel>
+        <Grid Grid.Row="2" RowSpacing="16">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
 
-        <!--  Page grid  -->
-        <GridView
-            x:Name="ThumbnailGrid"
-            Grid.Row="2"
-            Padding="0,4,0,24"
-            AllowDrop="True"
-            AutomationProperties.AutomationId="ThumbnailGrid"
-            CanDragItems="True"
-            CanReorderItems="True"
-            IsItemClickEnabled="True"
-            ItemClick="ThumbnailGrid_ItemClick"
-            ItemsSource="{x:Bind ViewModel.Pages, Mode=OneWay}"
-            SelectionMode="None">
-            <GridView.ItemTemplate>
-                <DataTemplate x:DataType="vm:DocumentItemViewModel">
-                    <Border
-                        Width="196"
-                        Padding="10"
-                        PointerEntered="Card_PointerEntered"
-                        PointerExited="Card_PointerExited"
-                        Style="{StaticResource EllieCardStyle}">
-                        <Grid RowSpacing="10">
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="*" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
+            <CommandBar
+                AutomationProperties.AutomationId="OrganizeCommandBar"
+                Background="Transparent"
+                DefaultLabelPosition="Right">
+                <AppBarButton
+                    x:Name="ImportButton"
+                    AutomationProperties.AutomationId="BtnImport"
+                    Click="ImportButton_Click"
+                    Icon="OpenFile"
+                    x:Uid="Organize_Import" />
+                <AppBarButton
+                    x:Name="AddButton"
+                    AutomationProperties.AutomationId="BtnAdd"
+                    Click="AddButton_Click"
+                    Icon="Add"
+                    x:Uid="Organize_Add" />
+                <AppBarButton
+                    x:Name="SaveButton"
+                    AutomationProperties.AutomationId="BtnSave"
+                    Click="SaveButton_Click"
+                    Icon="Save"
+                    x:Uid="Organize_Save" />
+                <AppBarButton
+                    x:Name="UndoButton"
+                    AutomationProperties.AutomationId="BtnUndo"
+                    Click="UndoButton_Click"
+                    Icon="Undo"
+                    x:Uid="Organize_Undo" />
+                <AppBarButton
+                    x:Name="RedoButton"
+                    AutomationProperties.AutomationId="BtnRedo"
+                    Click="RedoButton_Click"
+                    Icon="Redo"
+                    x:Uid="Organize_Redo" />
+                <AppBarButton
+                    x:Name="MergeButton"
+                    AutomationProperties.AutomationId="BtnMerge"
+                    Click="MergeButton_Click"
+                    Icon="Copy"
+                    x:Uid="Organize_Export" />
+                <AppBarSeparator />
+                <AppBarButton
+                    x:Name="BackToDocumentButton"
+                    AutomationProperties.AutomationId="BtnBackToDocument"
+                    Click="BackToDocumentButton_Click"
+                    Icon="Document"
+                    x:Uid="Organize_Back" />
+                <CommandBar.SecondaryCommands>
+                    <AppBarButton
+                        x:Name="OverwriteButton"
+                        x:Uid="Organize_OverwriteAdvanced"
+                        AutomationProperties.AutomationId="BtnOverwriteAdvanced"
+                        Click="OverwriteButton_Click"
+                        Icon="Save" />
+                </CommandBar.SecondaryCommands>
+            </CommandBar>
 
-                            <Grid>
-                                <Border Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="8">
-                                    <Image
-                                        Height="222"
-                                        Margin="4"
-                                        Source="{x:Bind Thumbnail, Mode=OneWay}"
-                                        Stretch="Uniform" />
-                                </Border>
+            <GridView
+                x:Name="ThumbnailGrid"
+                Grid.Row="1"
+                AutomationProperties.AutomationId="ThumbnailGrid"
+                AllowDrop="True"
+                CanDragItems="True"
+                CanReorderItems="False"
+                IsItemClickEnabled="True"
+                ItemClick="ThumbnailGrid_ItemClick"
+                ItemsSource="{x:Bind ViewModel.Pages, Mode=OneWay}"
+                SelectionMode="None">
+                <GridView.ItemTemplate>
+                    <DataTemplate x:DataType="vm:DocumentItemViewModel">
+                        <Border
+                            Width="192"
+                            Padding="12"
+                            Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8">
+                            <Grid RowSpacing="12">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
 
-                                <!--  Hover actions  -->
                                 <Border
-                                    x:Name="CardActions"
-                                    Margin="0,0,0,8"
-                                    Padding="4,2"
-                                    HorizontalAlignment="Center"
-                                    IsHitTestVisible="False"
-                                    Opacity="0"
-                                    Style="{StaticResource ElliePillStyle}"
-                                    VerticalAlignment="Bottom">
-                                    <Border.OpacityTransition>
-                                        <ScalarTransition />
-                                    </Border.OpacityTransition>
-                                    <StackPanel Orientation="Horizontal" Spacing="2">
-                                        <Button
-                                            Width="34"
-                                            Height="32"
-                                            AutomationProperties.AutomationId="BtnRotatePage"
-                                            AutomationProperties.Name="Rotate page"
-                                            Click="RotateButton_Click"
-                                            Style="{StaticResource EllieToolButtonStyle}"
-                                            ToolTipService.ToolTip="Rotate page clockwise">
-                                            <FontIcon FontSize="14" Glyph="&#xE7AD;" />
-                                        </Button>
-                                        <Button
-                                            Width="34"
-                                            Height="32"
-                                            AutomationProperties.AutomationId="BtnDeletePage"
-                                            AutomationProperties.Name="Delete page"
-                                            Click="DeleteButton_Click"
-                                            Style="{StaticResource EllieToolButtonStyle}"
-                                            ToolTipService.ToolTip="Delete page from the working document">
-                                            <FontIcon FontSize="14" Glyph="&#xE74D;" />
-                                        </Button>
-                                    </StackPanel>
+                                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                                    CornerRadius="4">
+                                    <Image
+                                        Height="220"
+                                        Source="{x:Bind Thumbnail, Mode=OneWay}"
+                                        Stretch="Uniform">
+                                        <Image.RenderTransform>
+                                            <CompositeTransform Rotation="{x:Bind RotationAngle, Mode=OneWay}" />
+                                        </Image.RenderTransform>
+                                    </Image>
                                 </Border>
-                            </Grid>
 
-                            <StackPanel Grid.Row="1" Spacing="2">
-                                <TextBlock
+                                <StackPanel Grid.Row="1" Spacing="4">
+                                    <TextBlock
+                                        HorizontalAlignment="Center"
+                                        Style="{StaticResource BodyStrongTextBlockStyle}"
+                                        Text="{x:Bind DisplayName, Mode=OneWay}" />
+                                    <TextBlock
+                                        HorizontalAlignment="Center"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Text="{x:Bind SourceLabel, Mode=OneWay}"
+                                        TextAlignment="Center"
+                                        TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+
+                                <StackPanel
+                                    Grid.Row="2"
+                                    Orientation="Horizontal"
                                     HorizontalAlignment="Center"
-                                    Style="{StaticResource BodyStrongTextBlockStyle}"
-                                    Text="{x:Bind DisplayName, Mode=OneWay}" />
-                                <TextBlock
-                                    HorizontalAlignment="Center"
-                                    Opacity="0.6"
-                                    Style="{StaticResource CaptionTextBlockStyle}"
-                                    Text="{x:Bind SourceLabel, Mode=OneWay}"
-                                    TextAlignment="Center"
-                                    TextTrimming="CharacterEllipsis" />
-                            </StackPanel>
-                        </Grid>
-                    </Border>
-                </DataTemplate>
-            </GridView.ItemTemplate>
-        </GridView>
+                                    Spacing="8">
+                                    <Button
+                                        AutomationProperties.AutomationId="BtnDeletePage"
+                                        x:Uid="Organize_Delete"
+                                        Click="DeleteButton_Click"
+                                        Style="{StaticResource EllieSubtleTouchButtonStyle}"
+                                        >
+                                        <SymbolIcon Symbol="Delete" />
+                                    </Button>
+                                    <Button
+                                        AutomationProperties.AutomationId="BtnMovePageLeft"
+                                        x:Uid="Organize_MoveLeft"
+                                        Click="MoveLeftButton_Click"
+                                        Style="{StaticResource EllieSubtleTouchButtonStyle}">
+                                        <SymbolIcon Symbol="Back" />
+                                    </Button>
+                                    <Button
+                                        AutomationProperties.AutomationId="BtnMovePageRight"
+                                        x:Uid="Organize_MoveRight"
+                                        Click="MoveRightButton_Click"
+                                        Style="{StaticResource EllieSubtleTouchButtonStyle}">
+                                        <SymbolIcon Symbol="Forward" />
+                                    </Button>
+                                    <Button
+                                        AutomationProperties.AutomationId="BtnDuplicatePage"
+                                        x:Uid="Organize_Duplicate"
+                                        Click="DuplicateButton_Click"
+                                        Style="{StaticResource EllieSubtleTouchButtonStyle}">
+                                        <SymbolIcon Symbol="Copy" />
+                                    </Button>
+                                    <Button
+                                        AutomationProperties.AutomationId="BtnRotatePage"
+                                        x:Uid="Organize_Rotate"
+                                        Click="RotateButton_Click"
+                                        Style="{StaticResource EllieSubtleTouchButtonStyle}"
+                                        >
+                                        <SymbolIcon Symbol="Rotate" />
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </GridView.ItemTemplate>
+            </GridView>
+        </Grid>
     </Grid>
 </Page>

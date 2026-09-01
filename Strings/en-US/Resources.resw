@@ -1,0 +1,253 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+
+  <data name="MainWindow.Title" xml:space="preserve"><value>Ellie PDF</value></data>
+  <data name="App_Name" xml:space="preserve"><value>Ellie PDF</value></data>
+  <data name="MainPage_Read.Content" xml:space="preserve"><value>Read</value></data>
+  <data name="MainPage_Organize.Content" xml:space="preserve"><value>Organize (Labs)</value></data>
+  <data name="MainPage_Settings.Content" xml:space="preserve"><value>Settings</value></data>
+  <data name="MainPage_Menu.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Menu</value></data>
+  <data name="MainPage_Back.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Back</value></data>
+  <data name="MainPage_DragRegion.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Window drag region</value></data>
+
+  <data name="Reader_EmptyStateTitle.Text" xml:space="preserve"><value>Open a PDF to start reading</value></data>
+  <data name="Reader_OpenPdfText.Text" xml:space="preserve"><value>Open PDF</value></data>
+  <data name="Reader_EmptyStateOpen.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Open PDF</value></data>
+  <data name="Reader_DocumentTabs.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Open documents</value></data>
+  <data name="Reader_CommandBar.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Reader commands</value></data>
+  <data name="Reader_EditCommandBar.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Editing commands</value></data>
+  <data name="Reader_Sidebar.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Document navigation</value></data>
+  <data name="Reader_ThumbnailsPanel.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Page thumbnails</value></data>
+  <data name="Reader_OutlinePanel.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Document outline</value></data>
+  <data name="Reader_CloseSidebar.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Close document sidebar</value></data>
+  <data name="Reader_SearchBox.PlaceholderText" xml:space="preserve"><value>Search in document</value></data>
+  <data name="Reader_SearchBox.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Search in document</value></data>
+  <data name="Reader_MatchCase.Content" xml:space="preserve"><value>Match case</value></data>
+  <data name="Reader_Find.Content" xml:space="preserve"><value>Find</value></data>
+  <data name="Reader_PreviousMatch.Content" xml:space="preserve"><value>Previous</value></data>
+  <data name="Reader_NextMatch.Content" xml:space="preserve"><value>Next</value></data>
+
+  <data name="Reader_Open.Label" xml:space="preserve"><value>Open</value></data>
+  <data name="Reader_CloseDocument.Label" xml:space="preserve"><value>Close document</value></data>
+  <data name="Reader_Pages.Label" xml:space="preserve"><value>Pages</value></data>
+  <data name="Reader_Outline.Label" xml:space="preserve"><value>Outline</value></data>
+  <data name="Reader_ViewMode.Label" xml:space="preserve"><value>View mode</value></data>
+  <data name="Reader_ContinuousView.Text" xml:space="preserve"><value>Continuous scroll</value></data>
+  <data name="Reader_SinglePageView.Text" xml:space="preserve"><value>Page by page</value></data>
+  <data name="Reader_PreviousPage.Label" xml:space="preserve"><value>Previous page</value></data>
+  <data name="Reader_NextPage.Label" xml:space="preserve"><value>Next page</value></data>
+  <data name="Reader_PageNumber.PlaceholderText" xml:space="preserve"><value>Page</value></data>
+  <data name="Reader_PageNumber.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Page number</value></data>
+  <data name="Reader_FitWidth.Label" xml:space="preserve"><value>Fit width</value></data>
+  <data name="Reader_FitPage.Label" xml:space="preserve"><value>Fit page</value></data>
+  <data name="Reader_ActualSize.Label" xml:space="preserve"><value>Actual size</value></data>
+  <data name="Reader_ZoomOut.Label" xml:space="preserve"><value>Zoom out</value></data>
+  <data name="Reader_ZoomIn.Label" xml:space="preserve"><value>Zoom in</value></data>
+  <data name="Reader_Search.Label" xml:space="preserve"><value>Search</value></data>
+  <data name="Reader_Print.Label" xml:space="preserve"><value>Print</value></data>
+  <data name="Reader_Organize.Label" xml:space="preserve"><value>Organize pages (Labs)</value></data>
+  <data name="Reader_Edit.Label" xml:space="preserve"><value>Edit PDF (Labs)</value></data>
+
+  <data name="Reader_DoneEditing.Label" xml:space="preserve"><value>Done editing</value></data>
+  <data name="Reader_Save.Label" xml:space="preserve"><value>Save</value></data>
+  <data name="Reader_SaveAs.Label" xml:space="preserve"><value>Save as</value></data>
+  <data name="Reader_SelectTool.Label" xml:space="preserve"><value>Select</value></data>
+  <data name="Reader_InkTool.Label" xml:space="preserve"><value>Ink</value></data>
+  <data name="Reader_AddText.Label" xml:space="preserve"><value>Add text</value></data>
+  <data name="Reader_Signature.Label" xml:space="preserve"><value>Signature</value></data>
+  <data name="Reader_Eraser.Label" xml:space="preserve"><value>Eraser</value></data>
+  <data name="Reader_UndoEdit.Label" xml:space="preserve"><value>Undo edit</value></data>
+  <data name="Reader_DeleteEdit.Label" xml:space="preserve"><value>Delete selected edit</value></data>
+
+  <data name="Reader_SignatureDialog.Title" xml:space="preserve"><value>Capture signature</value></data>
+  <data name="Reader_SignatureDialog.PrimaryButtonText" xml:space="preserve"><value>Place</value></data>
+  <data name="Reader_SignatureDialog.SecondaryButtonText" xml:space="preserve"><value>Cancel</value></data>
+  <data name="Reader_SignatureCanvas.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Drawn signature area</value></data>
+  <data name="Reader_ClearSignature.Content" xml:space="preserve"><value>Clear</value></data>
+  <data name="Reader_SignatureName.PlaceholderText" xml:space="preserve"><value>Or type your name</value></data>
+  <data name="Reader_SignatureName.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Typed signature</value></data>
+  <data name="Reader_InkPaletteLabel.Text" xml:space="preserve"><value>Ink</value></data>
+  <data name="Reader_InkBlack.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Black ink</value></data>
+  <data name="Reader_InkRed.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Red ink</value></data>
+  <data name="Reader_InkBlue.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Blue ink</value></data>
+  <data name="Reader_InkThin.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Thin ink</value></data>
+  <data name="Reader_InkMedium.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Medium ink</value></data>
+  <data name="Reader_InkThick.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Thick ink</value></data>
+
+  <data name="Reader_NoDocument" xml:space="preserve"><value>No document open</value></data>
+  <data name="Reader_PageUnavailable" xml:space="preserve"><value>Page –/–</value></data>
+  <data name="Reader_PageOfCount" xml:space="preserve"><value>Page {0:N0} of {1:N0}</value></data>
+  <data name="Reader_SidebarPages" xml:space="preserve"><value>Pages</value></data>
+  <data name="Reader_SidebarOutline" xml:space="preserve"><value>Outline</value></data>
+  <data name="Reader_SidebarSearch" xml:space="preserve"><value>Search results</value></data>
+  <data name="Reader_UnsavedChanges" xml:space="preserve"><value>Unsaved changes</value></data>
+  <data name="Reader_TabUnsavedName" xml:space="preserve"><value>{0}, unsaved changes</value></data>
+  <data name="Reader_Selected" xml:space="preserve"><value>Selected</value></data>
+  <data name="Reader_NotSelected" xml:space="preserve"><value>Not selected</value></data>
+  <data name="Reader_PageAutomationName" xml:space="preserve"><value>Page {0:N0}</value></data>
+  <data name="Reader_StatusOpened" xml:space="preserve"><value>Opened {0}.</value></data>
+  <data name="Reader_StatusOpenCancelled" xml:space="preserve"><value>Open cancelled.</value></data>
+  <data name="Reader_StatusCloseCancelled" xml:space="preserve"><value>Close cancelled. The tab remains open.</value></data>
+  <data name="Reader_StatusOverlaySaveUnsupported" xml:space="preserve"><value>This tab has unsaved Labs edits. Save writes editable annotations to the PDF; Save Flattened Copy creates a separate flattened PDF.</value></data>
+  <data name="Reader_StatusSaveConflict" xml:space="preserve"><value>The PDF changed on disk while saving. The tab remains open so you can review the changes.</value></data>
+  <data name="Reader_StatusSaveFailed" xml:space="preserve"><value>The document could not be saved ({0}). The tab remains open.</value></data>
+  <data name="Reader_SearchNoMatches" xml:space="preserve"><value>No matches found.</value></data>
+  <data name="Reader_SearchMatchOf" xml:space="preserve"><value>Match {0:N0} of {1:N0}</value></data>
+  <data name="Reader_SearchMatchOne" xml:space="preserve"><value>Match {0:N0} of one result</value></data>
+  <data name="Reader_SearchMatchMany" xml:space="preserve"><value>Match {0:N0} of {1:N0} results</value></data>
+  <data name="Reader_StatusEditLabsOnly" xml:space="preserve"><value>Editing is available only when Labs is enabled in Settings.</value></data>
+  <data name="Reader_StatusOpenBeforeEdit" xml:space="preserve"><value>Open a document before editing.</value></data>
+  <data name="Reader_StatusOpenBeforeSave" xml:space="preserve"><value>Open a document before saving.</value></data>
+  <data name="Reader_PdfFileType" xml:space="preserve"><value>PDF document</value></data>
+  <data name="Reader_StatusSavedCopy" xml:space="preserve"><value>Saved a copy to “{0}”.</value></data>
+  <data name="Reader_StatusOrganizeLabsOnly" xml:space="preserve"><value>Page organization is available only when Labs is enabled in Settings.</value></data>
+  <data name="Reader_StatusOpenBeforeOrganize" xml:space="preserve"><value>Open a document before organizing pages.</value></data>
+  <data name="Reader_StatusSavedEmbedded" xml:space="preserve"><value>Saved “{0}” with annotations embedded.</value></data>
+  <data name="Reader_SaveConfirmTitle" xml:space="preserve"><value>Save changes?</value></data>
+  <data name="Reader_SaveConfirmContent" xml:space="preserve"><value>Overwrite “{0}” with your edits?</value></data>
+  <data name="Reader_SaveConfirmAction" xml:space="preserve"><value>Save</value></data>
+  <data name="Reader_FocusModeOn" xml:space="preserve"><value>Focus mode on</value></data>
+  <data name="Reader_FocusModeOff" xml:space="preserve"><value>Focus mode off</value></data>
+  <data name="Print_Title" xml:space="preserve"><value>Print</value></data>
+  <data name="Print_Action" xml:space="preserve"><value>Print</value></data>
+  <data name="Print_AllPages" xml:space="preserve"><value>All pages</value></data>
+  <data name="Print_CurrentPage" xml:space="preserve"><value>Current page</value></data>
+  <data name="Print_PageRange" xml:space="preserve"><value>Page range</value></data>
+  <data name="Print_From" xml:space="preserve"><value>From</value></data>
+  <data name="Print_To" xml:space="preserve"><value>To</value></data>
+  <data name="Common_Cancel" xml:space="preserve"><value>Cancel</value></data>
+  <data name="Settings_ClearRecoveryConfirmTitle" xml:space="preserve"><value>Delete recovery data?</value></data>
+  <data name="Settings_ClearRecoveryConfirmMessage" xml:space="preserve"><value>This permanently deletes unsaved recovery data. Any edits that have not been saved may be lost.</value></data>
+  <data name="Settings_ClearRecoveryConfirmDelete" xml:space="preserve"><value>Delete recovery data</value></data>
+  <data name="Settings_ClearRecoveryConfirmCancel" xml:space="preserve"><value>Cancel</value></data>
+  <data name="Settings_PreviewSupport.Content" xml:space="preserve"><value>Preview support bundle</value></data>
+  <data name="Settings_ExportSupport.Content" xml:space="preserve"><value>Export redacted support bundle</value></data>
+  <data name="Settings_SupportPreviewEmpty" xml:space="preserve"><value>The redacted support bundle is empty.</value></data>
+  <data name="Settings_SupportPreviewOne" xml:space="preserve"><value>One redacted event ({0:N1} KiB), from {1:g} to {2:g}. Document names and content are excluded.</value></data>
+  <data name="Settings_SupportPreviewMany" xml:space="preserve"><value>{0:N0} redacted events ({1:N1} KiB), from {2:g} to {3:g}. Document names and content are excluded.</value></data>
+  <data name="Settings_StatusSupportExported" xml:space="preserve"><value>The redacted support bundle was exported.</value></data>
+  <data name="Settings_SupportSuggestedFileName" xml:space="preserve"><value>ElliePdf-support</value></data>
+  <data name="Settings_SupportFileType" xml:space="preserve"><value>JSON support bundle</value></data>
+  <data name="App_Publisher" xml:space="preserve"><value>ElliePdf</value></data>
+  <data name="App_Description" xml:space="preserve"><value>Fast, private PDF reading</value></data>
+  <data name="App_PdfAssociation" xml:space="preserve"><value>Ellie PDF document</value></data>
+  <data name="Common_Open" xml:space="preserve"><value>Open</value></data><data name="Common_Save" xml:space="preserve"><value>Save</value></data><data name="Common_Discard" xml:space="preserve"><value>Discard</value></data>
+  <data name="PasswordPrompt_Title" xml:space="preserve"><value>Password required</value></data><data name="PasswordPrompt_Placeholder" xml:space="preserve"><value>Password</value></data><data name="PasswordPrompt_Incorrect" xml:space="preserve"><value>The password for '{0}' was incorrect. Try again.</value></data><data name="PasswordPrompt_Protected" xml:space="preserve"><value>'{0}' is protected. Enter the password to open it.</value></data>
+  <data name="Unsaved_Title" xml:space="preserve"><value>Unsaved edits</value></data><data name="Unsaved_Message" xml:space="preserve"><value>'{0}' has unsaved annotations. What would you like to do?</value></data>
+  <data name="Organize_Title.Text" xml:space="preserve"><value>Organize</value></data><data name="Organize_Import.Label" xml:space="preserve"><value>Import</value></data><data name="Organize_Add.Label" xml:space="preserve"><value>Add files</value></data><data name="Organize_Save.Label" xml:space="preserve"><value>Save as</value></data><data name="Organize_Export.Label" xml:space="preserve"><value>Export</value></data><data name="Organize_Back.Label" xml:space="preserve"><value>Cancel organizer</value></data><data name="Organize_Delete.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Delete page</value></data><data name="Organize_Delete.ToolTipService.ToolTip" xml:space="preserve"><value>Delete page from the working document</value></data><data name="Organize_Rotate.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Rotate page</value></data><data name="Organize_Rotate.ToolTipService.ToolTip" xml:space="preserve"><value>Rotate page clockwise</value></data>
+  <data name="Organize_Undo.Label" xml:space="preserve"><value>Undo</value></data><data name="Organize_Redo.Label" xml:space="preserve"><value>Redo</value></data><data name="Organize_MoveLeft.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Move page earlier</value></data><data name="Organize_MoveLeft.ToolTipService.ToolTip" xml:space="preserve"><value>Move page earlier in the plan</value></data><data name="Organize_MoveRight.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Move page later</value></data><data name="Organize_MoveRight.ToolTipService.ToolTip" xml:space="preserve"><value>Move page later in the plan</value></data><data name="Organize_Duplicate.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Duplicate page</value></data><data name="Organize_Duplicate.ToolTipService.ToolTip" xml:space="preserve"><value>Add a copy of this page to the plan</value></data>
+  <data name="Common_Close" xml:space="preserve"><value>Close</value></data>
+  <data name="Common_NotAvailable" xml:space="preserve"><value>Not available</value></data>
+  <data name="Common_Yes" xml:space="preserve"><value>Yes</value></data>
+  <data name="Common_No" xml:space="preserve"><value>No</value></data>
+  <data name="Reader_Properties.Label" xml:space="preserve"><value>Properties</value></data>
+  <data name="Reader_SemanticPageLoading" xml:space="preserve"><value>Page text is loading</value></data>
+  <data name="Reader_SemanticPageName" xml:space="preserve"><value>Page {0:N0}, {1:N0} readable characters</value></data>
+  <data name="Reader_TextCopyAllowed" xml:space="preserve"><value>Selectable text. Use the standard copy command.</value></data>
+  <data name="Reader_TextCopyBlocked" xml:space="preserve"><value>Copying is disabled by this document's permissions.</value></data>
+  <data name="Reader_InternalLinkName" xml:space="preserve"><value>Go to page {0:N0}</value></data>
+  <data name="Reader_ExternalLinkName" xml:space="preserve"><value>Open external link {0}</value></data>
+  <data name="Reader_LinkActivationHelp" xml:space="preserve"><value>Activate this link</value></data>
+  <data name="Reader_LinkBlocked" xml:space="preserve"><value>This PDF link was blocked by the safe-link policy.</value></data>
+  <data name="Reader_LinkLaunchFailed" xml:space="preserve"><value>Windows could not open the external link.</value></data>
+  <data name="Reader_FormReadOnly" xml:space="preserve"><value>Read-only PDF form field</value></data>
+  <data name="Reader_FormRequired" xml:space="preserve"><value>Required PDF form field</value></data>
+  <data name="Reader_FormEditable" xml:space="preserve"><value>Editable PDF form field</value></data>
+  <data name="Reader_FormUnsupportedShort" xml:space="preserve"><value>Read only</value></data>
+  <data name="Reader_FormUnsupportedName" xml:space="preserve"><value>Unsupported form field: {0}</value></data>
+  <data name="Reader_FormUnsupported" xml:space="preserve"><value>This form widget is shown read-only because the PDF engine cannot update it safely.</value></data>
+  <data name="Reader_FormUpdateBlocked" xml:space="preserve"><value>The form value could not be updated.</value></data>
+  <data name="Reader_FormUpdated" xml:space="preserve"><value>Form value updated. Save the PDF to keep this change.</value></data>
+  <data name="Reader_Searching" xml:space="preserve"><value>Searching…</value></data>
+  <data name="Reader_SearchProgressOne" xml:space="preserve"><value>One result found; still searching…</value></data>
+  <data name="Reader_SearchProgressMany" xml:space="preserve"><value>{0:N0} results found; still searching…</value></data>
+  <data name="Reader_SearchResultPage" xml:space="preserve"><value>Page {0:N0}</value></data>
+  <data name="Reader_SearchResultName" xml:space="preserve"><value>Search result on page {0:N0}: {1}</value></data>
+  <data name="Reader_PropertiesDialogTitle" xml:space="preserve"><value>Document properties</value></data>
+  <data name="Reader_PropertiesTitle" xml:space="preserve"><value>Title</value></data>
+  <data name="Reader_PropertiesAuthor" xml:space="preserve"><value>Author</value></data>
+  <data name="Reader_PropertiesSubject" xml:space="preserve"><value>Subject</value></data>
+  <data name="Reader_PropertiesCreator" xml:space="preserve"><value>Creator</value></data>
+  <data name="Reader_PropertiesVersion" xml:space="preserve"><value>PDF version</value></data>
+  <data name="Reader_PropertiesPages" xml:space="preserve"><value>Pages</value></data>
+  <data name="Reader_PropertiesPageSize" xml:space="preserve"><value>Current page size</value></data>
+  <data name="Reader_PropertiesPageSizeValue" xml:space="preserve"><value>{0:N1} × {1:N1} points</value></data>
+  <data name="Reader_PropertiesSecurity" xml:space="preserve"><value>Security</value></data>
+  <data name="Reader_PropertiesPermissions" xml:space="preserve"><value>Permissions</value></data>
+  <data name="Reader_PropertiesPermissionsValue" xml:space="preserve"><value>Print: {0}; copy: {1}; modify: {2}; fill forms: {3}; assemble: {4}</value></data>
+  <data name="Reader_PropertiesForms" xml:space="preserve"><value>Interactive forms</value></data>
+  <data name="Reader_PropertiesOutline" xml:space="preserve"><value>Outline</value></data>
+  <data name="Reader_PropertiesEncrypted" xml:space="preserve"><value>Encrypted</value></data>
+  <data name="Reader_PropertiesNotEncrypted" xml:space="preserve"><value>Not encrypted</value></data>
+  <data name="Print_FitToPrintableArea" xml:space="preserve"><value>Fit to printable area</value></data>
+  <data name="Print_ActualSize" xml:space="preserve"><value>Actual size</value></data>
+  <data name="Print_ScalingHeading" xml:space="preserve"><value>Scaling</value></data>
+  <data name="Print_AutoOrientationExplanation" xml:space="preserve"><value>Portrait or landscape orientation is selected automatically for each page.</value></data>
+  <data name="Print_OpenDocumentTooltip" xml:space="preserve"><value>Open a PDF before printing.</value></data>
+  <data name="Print_AllowedTooltip" xml:space="preserve"><value>Print this document</value></data>
+  <data name="Print_BusyTooltip" xml:space="preserve"><value>A print job is already active.</value></data>
+  <data name="Print_AvailabilityUnknownTooltip" xml:space="preserve"><value>Printing is unavailable because permissions could not be read.</value></data>
+  <data name="Print_PermissionDeniedTooltip" xml:space="preserve"><value>Printing is disabled by this PDF's permissions.</value></data>
+  <data name="Print_PermissionDeniedTitle" xml:space="preserve"><value>Printing not allowed</value></data>
+  <data name="Print_PermissionDeniedMessage" xml:space="preserve"><value>This PDF does not grant permission to print. Ellie PDF will not send its pages to a printer.</value></data>
+  <data name="Print_UnsupportedTitle" xml:space="preserve"><value>Printing unavailable</value></data>
+  <data name="Print_UnsupportedMessage" xml:space="preserve"><value>Windows could not open the print interface for this window.</value></data>
+  <data name="Print_ErrorTitle" xml:space="preserve"><value>Could not prepare printing</value></data>
+  <data name="Print_ErrorMessage" xml:space="preserve"><value>Ellie PDF could not read the document's printing permissions.</value></data>
+  <data name="Reader_EditTextPlaceholder" xml:space="preserve"><value>Enter text…</value></data>
+  <data name="Organize_PageName" xml:space="preserve"><value>Page {0:N0}</value></data>
+  <data name="Organize_StatusAdded" xml:space="preserve"><value>Added {0:N0} document(s). Total pages: {1:N0}.</value></data>
+  <data name="Organize_StatusLoaded" xml:space="preserve"><value>Loaded {0:N0} page(s) from {1:N0} document(s).</value></data>
+  <data name="Organize_StatusImportCancelled" xml:space="preserve"><value>Import cancelled.</value></data>
+  <data name="Organize_StatusRotated" xml:space="preserve"><value>Rotated {0}.</value></data>
+  <data name="Organize_StatusDeleted" xml:space="preserve"><value>Deleted {0}.</value></data>
+  <data name="Organize_StatusImportBeforeSave" xml:space="preserve"><value>Import a PDF before saving.</value></data>
+  <data name="Organize_StatusSaved" xml:space="preserve"><value>Saved {0:N0} document(s).</value></data>
+  <data name="Organize_StatusImportBeforeMerge" xml:space="preserve"><value>Import at least one page before merging.</value></data>
+  <data name="Organize_StatusExported" xml:space="preserve"><value>Exported {0:N0} page(s) to “{1}”.</value></data>
+  <data name="Organize_StatusLabsDisabled" xml:space="preserve"><value>Page organization is disabled. Enable Labs in Settings to use experimental editing tools.</value></data>
+  <data name="Organize_StatusSaveAsRequired" xml:space="preserve"><value>Choose Export or Save As to write the plan to a new PDF. Source files are never overwritten.</value></data>
+  <data name="Organize_StatusExportCancelled" xml:space="preserve"><value>Export cancelled. Source PDFs were not changed.</value></data>
+  <data name="Organize_SaveConfirmTitle" xml:space="preserve"><value>Save changes to original files?</value></data>
+  <data name="Organize_SaveConfirmContent" xml:space="preserve"><value>This will overwrite the original PDF files with your organize changes. This cannot be undone.</value></data>
+  <data name="Organize_SaveConfirmAction" xml:space="preserve"><value>Save</value></data>
+  <data name="Organize_SaveConfirmCancel" xml:space="preserve"><value>Cancel</value></data>
+  <data name="Organize_ExportCompleteTitle" xml:space="preserve"><value>Export complete</value></data>
+  <data name="Organize_ExportCompleteContent" xml:space="preserve"><value>Open “{0}” in the reader?</value></data>
+  <data name="Organize_ExportCompleteOpen" xml:space="preserve"><value>Open</value></data>
+  <data name="Organize_ExportCompleteNotNow" xml:space="preserve"><value>Not now</value></data>
+  <data name="Organize_ExportFileName" xml:space="preserve"><value>ElliePdf-Export</value></data>
+  <data name="Organize_OverwriteAdvanced.Label" xml:space="preserve"><value>Advanced: replace existing PDF</value></data>
+  <data name="Organize_OverwriteAdvanced.ToolTipService.ToolTip" xml:space="preserve"><value>Choose and replace an existing PDF after explicit confirmation</value></data>
+  <data name="Organize_OverwriteConfirmTitle" xml:space="preserve"><value>Replace this existing PDF?</value></data>
+  <data name="Organize_OverwriteConfirmContent" xml:space="preserve"><value>“{0}” will be replaced with the current organizer plan. This cannot be undone.</value></data>
+  <data name="Organize_OverwriteConfirmAction" xml:space="preserve"><value>Replace PDF</value></data>
+  <data name="Reader_SidebarHeading.Text" xml:space="preserve"><value>Document navigation</value></data>
+  <data name="Reader_DirtyMarker" xml:space="preserve"><value>●</value></data>
+  <data name="Settings_Title.Text" xml:space="preserve"><value>Settings</value></data>
+  <data name="Settings_Reading.Text" xml:space="preserve"><value>Reading</value></data>
+  <data name="Settings_DefaultZoom.Header" xml:space="preserve"><value>Default zoom</value></data>
+  <data name="Settings_RecentCount.Header" xml:space="preserve"><value>Recent files to keep</value></data>
+  <data name="Settings_ReopenSession.Header" xml:space="preserve"><value>Reopen my last session</value></data>
+  <data name="Settings_KeepRecents.Header" xml:space="preserve"><value>Keep recent files</value></data>
+  <data name="Settings_PersistViewState.Header" xml:space="preserve"><value>Remember view state</value></data>
+  <data name="Settings_Saving.Text" xml:space="preserve"><value>Saving</value></data>
+  <data name="Settings_ConfirmOverwrite.Header" xml:space="preserve"><value>Confirm overwriting files</value></data>
+  <data name="Settings_ConfirmOrganize.Header" xml:space="preserve"><value>Confirm organize saves</value></data>
+  <data name="Settings_AutoRecovery.Header" xml:space="preserve"><value>Save recovery snapshots automatically</value></data>
+  <data name="Settings_Privacy.Text" xml:space="preserve"><value>Privacy</value></data>
+  <data name="Settings_LocalDiagnostics.Header" xml:space="preserve"><value>Keep local diagnostics</value></data>
+  <data name="Settings_CrashReports.Header" xml:space="preserve"><value>Enable crash reports</value></data>
+  <data name="Settings_ClearRecents.Content" xml:space="preserve"><value>Clear recent files</value></data>
+  <data name="Settings_ClearViewState.Content" xml:space="preserve"><value>Clear view state</value></data>
+  <data name="Settings_ClearDiagnostics.Content" xml:space="preserve"><value>Clear diagnostics</value></data>
+  <data name="Settings_ClearRecovery.Content" xml:space="preserve"><value>Clear recovery data</value></data>
+  <data name="Settings_Labs.Text" xml:space="preserve"><value>Labs</value></data>
+  <data name="Settings_LabsDescription.Text" xml:space="preserve"><value>Experimental editing features are still under development.</value></data>
+  <data name="Settings_EnableLabs.Header" xml:space="preserve"><value>Enable Labs</value></data>
+  <data name="Settings_Save.Content" xml:space="preserve"><value>Save settings</value></data>
+</root>

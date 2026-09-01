@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "status": "baseline",
+  "sourceRef": "main",
+  "sdk": "11.0.100-preview.7.26381.103",
+  "packages": {
+    "Microsoft.Extensions.DependencyInjection": "11.0.0-preview.7.26381.103",
+    "Microsoft.Windows.SDK.BuildTools": "10.0.29648.1000-preview",
+    "Microsoft.WindowsAppSDK": "2.4.1-experimental",
+    "System.Drawing.Common": "11.0.0-preview.7.26381.103"
+  },
+  "tools": {
+    "dotnet-trace": "9.0.661903",
+    "microsoft-store-apppublisher-action": "v1.4",
+    "msstore-cli": "v0.4.1"
+  },
+  "windowsMinimum": "10.0.26100.0",
+  "architectures": ["win-x64", "win-arm64"],
+  "gaVehicle": "Microsoft Store",
+  "arm64Pdfium": "verified-package-asset",
+  "payloadSha256": null,
+  "notes": "Populate payloadSha256 from the signed release record when a payload is promoted."
+}

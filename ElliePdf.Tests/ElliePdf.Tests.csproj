@@ -1,58 +1,22 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net11.0-windows</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <Platforms>AnyCPU;x64</Platforms>
-    <PlatformTarget>x64</PlatformTarget>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
-    <PackageReference Include="xunit" Version="2.9.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.0" />
-    <PackageReference Include="System.Drawing.Common" Version="9.0.8" />
-  </ItemGroup>
-
-  <!--
-    The PDF plumbing lives in the WinUI app project, which cannot be referenced from a plain
-    net11.0 test project. These files have no UI dependencies, so compile them in directly to get
-    real coverage of the PDFium interop against the real native library.
-  -->
-  <ItemGroup>
-    <Compile Include="..\Services\PdfiumNative.cs" Link="Linked\PdfiumNative.cs" />
-    <Compile Include="..\Services\PdfOverlayWriter.cs" Link="Linked\PdfOverlayWriter.cs" />
-    <Compile Include="..\Services\OverlayFontProvider.cs" Link="Linked\OverlayFontProvider.cs" />
-    <Compile Include="..\Services\InkGeometry.cs" Link="Linked\InkGeometry.cs" />
-    <Compile Include="..\Services\ShapeGeometry.cs" Link="Linked\ShapeGeometry.cs" />
-    <Compile Include="..\Services\OverlayHistory.cs" Link="Linked\OverlayHistory.cs" />
-    <Compile Include="..\Services\AnnotationPayload.cs" Link="Linked\AnnotationPayload.cs" />
-    <Compile Include="..\Services\PdfAnnotationReader.cs" Link="Linked\PdfAnnotationReader.cs" />
-    <Compile Include="..\Services\LegacyCompanionMigration.cs" Link="Linked\LegacyCompanionMigration.cs" />
-    <Compile Include="..\Services\AnnotationStore.cs" Link="Linked\AnnotationStore.cs" />
-    <Compile Include="..\Services\ElliePdfJsonContext.cs" Link="Linked\ElliePdfJsonContext.cs" />
-    <Compile Include="..\Services\UserSettings.cs" Link="Linked\UserSettings.cs" />
-    <Compile Include="..\Helpers\SignatureRenderer.cs" Link="Linked\SignatureRenderer.cs" />
-    <Compile Include="..\Models\PageOverlayDocument.cs" Link="Linked\PageOverlayDocument.cs" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Include="..\runtimes\win-x64\native\pdfium.dll" Condition="Exists('..\runtimes\win-x64\native\pdfium.dll')">
-      <Link>pdfium.dll</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\ElliePdf.Core\ElliePdf.Core.csproj" />
   </ItemGroup>
 </Project>
-
-
-
-
-
-

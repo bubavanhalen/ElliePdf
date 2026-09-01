@@ -1,38 +1,37 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using ElliePdf;
-using ElliePdf.Helpers;
+using ElliePdf.Diagnostics;
 using ElliePdf.Services;
+using Microsoft.UI.Xaml.Controls;
 
 namespace ElliePdf.ViewModels;
 
 public sealed partial class SettingsViewModel : ObservableObject
 {
-    private static readonly PdfZoomMode[] ZoomModes =
-    [
-        PdfZoomMode.FitWidth,
-        PdfZoomMode.FitPage,
-        PdfZoomMode.ActualSize,
-        PdfZoomMode.Custom
-    ];
-
     private readonly IUserSettingsService _settingsService;
-    private bool _isLoading;
+    private readonly IRecentFilesService _recentFilesService;
+    private readonly ISessionStateStore _sessionStateStore;
+    private readonly PrivacySafeDiagnostics _diagnostics;
+    private readonly IAnnotationStore _annotationStore;
 
-    public SettingsViewModel(IUserSettingsService settingsService)
+    public SettingsViewModel(
+        IUserSettingsService settingsService,
+        IRecentFilesService recentFilesService,
+        ISessionStateStore sessionStateStore,
+        PrivacySafeDiagnostics diagnostics,
+        IAnnotationStore annotationStore)
     {
         _settingsService = settingsService;
-
-        var version = typeof(SettingsViewModel).Assembly.GetName().Version;
-        AppVersion = version is null ? "1.0" : $"{version.Major}.{version.Minor}.{version.Build}";
-
+        _recentFilesService = recentFilesService;
+        _sessionStateStore = sessionStateStore;
+        _diagnostics = diagnostics;
+        _annotationStore = annotationStore;
         LoadFromSettings();
     }
 
     [ObservableProperty]
-    public partial int ThemeIndex { get; set; }
-
-    [ObservableProperty]
-    public partial int DefaultZoomModeIndex { get; set; }
+    public partial PdfZoomMode DefaultZoomMode { get; set; }
 
     [ObservableProperty]
     public partial bool ConfirmOverwriteSave { get; set; }
@@ -41,78 +40,164 @@ public sealed partial class SettingsViewModel : ObservableObject
     public partial bool ConfirmOrganizeSave { get; set; }
 
     [ObservableProperty]
+    public partial bool AutoSaveCompanion { get; set; }
+
+    [ObservableProperty]
+    public partial bool EnableLabs { get; set; }
+
+    [ObservableProperty]
     public partial int RecentFilesMaxCount { get; set; }
 
-    public List<string> ThemeOptions { get; } = ["Use system setting", "Light", "Dark"];
+    [ObservableProperty]
+    public partial bool ReopenLastSession { get; set; }
 
-    public List<string> ZoomModeOptions { get; } = ["Fit width", "Fit page", "Actual size", "Custom"];
+    [ObservableProperty]
+    public partial bool KeepRecentFiles { get; set; }
 
-    public string AppVersion { get; }
+    [ObservableProperty]
+    public partial bool PersistViewState { get; set; }
 
-    partial void OnThemeIndexChanged(int value)
+    [ObservableProperty]
+    public partial bool EnableLocalDiagnostics { get; set; }
+
+    [ObservableProperty]
+    public partial bool EnableCrashReports { get; set; }
+
+    [ObservableProperty]
+    public partial bool IsStatusOpen { get; private set; }
+
+    [ObservableProperty]
+    public partial string StatusMessage { get; private set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial InfoBarSeverity StatusSeverity { get; private set; } = InfoBarSeverity.Informational;
+
+    public IReadOnlyList<PdfZoomMode> ZoomModeOptions { get; } =
+    [
+        PdfZoomMode.FitWidth,
+        PdfZoomMode.FitPage,
+        PdfZoomMode.ActualSize,
+        PdfZoomMode.Custom
+    ];
+
+    [RelayCommand]
+    private async Task SaveAsync()
     {
-        if (!_isLoading)
-        {
-            ThemeHelper.Apply(ThemeIndexToName(value));
-        }
-
-        ApplyAndSave();
-    }
-
-    partial void OnDefaultZoomModeIndexChanged(int value) => ApplyAndSave();
-
-    partial void OnConfirmOverwriteSaveChanged(bool value) => ApplyAndSave();
-
-    partial void OnConfirmOrganizeSaveChanged(bool value) => ApplyAndSave();
-
-    partial void OnRecentFilesMaxCountChanged(int value) => ApplyAndSave();
-
-    private void ApplyAndSave()
-    {
-        if (_isLoading)
-        {
-            return;
-        }
-
         var settings = _settingsService.Settings;
-        settings.AppTheme = ThemeIndexToName(ThemeIndex);
-        settings.DefaultZoomMode = ZoomModes[Math.Clamp(DefaultZoomModeIndex, 0, ZoomModes.Length - 1)];
+        settings.DefaultZoomMode = DefaultZoomMode;
         settings.ConfirmOverwriteSave = ConfirmOverwriteSave;
         settings.ConfirmOrganizeSave = ConfirmOrganizeSave;
+        settings.AutoSaveCompanion = AutoSaveCompanion;
+        settings.EnableLabs = EnableLabs;
         settings.RecentFilesMaxCount = Math.Clamp(RecentFilesMaxCount, 1, 50);
+        settings.ReopenLastSession = ReopenLastSession;
+        settings.KeepRecentFiles = KeepRecentFiles;
+        settings.PersistViewState = PersistViewState;
+        settings.EnableLocalDiagnostics = EnableLocalDiagnostics;
+        settings.EnableCrashReports = EnableCrashReports;
 
-        _ = _settingsService.SaveAsync();
+        await _settingsService.SaveAsync();
+        if (!KeepRecentFiles)
+        {
+            await _recentFilesService.ClearAsync();
+            await _sessionStateStore.ClearAsync(SessionDataKind.Recents);
+        }
+        if (!ReopenLastSession)
+        {
+            await _sessionStateStore.ClearAsync(SessionDataKind.ReopenState);
+        }
+        if (!EnableLocalDiagnostics)
+        {
+            _diagnostics.DeleteLocalData();
+        }
+
+        StatusMessage = AppResources.Get("Settings_StatusSaved");
+        StatusSeverity = InfoBarSeverity.Success;
+        IsStatusOpen = true;
     }
 
-    private static string ThemeIndexToName(int index) => index switch
-    {
-        1 => "Light",
-        2 => "Dark",
-        _ => "System"
-    };
+    public void DismissStatus() => IsStatusOpen = false;
 
-    private static int ThemeNameToIndex(string? name) => name switch
+    [RelayCommand]
+    private async Task ClearRecentFilesAsync()
     {
-        "Light" => 1,
-        "Dark" => 2,
-        _ => 0
-    };
+        await _recentFilesService.ClearAsync();
+        await _sessionStateStore.ClearAsync(SessionDataKind.Recents);
+        StatusMessage = AppResources.Get("Settings_StatusRecentsCleared");
+        StatusSeverity = InfoBarSeverity.Success;
+        IsStatusOpen = true;
+    }
+
+    [RelayCommand]
+    private async Task ClearViewStateAsync()
+    {
+        await _sessionStateStore.ClearAsync(SessionDataKind.ViewState);
+        StatusMessage = AppResources.Get("Settings_StatusViewStateCleared");
+        StatusSeverity = InfoBarSeverity.Success;
+        IsStatusOpen = true;
+    }
+
+    [RelayCommand]
+    private void ClearDiagnostics()
+    {
+        _diagnostics.DeleteLocalData();
+        StatusMessage = AppResources.Get("Settings_StatusDiagnosticsCleared");
+        StatusSeverity = InfoBarSeverity.Success;
+        IsStatusOpen = true;
+    }
+
+    [RelayCommand]
+    private void PreviewSupportBundle()
+    {
+        var preview = _diagnostics.Preview();
+        StatusMessage = preview.EventCount switch
+        {
+            0 => AppResources.Get("Settings_SupportPreviewEmpty"),
+            1 => AppResources.Format(
+                "Settings_SupportPreviewOne",
+                preview.Bytes / 1024d,
+                preview.Oldest.ToLocalTime(),
+                preview.Newest.ToLocalTime()),
+            _ => AppResources.Format(
+                "Settings_SupportPreviewMany",
+                preview.EventCount,
+                preview.Bytes / 1024d,
+                preview.Oldest.ToLocalTime(),
+                preview.Newest.ToLocalTime())
+        };
+        StatusSeverity = InfoBarSeverity.Informational;
+        IsStatusOpen = true;
+    }
+
+    public void ExportSupportBundle(string destinationPath)
+    {
+        _diagnostics.ExportSupportBundle(destinationPath);
+        StatusMessage = AppResources.Get("Settings_StatusSupportExported");
+        StatusSeverity = InfoBarSeverity.Success;
+        IsStatusOpen = true;
+    }
+
+    public async Task ClearRecoveryDataAsync()
+    {
+        await _annotationStore.ClearAllRecoveryAsync();
+        StatusMessage = AppResources.Get("Settings_StatusRecoveryCleared");
+        StatusSeverity = InfoBarSeverity.Success;
+        IsStatusOpen = true;
+    }
 
     private void LoadFromSettings()
     {
-        _isLoading = true;
-        try
-        {
-            var settings = _settingsService.Settings;
-            ThemeIndex = ThemeNameToIndex(settings.AppTheme);
-            DefaultZoomModeIndex = Math.Max(0, Array.IndexOf(ZoomModes, settings.DefaultZoomMode));
-            ConfirmOverwriteSave = settings.ConfirmOverwriteSave;
-            ConfirmOrganizeSave = settings.ConfirmOrganizeSave;
-            RecentFilesMaxCount = settings.RecentFilesMaxCount;
-        }
-        finally
-        {
-            _isLoading = false;
-        }
+        var settings = _settingsService.Settings;
+        DefaultZoomMode = settings.DefaultZoomMode;
+        ConfirmOverwriteSave = settings.ConfirmOverwriteSave;
+        ConfirmOrganizeSave = settings.ConfirmOrganizeSave;
+        AutoSaveCompanion = settings.AutoSaveCompanion;
+        EnableLabs = settings.EnableLabs;
+        RecentFilesMaxCount = settings.RecentFilesMaxCount;
+        ReopenLastSession = settings.ReopenLastSession;
+        KeepRecentFiles = settings.KeepRecentFiles;
+        PersistViewState = settings.PersistViewState;
+        EnableLocalDiagnostics = settings.EnableLocalDiagnostics;
+        EnableCrashReports = settings.EnableCrashReports;
     }
 }

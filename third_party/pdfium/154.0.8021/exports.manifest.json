@@ -1,0 +1,12 @@
+{
+  "package": "bblanchon.PDFium.Win32",
+  "version": "154.0.8021",
+  "sourceCommit": "9dd99a8991bed3a2f37658a31bcd5b403800fd03",
+  "requiredBy": "src/ElliePdf.Pdfium/PdfiumNative.cs",
+  "requiredExportCount": 103,
+  "verificationScript": "eng/Verify-PdfiumNative.ps1",
+  "rids": {
+    "win-x64": { "machine": "0x8664", "sha256": "2A9031FA88F412147C3BC7115054550048C724DB6EA70298B6C6B0D13E513882", "length": 7262720 },
+    "win-arm64": { "machine": "0xAA64", "sha256": "B8A41647AC18C039C4A9CE4F00C1D71A08133EDF92531A9C7903FD985A04DB73", "length": 6705152 }
+  }
+}

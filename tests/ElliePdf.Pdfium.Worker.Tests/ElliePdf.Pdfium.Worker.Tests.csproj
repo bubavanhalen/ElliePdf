@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net11.0-windows10.0.26100.0</TargetFramework>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == '' and '$(Platform)' == 'ARM64'">win-arm64</RuntimeIdentifier>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
+    <PlatformTarget Condition="'$(Platform)' == 'ARM64'">ARM64</PlatformTarget>
+    <PlatformTarget Condition="'$(Platform)' != 'ARM64'">x64</PlatformTarget>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="bblanchon.PDFium.Win32" GeneratePathProperty="true" />
+    <ProjectReference Include="..\..\src\ElliePdf.Pdf.Transport\ElliePdf.Pdf.Transport.csproj" />
+    <ProjectReference Include="..\..\src\ElliePdf.Pdfium.Worker\ElliePdf.Pdfium.Worker.csproj" />
+  </ItemGroup>
+
+  <Target Name="CopyVerifiedPdfiumAssetForTests" AfterTargets="Build">
+    <PropertyGroup>
+      <_PdfiumAsset>$(Pkgbblanchon_PDFium_Win32)\runtimes\$(RuntimeIdentifier)\native\pdfium.dll</_PdfiumAsset>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(_PdfiumAsset)')" Text="PDFium package asset missing for worker tests: $(_PdfiumAsset)." />
+    <Copy SourceFiles="$(_PdfiumAsset)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+  </Target>
+
+  <ItemGroup>
+    <None Include="..\..\testdata\manifest.json" Link="testdata\manifest.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\testdata\generated\*.pdf" Link="testdata\generated\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

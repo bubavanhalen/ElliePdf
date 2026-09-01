@@ -6,12 +6,9 @@ public sealed class RecentFileItemViewModel
     {
         FilePath = filePath;
         DisplayName = Path.GetFileName(filePath);
-        FolderName = Path.GetDirectoryName(filePath) ?? string.Empty;
     }
 
     public string FilePath { get; }
 
     public string DisplayName { get; }
-
-    public string FolderName { get; }
 }

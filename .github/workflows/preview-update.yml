@@ -1,0 +1,111 @@
+name: Weekly preview compatibility
+
+on:
+  schedule:
+    - cron: '41 2 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  DOTNET_ROLL_FORWARD: Disable
+
+jobs:
+  preview-candidate:
+    runs-on: windows-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - name: Bootstrap pinned SDK
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          global-json-file: global.json
+      - name: Discover and apply newest prerelease pins
+        id: preview
+        shell: pwsh
+        run: .\eng\Update-PreviewPins.ps1 -Apply -WriteGitHubOutput
+      - name: Install candidate SDK
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: ${{ steps.preview.outputs.sdk }}
+      - name: Regenerate and verify package locks
+        shell: pwsh
+        run: |
+          dotnet restore ElliePdf.slnx --force-evaluate -p:RestoreLockedMode=false
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate lock regeneration failed.' }
+          dotnet restore ElliePdf.slnx --locked-mode
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate locked restore failed.' }
+          dotnet tool restore
+      - name: Validate preview governance
+        shell: pwsh
+        run: |
+          .\eng\Verify-PdfiumNative.ps1
+          .\eng\Test-UpstreamWarningAllowlist.ps1
+          .\eng\Test-ResourceCompleteness.ps1
+          .\eng\Test-LocalizationUsage.ps1
+          .\eng\Test-MsixVersionMapping.ps1
+          .\eng\Get-ToolchainFingerprint.ps1 -OutputPath preview-toolchain-fingerprint.json
+      - name: Build x64 and ARM64
+        shell: pwsh
+        run: |
+          dotnet build ElliePdf.slnx -c Release -p:Platform=x64 --no-restore
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate x64 build failed.' }
+          dotnet build ElliePdf.slnx -c Release -p:Platform=ARM64 --no-restore
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate ARM64 build failed.' }
+      - name: Run all x64 tests
+        shell: pwsh
+        run: |
+          $projects = @('ElliePdf.Tests\ElliePdf.Tests.csproj') + (Get-ChildItem tests -Filter *.Tests.csproj -Recurse | ForEach-Object FullName)
+          foreach ($project in $projects) {
+            dotnet test $project -c Release -p:Platform=x64 -p:RuntimeIdentifier=win-x64 --no-restore
+            if ($LASTEXITCODE -ne 0) { throw "Candidate tests failed: $project" }
+          }
+      - name: Performance smoke
+        shell: pwsh
+        run: |
+          dotnet run --project .\Benchmark\Benchmark.csproj -c Release --no-restore
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate performance smoke failed.' }
+      - name: NativeAOT publish and package x64
+        shell: pwsh
+        run: |
+          .\eng\Publish-ReleaseArtifacts.ps1 -Platform x64 -RuntimeIdentifier win-x64 -Package
+          .\eng\Test-SourceLink.ps1 -SymbolsPath artifacts\symbols\win-x64
+      - name: NativeAOT publish and package ARM64
+        shell: pwsh
+        run: |
+          .\eng\Publish-ReleaseArtifacts.ps1 -Platform ARM64 -RuntimeIdentifier win-arm64 -Package
+          .\eng\Test-SourceLink.ps1 -SymbolsPath artifacts\symbols\win-arm64
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: preview-candidate-evidence
+          path: |
+            preview-toolchain-fingerprint.json
+            artifacts/publish/win-x64
+            artifacts/publish/win-arm64
+            artifacts/package/win-x64
+            artifacts/package/win-arm64
+            artifacts/benchmark-report.json
+      - name: Propose validated pin update
+        if: steps.preview.outputs.changed == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $branch = 'automation/preview-stack'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git checkout -B $branch
+          git add global.json Directory.Packages.props
+          git add -- packages.lock.json ':(glob)**/packages.lock.json'
+          git commit -m "chore: validate newest preview stack"
+          git push --force origin "HEAD:$branch"
+          $existing = gh pr list --head $branch --state open --json number --jq '.[0].number'
+          if ([string]::IsNullOrWhiteSpace($existing)) {
+            gh pr create --head $branch --base '${{ github.event.repository.default_branch }}' `
+              --title 'chore: validate newest preview stack' `
+              --body 'Automated candidate passed locked restore, x64/ARM64 build, x64 tests, performance smoke, NativeAOT publish, packaging, provenance, and warning-policy gates. Review before promotion; the prior pin remains the last-known-good rollback point.'
+          }

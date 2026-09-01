@@ -17,7 +17,7 @@ public static class ZoomScaleCalculator
                 0.25,
                 Math.Min(viewportWidth / pageWidthPoints, viewportHeight / pageHeightPoints)),
             PdfZoomMode.ActualSize => 96.0 / 72.0,
-            _ => zoomScale
+            _ => Math.Clamp(zoomScale, 0.1, 64.0) * 96.0 / 72.0
         };
     }
 }

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<UserControl
+    x:Class="ElliePdf.Controls.PdfPagePresenter"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:ElliePdf.Controls">
+
+    <Border
+        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+        CornerRadius="4">
+        <Grid>
+            <controls:PdfTileSurface
+                x:Name="TileSurface"
+                AutomationProperties.AccessibilityView="Raw"
+                Background="White"
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Stretch" />
+            <Canvas
+                x:Name="SearchHighlightCanvas"
+                IsHitTestVisible="False" />
+            <controls:PdfSemanticOverlay x:Name="SemanticOverlay" />
+        </Grid>
+    </Border>
+</UserControl>

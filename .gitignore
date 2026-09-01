@@ -9,6 +9,7 @@
 *.userosscache
 *.sln.docstates
 artifacts/
+testdata/generated/
 
 # Build logs
 [Ll]og/
