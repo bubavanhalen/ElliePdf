@@ -10,7 +10,7 @@ ElliePdf uses the exact .NET SDK and package versions committed in the repositor
 The SDK is pinned in `global.json` with prerelease enabled and roll-forward
 disabled. Package versions are centralized and restore lock files are committed.
 Only the scheduled preview-compatibility workflow may propose a toolchain update.
-It discovers the newest .NET 11 prerelease SDK and the newest matching .NET,
+It discovers the newest .NET 11 SDK (including prereleases) and the newest matching .NET,
 Windows SDK and Windows App SDK prerelease packages from their official feeds,
 regenerates locks, runs the complete dual-architecture publish gate, and opens or
 refreshes an isolated review branch. It never promotes the candidate directly.

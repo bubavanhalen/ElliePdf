@@ -30,7 +30,7 @@ jobs:
       - name: Generate and verify synthetic corpus
         shell: pwsh
         run: .\eng\Initialize-TestCorpus.ps1
-      - name: Discover and apply newest prerelease pins
+      - name: Discover and apply current .NET 11 and prerelease dependency pins
         id: preview
         shell: pwsh
         run: .\eng\Update-PreviewPins.ps1 -Apply -WriteGitHubOutput

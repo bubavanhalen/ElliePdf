@@ -13,14 +13,13 @@ function Get-VersionSortKey([string] $Version) {
     $parts = $Version.Split('-', 2)
     $core = @($parts[0].Split('.') | ForEach-Object { [uint64]$_ })
     while ($core.Count -lt 4) { $core += 0 }
-    $phase = 0
+    $phase = 2
     $suffix = @()
     if ($parts.Count -gt 1) {
-        if ($parts[1] -match '^rc(?:\.|\d|$)') { $phase = 1 }
+        $phase = if ($parts[1] -match '^rc(?:\.|\d|$)') { 1 } else { 0 }
         $suffix = @([Regex]::Matches($parts[1], '\d+') | ForEach-Object { [uint64]$_.Value })
     }
-    # Compare release candidates after previews of the same version, even
-    # when the preview sequence number is higher than the RC sequence number.
+    # For the same SDK version, stable follows RC, which follows preview.
     $numbers = $core + @($phase) + $suffix
     return (($numbers | ForEach-Object { $_.ToString('D12', [Globalization.CultureInfo]::InvariantCulture) }) -join '.')
 }
@@ -47,11 +46,11 @@ function Set-PackageVersion([string] $Xml, [string] $PackageId, [string] $Versio
 }
 
 $releaseMetadata = Invoke-RestMethod 'https://builds.dotnet.microsoft.com/dotnet/release-metadata/11.0/releases.json'
-$previewSdks = @($releaseMetadata.releases.sdks.version | Where-Object { $_ -match '-' } | ForEach-Object {
+$sdks = @($releaseMetadata.releases.sdks.version | ForEach-Object {
     [pscustomobject]@{ Text = $_; SortKey = Get-VersionSortKey $_ }
 })
-if ($previewSdks.Count -eq 0) { throw 'The official .NET 11 feed contains no preview SDK.' }
-$sdkVersion = ($previewSdks | Sort-Object SortKey -Descending | Select-Object -First 1).Text
+if ($sdks.Count -eq 0) { throw 'The official .NET 11 feed contains no SDK.' }
+$sdkVersion = ($sdks | Sort-Object SortKey -Descending | Select-Object -First 1).Text
 
 $packagePins = [ordered]@{
     'Microsoft.Extensions.DependencyInjection' = Get-LatestVersion 'Microsoft.Extensions.DependencyInjection' { $_ -match '^11\.' -and $_ -match '-' }
