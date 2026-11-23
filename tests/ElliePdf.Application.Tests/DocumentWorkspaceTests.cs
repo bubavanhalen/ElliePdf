@@ -171,7 +171,7 @@ public sealed class DocumentWorkspaceTests
         cancellation.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => open);
         factory.AllowBlockedOpen();
-        await redundantSession.DisposalStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await redundantSession.DisposalCompleted.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
         Assert.True(redundantSession.Disposed);
         Assert.Empty(workspace.Documents);
@@ -531,9 +531,11 @@ public sealed class DocumentWorkspaceTests
             DocumentId = documentId ?? DocumentId.New();
         }
         public bool OperationObservedCancellation => _cancelled.Task.IsCompleted;
-        public bool Disposed { get; private set; }
+        public bool Disposed => DisposalCompleted.Task.IsCompletedSuccessfully;
         public int DisposeCount { get; private set; }
         public TaskCompletionSource DisposalStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource DisposalCompleted { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public DocumentId DocumentId { get; }
@@ -558,8 +560,7 @@ public sealed class DocumentWorkspaceTests
             {
                 throw new InvalidOperationException("Synthetic disposal failure.");
             }
-            Disposed = true;
-            await Task.CompletedTask;
+            DisposalCompleted.TrySetResult();
         }
     }
 }
