@@ -348,12 +348,12 @@
             Canvas.ZIndex="20"
             VerticalAlignment="Top"
             AddTabButtonClick="DocumentTabs_AddTabButtonClick"
-            Background="Transparent"
+            Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
             CanDragTabs="True"
             CanReorderTabs="True"
             IsAddTabButtonVisible="True"
             TabCloseRequested="DocumentTabs_TabCloseRequested"
-            TabWidthMode="SizeToContent"
+            TabWidthMode="Equal"
             SelectionChanged="DocumentTabs_SelectionChanged"
             Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.ShowTabBar), Mode=OneWay}" />
 

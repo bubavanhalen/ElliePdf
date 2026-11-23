@@ -254,9 +254,10 @@ public sealed partial class PdfSemanticOverlay : UserControl
             return;
         }
 
+        Border? editorSurface = null;
         Control control = form.Type switch
         {
-            FormWidgetType.Text => CreateTextForm(form),
+            FormWidgetType.Text => CreateTextForm(form, out editorSurface),
             FormWidgetType.Checkbox => CreateCheckForm(form, radio: false),
             FormWidgetType.RadioButton => CreateCheckForm(form, radio: true),
             FormWidgetType.ComboBox => CreateComboForm(form),
@@ -272,12 +273,17 @@ public sealed partial class PdfSemanticOverlay : UserControl
             : form.IsRequired
                 ? AppResources.Get("Reader_FormRequired")
                 : AppResources.Get("Reader_FormEditable"));
-        Place(FormLayer, control, form.Bounds, minimumTarget: true);
+        Place(FormLayer, (FrameworkElement?)editorSurface ?? control, form.Bounds, minimumTarget: true);
     }
 
-    private TextBox CreateTextForm(SemanticFormSnapshot form)
+    private TextBox CreateTextForm(SemanticFormSnapshot form, out Border editorSurface)
     {
-        var control = new TextBox { Text = form.Value.Text ?? string.Empty, Tag = form };
+        // PDFium paints the stored appearance into the page. Behind the native editor,
+        // an opaque surface keeps those pixels from showing through text-box states.
+        editorSurface = (Border)((DataTemplate)Resources["TextFormEditorTemplate"]).LoadContent();
+        var control = (TextBox)editorSurface.Child;
+        control.Text = form.Value.Text ?? string.Empty;
+        control.Tag = form;
         control.LostFocus += (_, _) => Commit(form, FormValue.TextValue(control.Text));
         return control;
     }

@@ -4,6 +4,13 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     IsTabStop="False">
+    <UserControl.Resources>
+        <DataTemplate x:Key="TextFormEditorTemplate">
+            <Border Background="{ThemeResource SolidBackgroundFillColorBaseBrush}">
+                <TextBox />
+            </Border>
+        </DataTemplate>
+    </UserControl.Resources>
     <Grid Background="Transparent">
         <Canvas x:Name="TextLayer" />
         <Canvas x:Name="LinkLayer" />

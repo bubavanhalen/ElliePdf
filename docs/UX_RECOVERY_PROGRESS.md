@@ -87,6 +87,13 @@ Final native captures: [dark](evidence/ux-recovery-2026-09-07/native-preview-dar
 - Continuous fit zoom now uses metadata for the active tab's current page. An outdated layout request cannot publish dimensions after a tab or view change. The mixed-page tab interaction still needs desktop replay.
 - Scheduled reference performance now requires 48 ETW reports covering 100%, 150%, and 200% display scaling, tied to the same-run x64 MSIX. A deterministic 14.8 MB raster fixture covers cold activation. The verifier passed synthetic positive and rejection tests. Product benchmarks and frozen competitor baselines remain open.
 
+## Native x64 desktop replay
+
+- A separate development identity ran the unsigned RC 3 NativeAOT build. Opening the mixed-orientation and encrypted fixtures through the picker worked. The encrypted file raised the expected dialog and rendered after unlock. Keyboard cycling reached the prior documents and restored the vector fixture's 80% zoom.
+- Inactive labels disappeared where the tab strip overlaid a white page. The strip now uses an opaque theme surface and equal-width tabs. A fresh packaged replay showed all three labels, and clicking the vector tab restored its contents and zoom. Tabs and commands still need a complete layout review because the default shell overlays page content.
+- The mixed fixture showed doubled form text from the translucent editor over the PDF raster. An opaque theme surface behind the native text editor removed the duplicate on the packaged replay. Form persistence and the accessibility matrix remain separate checks.
+- Hosted Windows still reported first-request broken pipes after native readiness checks. The broker now verifies the pipe owner's actual user SID in the AppContainer, including elevated tokens whose default owner differs. Locally the fuzz smoke (5), worker-client tests (24), and transport tests (20) passed. Hosted verification remains open.
+
 ## Remaining review checklist
 
 - Confirm the desired design direction against the earlier app, not just against the regressed shell.
