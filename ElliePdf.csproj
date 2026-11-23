@@ -13,15 +13,22 @@
     <PlatformTarget Condition="'$(PlatformTarget)' == ''">x64</PlatformTarget>
     <PublishProfile Condition="Exists('Properties\PublishProfiles\win-$(Platform).pubxml')">win-$(Platform).pubxml</PublishProfile>
     <UseWinUI>true</UseWinUI>
+    <!-- Register only the WinUI metadata provider used by ElliePdf. The
+         experimental SDK also ships Chart and TableView providers. -->
+    <XamlCodeGenerationControlFlags>$([System.String]::Copy('$(XamlCodeGenerationControlFlags);DoNotGenerateOtherProviders').TrimStart(';'))</XamlCodeGenerationControlFlags>
     <WinUISDKReferences>false</WinUISDKReferences>
     <EnableMsixTooling>true</EnableMsixTooling>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <DefaultLanguage>en-US</DefaultLanguage>
+    <!-- The worker reference is a build dependency, never an in-process assembly.
+         Debug deliberately uses a framework-dependent UI and a self-contained worker. -->
+    <ValidateExecutableReferencesMatchSelfContained Condition="'$(Configuration)' == 'Debug'">false</ValidateExecutableReferencesMatchSelfContained>
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="XamlTypeInfoProvider.cs" />
     <Compile Remove="ElliePdf.Tests\**" />
     <Compile Remove="ElliePdf.Core\**" />
     <Compile Remove="Benchmark\**" />
@@ -54,6 +61,14 @@
     <Page Remove="src\**" />
     <Page Remove="tests\**" />
   </ItemGroup>
+
+  <!-- The pass-one C# assembly is for the XAML compiler. Add the explicit
+       registration after the compiler emits the full provider in pass two. -->
+  <Target Name="AddExplicitWinUiMetadataProvider" AfterTargets="MarkupCompilePass2">
+    <ItemGroup>
+      <Compile Include="XamlTypeInfoProvider.cs" />
+    </ItemGroup>
+  </Target>
 
   <ItemGroup>
     <ProjectReference Include="ElliePdf.Core\ElliePdf.Core.csproj" />
@@ -112,12 +127,21 @@
   </PropertyGroup>
   <PropertyGroup>
     <PublishAot>true</PublishAot>
+    <!-- The reader's performance and recovery diagnostics use EventSource.
+         NativeAOT otherwise compiles out EventPipe support. -->
+    <EventSourceSupport>true</EventSourceSupport>
+    <!-- WinUI needs the full Build target to resolve XAML references before
+         PrepareResources. The .NET 11 optimized AOT publish path skips it. -->
+    <UseOptimizedPublish>false</UseOptimizedPublish>
     <SelfContained Condition="'$(Configuration)' == 'Release'">true</SelfContained>
   </PropertyGroup>
 
-  <Target Name="CopyPdfWorkerBundle" AfterTargets="Build">
+  <Target Name="CopyPdfWorkerBundle" AfterTargets="ResolveReferences"
+          BeforeTargets="_ComputeAppxPackagePayload"
+          Condition="'$(DesignTimeBuild)' != 'true'">
     <ItemGroup>
       <_PdfWorkerBundle Include="$(MSBuildProjectDirectory)\src\ElliePdf.Pdfium.Worker\bin\$(Platform)\$(Configuration)\$(TargetFramework)\$(RuntimeIdentifier)\**\*"
+                        Exclude="$(MSBuildProjectDirectory)\src\ElliePdf.Pdfium.Worker\bin\$(Platform)\$(Configuration)\$(TargetFramework)\$(RuntimeIdentifier)\publish\**\*"
                         Condition="'$(RuntimeIdentifier)' != ''" />
       <_PdfWorkerBundle Include="$(MSBuildProjectDirectory)\src\ElliePdf.Pdfium.Worker\bin\$(Platform)\$(Configuration)\$(TargetFramework)\*"
                         Condition="'$(RuntimeIdentifier)' == ''" />
@@ -128,6 +152,15 @@
     <Copy SourceFiles="@(_PdfWorkerBundle)"
           DestinationFiles="@(_PdfWorkerBundle->'$(OutDir)PdfWorker\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true" />
+    <ItemGroup>
+      <!-- F5 deployment must include the worker even on the first build.
+           Release packaging supplies the separately published NativeAOT bundle. -->
+      <AppxPackagePayload Include="@(_PdfWorkerBundle)"
+                          Condition="'$(GenerateAppxPackageOnBuild)' != 'true'">
+        <TargetPath>PdfWorker\%(RecursiveDir)%(Filename)%(Extension)</TargetPath>
+      </AppxPackagePayload>
+      <FileWrites Include="@(_PdfWorkerBundle->'$(OutDir)PdfWorker\%(RecursiveDir)%(Filename)%(Extension)')" />
+    </ItemGroup>
   </Target>
 
   <!-- Release packaging runs the worker's NativeAOT publish as a separate, deterministic

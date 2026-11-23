@@ -1,0 +1,12 @@
+# Official PyPI wheels for CPython 3.13 on Windows x64/ARM64.
+# Install only with --require-hashes --only-binary=:all:.
+reportlab==4.4.10 \
+    --hash=sha256:5abc815746ae2bc44e7ff25db96814f921349ca814c992c7eac3c26029bf7c24
+pillow==11.3.0 \
+    --hash=sha256:0bce5c4fd0921f99d2e858dc4d4d64193407e1b99478bc5cacecba2311abde51 \
+    --hash=sha256:1904e1264881f682f02b7f8167935cce37bc97db457f8e7849dc3a6a52b99580
+pypdf==6.0.0 \
+    --hash=sha256:56ea60100ce9f11fc3eec4f359da15e9aec3821b036c1f06d2b660d35683abb8
+charset-normalizer==3.4.3 \
+    --hash=sha256:ce571ab16d890d23b5c278547ba694193a45011ff86a9162a71307ed9f86759a \
+    --hash=sha256:cf1ebb7d78e1ad8ec2a8c4732c7be2e736f6e5123a4146c5b89c9d1f585f8cef

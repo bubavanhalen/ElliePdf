@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Tracing;
 
 namespace ElliePdf.Telemetry;
@@ -66,7 +67,7 @@ public sealed class ElliePdfEventSource : EventSource
 
         EventData* data = stackalloc EventData[1];
         SetEventData(ref data[0], &arg1, sizeof(int));
-        WriteEventCore(eventId, 1, data);
+        WritePrimitiveEvent(eventId, 1, data);
     }
 
     [NonEvent]
@@ -78,7 +79,7 @@ public sealed class ElliePdfEventSource : EventSource
         EventData* data = stackalloc EventData[2];
         SetEventData(ref data[0], &arg1, sizeof(int));
         SetEventData(ref data[1], &arg2, sizeof(int));
-        WriteEventCore(eventId, 2, data);
+        WritePrimitiveEvent(eventId, 2, data);
     }
 
     [NonEvent]
@@ -90,7 +91,7 @@ public sealed class ElliePdfEventSource : EventSource
         EventData* data = stackalloc EventData[2];
         SetEventData(ref data[0], &arg1, sizeof(int));
         SetEventData(ref data[1], &arg2, sizeof(long));
-        WriteEventCore(eventId, 2, data);
+        WritePrimitiveEvent(eventId, 2, data);
     }
 
     [NonEvent]
@@ -104,7 +105,7 @@ public sealed class ElliePdfEventSource : EventSource
         SetEventData(ref data[0], &arg1, sizeof(int));
         SetEventData(ref data[1], &arg2, sizeof(long));
         SetEventData(ref data[2], &booleanValue, sizeof(int));
-        WriteEventCore(eventId, 3, data);
+        WritePrimitiveEvent(eventId, 3, data);
     }
 
     [NonEvent]
@@ -117,7 +118,7 @@ public sealed class ElliePdfEventSource : EventSource
         SetEventData(ref data[0], &arg1, sizeof(int));
         SetEventData(ref data[1], &arg2, sizeof(long));
         SetEventData(ref data[2], &arg3, sizeof(int));
-        WriteEventCore(eventId, 3, data);
+        WritePrimitiveEvent(eventId, 3, data);
     }
 
     [NonEvent]
@@ -130,7 +131,7 @@ public sealed class ElliePdfEventSource : EventSource
         SetEventData(ref data[0], &arg1, sizeof(int));
         SetEventData(ref data[1], &arg2, sizeof(long));
         SetEventData(ref data[2], &arg3, sizeof(long));
-        WriteEventCore(eventId, 3, data);
+        WritePrimitiveEvent(eventId, 3, data);
     }
 
     [NonEvent]
@@ -143,7 +144,7 @@ public sealed class ElliePdfEventSource : EventSource
         SetEventData(ref data[0], &arg1, sizeof(int));
         SetEventData(ref data[1], &arg2, sizeof(int));
         SetEventData(ref data[2], &arg3, sizeof(int));
-        WriteEventCore(eventId, 3, data);
+        WritePrimitiveEvent(eventId, 3, data);
     }
 
     [NonEvent]
@@ -156,7 +157,7 @@ public sealed class ElliePdfEventSource : EventSource
         SetEventData(ref data[0], &arg1, sizeof(int));
         SetEventData(ref data[1], &arg2, sizeof(int));
         SetEventData(ref data[2], &arg3, sizeof(long));
-        WriteEventCore(eventId, 3, data);
+        WritePrimitiveEvent(eventId, 3, data);
     }
 
     [NonEvent]
@@ -171,7 +172,7 @@ public sealed class ElliePdfEventSource : EventSource
         SetEventData(ref data[1], &arg2, sizeof(int));
         SetEventData(ref data[2], &arg3, sizeof(long));
         SetEventData(ref data[3], &booleanValue, sizeof(int));
-        WriteEventCore(eventId, 4, data);
+        WritePrimitiveEvent(eventId, 4, data);
     }
 
     [NonEvent]
@@ -185,7 +186,7 @@ public sealed class ElliePdfEventSource : EventSource
         SetEventData(ref data[1], &arg2, sizeof(int));
         SetEventData(ref data[2], &arg3, sizeof(long));
         SetEventData(ref data[3], &arg4, sizeof(int));
-        WriteEventCore(eventId, 4, data);
+        WritePrimitiveEvent(eventId, 4, data);
     }
 
     [NonEvent]
@@ -201,7 +202,15 @@ public sealed class ElliePdfEventSource : EventSource
         SetEventData(ref data[2], &arg3, sizeof(int));
         SetEventData(ref data[3], &arg4, sizeof(int));
         SetEventData(ref data[4], &booleanValue, sizeof(int));
-        WriteEventCore(eventId, 5, data);
+        WritePrimitiveEvent(eventId, 5, data);
+    }
+
+    [NonEvent]
+    [UnconditionalSuppressMessage("Trimming", "IL2026",
+        Justification = "The private writers pass only fixed-width int, long and Win32 BOOL payloads. No object graph is serialized.")]
+    private unsafe void WritePrimitiveEvent(int eventId, int count, EventData* data)
+    {
+        WriteEventCore(eventId, count, data);
     }
 
     [NonEvent]

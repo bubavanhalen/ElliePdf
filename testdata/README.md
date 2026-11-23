@@ -2,16 +2,16 @@
 
 This directory commits the manifest and deterministic generator only. Generated PDFs stay ignored under `testdata/generated/`; no downloaded or proprietary PDF is used.
 
-Generate the ten normal fixtures with the bundled workspace Python runtime (or any Python environment containing ReportLab and Pillow):
+On Windows, use the same pinned Python 3.13 dependencies and manifest checks as CI:
 
 ```powershell
-python eng/Generate-TestCorpus.py testdata/generated
+./eng/Initialize-TestCorpus.ps1
 ```
 
 The 1-GB stress fixture is deliberately opt-in and is never committed:
 
 ```powershell
-python eng/Generate-TestCorpus.py testdata/generated --include-1gb
+./eng/Initialize-TestCorpus.ps1 -Include1Gb
 ```
 
 It is a valid one-page synthetic PDF padded deterministically to exactly 1,073,741,824 bytes. Its pinned SHA-256 is

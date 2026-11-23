@@ -10,7 +10,18 @@ $globalJsonPath = Join-Path $repoRoot 'global.json'
 $centralPackagesPath = Join-Path $repoRoot 'Directory.Packages.props'
 
 function Get-VersionSortKey([string] $Version) {
-    $numbers = @([Regex]::Matches($Version, '\d+') | ForEach-Object { [uint64]$_.Value })
+    $parts = $Version.Split('-', 2)
+    $core = @($parts[0].Split('.') | ForEach-Object { [uint64]$_ })
+    while ($core.Count -lt 4) { $core += 0 }
+    $phase = 0
+    $suffix = @()
+    if ($parts.Count -gt 1) {
+        if ($parts[1] -match '^rc(?:\.|\d|$)') { $phase = 1 }
+        $suffix = @([Regex]::Matches($parts[1], '\d+') | ForEach-Object { [uint64]$_.Value })
+    }
+    # Compare release candidates after previews of the same version, even
+    # when the preview sequence number is higher than the RC sequence number.
+    $numbers = $core + @($phase) + $suffix
     return (($numbers | ForEach-Object { $_.ToString('D12', [Globalization.CultureInfo]::InvariantCulture) }) -join '.')
 }
 

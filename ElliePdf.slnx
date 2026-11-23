@@ -7,6 +7,7 @@
     <Platform Solution="*|x64" Project="x64" />
     <Platform Solution="*|ARM64" Project="ARM64" />
     <Deploy Solution="*|x64" />
+    <Deploy Solution="*|ARM64" />
   </Project>
   <Project Path="ElliePdf.Core\ElliePdf.Core.csproj" />
   <Folder Name="/tests/" />
