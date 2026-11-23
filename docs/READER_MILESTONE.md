@@ -42,3 +42,16 @@ The `363243e` x64 Debug comparison build used .NET 11.0.100 and Windows App SDK 
 The `1ad1004` x64 NativeAOT build used the pinned RC 3 SDK and Windows App SDK 2.6.6 experimental. Its unsigned MSIX passed static inspection (276 entries, SHA-256 `745CC0170B63B8B8391C6148732E014A935C40BC1D2A00DA8AFA93C0C90C6DEC`) and ran under a separate loose development identity. The picker opened the RFC on that build. The tab row remained off the document surface. The lower toolbar still covered the page, and the page control showed `1` without a visible total in that window. Windows file dispatch passed the RFC path to the executable on a cold launch. After eight seconds, the reader was showing a different, restored PDF. This trial failed the readable-page criterion. The first product slice corrects file activation before further redesign.
 
 The RC 3 x64 release-mode worker replay completed 1,024 cases with zero crashes, zero deadlines and one unexpected `Win32Exception` on case `pdf-0685`. Its generic HRESULT was `0x80004005`. The process-name leak count was one while a separate ElliePdf test app had launched, so that count is inconclusive. The local report SHA-256 is `31C3D7E84B2636E6A01E8DD96968229AC171AFDC9B317F4550D70565C0957436`. The follow-up adds the native error code and attributes the leak count to the fuzz worker image.
+
+## File-open fix and ElliePdf timing pilot
+
+The stable .NET 11 x64 candidate built and passed static inspection (276 entries, SHA-256 `54B8578AD9691313C55A32B9807C5B37DFB980C6B8096F2E500BDEBF05154D1D`). Its loose package opened `RFC 9110 shell open.pdf` on cold Windows dispatch. Dispatching the Apollo 16 scan next opened a new tab in the same process with its existing tabs intact. Page 800 rendered readable transcript text after entry in the page field.
+
+The local ElliePdf pilot dispatched RFC 9110 via `ShellExecuteEx` using the development package's PDF ProgID. The resident condition started the Apollo 11 report in the same viewer before dispatching the RFC. The OS file cache was warm, and cold opens restored the same three saved fixture tabs. The capture matched the title and first body paragraph against a manually inspected image and allowed for a 24-pixel vertical offset between two observed layout positions. An initial fixed-position match missed that offset and its values are excluded. The successful pilot used a 956 × 720 window, approximately, at 100% scaling. Restarting the test process between trials kept the saved fixture session consistent. [Raw observations](evidence/reader-ellie-pilot-2026-11-23.csv)
+
+| ElliePdf condition | Samples | p50 | p95 |
+| --- | ---: | ---: | ---: |
+| Cold process | 5 | 1,228 ms | 1,435 ms |
+| Resident with another PDF | 5 | 865 ms | 1,167 ms |
+
+Both ElliePdf pilot conditions missed the browser targets. Warm reopen and the long-document timing matrix are pending. The pilot uses different window widths for ElliePdf and the browsers, small sample sizes and separate test passes. Speed acceptance requires matched viewports and interleaving all three viewers.

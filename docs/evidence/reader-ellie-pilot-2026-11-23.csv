@@ -1,0 +1,11 @@
+viewer,condition,trial,readable_ms,sampling_interval_ms
+ElliePdf,cold-process,1,1229.29,69.07
+ElliePdf,cold-process,2,1119.59,61.47
+ElliePdf,cold-process,3,1198.13,68.35
+ElliePdf,cold-process,4,1227.79,74.99
+ElliePdf,cold-process,5,1434.98,36.43
+ElliePdf,resident,1,612.79,52.18
+ElliePdf,resident,2,1166.79,298.99
+ElliePdf,resident,3,1127.24,31.23
+ElliePdf,resident,4,865.13,126.92
+ElliePdf,resident,5,572.13,80.72
