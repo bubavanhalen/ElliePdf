@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Text.Json;
 
 namespace ElliePdf.Fuzz.Tests;
@@ -73,6 +74,19 @@ public sealed class BoundedFuzzHarnessTests
             Assert.DoesNotContain("%PDF", item.PrivacySafeLine(), StringComparison.Ordinal);
         });
         Assert.Contains(report.Cases, item => item.Outcome == "accepted");
+    }
+
+    [Fact]
+    public void Worker_fuzz_report_includes_native_error_without_exception_message()
+    {
+        const string privateMessage = "private file location";
+        var outcome = WorkerFuzzCaseOutcome.Create("pdf-0000", [], "unexpected",
+            new Win32Exception(5, privateMessage));
+
+        var line = outcome.PrivacySafeLine();
+        Assert.Contains("failure=Win32Exception error=0x80004005 nativeError=0x00000005",
+            line, StringComparison.Ordinal);
+        Assert.DoesNotContain(privateMessage, line, StringComparison.Ordinal);
     }
 
     [Fact(Timeout = 120_000)]

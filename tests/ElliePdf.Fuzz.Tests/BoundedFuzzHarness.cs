@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Reflection;
 using System.Security.Cryptography;
@@ -263,6 +264,7 @@ internal static class BoundedFuzzHarness
             await using var session = await client.OpenSessionAsync(
                 new DocumentOpenRequest(DocumentId.New(), new PdfSourceHandle(path)), cancellationToken);
             var before = WorkerProcess(client) ?? throw new InvalidOperationException("Worker process was not observable after startup.");
+            Assert.Contains(before.Id, WorkerPids(workerPath));
             var hostPid = Environment.ProcessId;
             try
             {
@@ -364,10 +366,37 @@ internal static class BoundedFuzzHarness
     }
 
     private static HashSet<int> WorkerPids(string workerPath)
-        => Process.GetProcessesByName(Path.GetFileNameWithoutExtension(workerPath))
-            .Where(process => !process.HasExited)
-            .Select(process => process.Id)
-            .ToHashSet();
+    {
+        var pids = new HashSet<int>();
+        foreach (var process in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(workerPath)))
+        {
+            using (process)
+            {
+                if (IsWorkerImage(process, workerPath))
+                    pids.Add(process.Id);
+            }
+        }
+        return pids;
+    }
+
+    private static bool IsWorkerImage(Process process, string workerPath)
+    {
+        try
+        {
+            return !process.HasExited
+                && string.Equals(process.MainModule?.FileName, workerPath, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (InvalidOperationException)
+        {
+            // The process exited between enumeration and inspection.
+            return false;
+        }
+        catch (Win32Exception)
+        {
+            // An inaccessible process cannot be attributed to this harness.
+            return false;
+        }
+    }
 
     private static async Task<int> WaitForWorkerExitAsync(string workerPath, HashSet<int> baseline, TimeSpan timeout)
     {
@@ -383,7 +412,13 @@ internal static class BoundedFuzzHarness
         var remaining = WorkerPids(workerPath).Except(baseline).ToArray();
         foreach (var pid in remaining)
         {
-            try { using var process = Process.GetProcessById(pid); process.Kill(entireProcessTree: true); } catch (ArgumentException) { }
+            try
+            {
+                using var process = Process.GetProcessById(pid);
+                if (IsWorkerImage(process, workerPath))
+                    process.Kill(entireProcessTree: true);
+            }
+            catch (ArgumentException) { }
             catch (InvalidOperationException) { }
         }
         return remaining.Length;
@@ -442,15 +477,26 @@ internal sealed record WorkerFuzzLimits(int CaseCount, TimeSpan CaseDeadline)
     };
 }
 
-internal sealed record WorkerFuzzCaseOutcome(string Name, string Sha256, string Outcome, string? FailureClass, int? ErrorCode)
+internal sealed record WorkerFuzzCaseOutcome(
+    string Name,
+    string Sha256,
+    string Outcome,
+    string? FailureClass,
+    int? ErrorCode,
+    int? NativeErrorCode)
 {
     public static WorkerFuzzCaseOutcome Create(string name, ReadOnlySpan<byte> bytes, string outcome, Exception? failure = null)
-        => new(name, Convert.ToHexString(SHA256.HashData(bytes)), outcome, failure?.GetType().Name, failure?.HResult);
+        => new(name, Convert.ToHexString(SHA256.HashData(bytes)), outcome, failure?.GetType().Name,
+            failure?.HResult, (failure as Win32Exception)?.NativeErrorCode);
 
     public string PrivacySafeLine()
     {
         var line = $"{Name} sha256={Sha256} outcome={Outcome}";
-        return FailureClass is null ? line : $"{line} failure={FailureClass} error=0x{ErrorCode:X8}";
+        if (FailureClass is not null)
+            line += $" failure={FailureClass} error=0x{ErrorCode:X8}";
+        if (NativeErrorCode is int nativeError)
+            line += $" nativeError=0x{nativeError:X8}";
+        return line;
     }
 }
 
