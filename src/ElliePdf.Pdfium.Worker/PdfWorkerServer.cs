@@ -40,6 +40,8 @@ public sealed class PdfWorkerServer : IAsyncDisposable
         _leases = new WorkerPixelLeasePool(sessionId);
     }
 
+    public Task Ready => _documents.Ready;
+
     public async Task RunAsync(Stream stream, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(stream);

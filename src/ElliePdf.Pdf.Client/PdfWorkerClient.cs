@@ -987,6 +987,47 @@ public sealed class PdfWorkerClient : IPdfEngineClient, IPdfPageMergeClient
         }
     }
 
+    private async Task WaitForReadyConnectionAsync(
+        NamedPipeServerStream brokerPipe,
+        Process process,
+        CancellationToken cancellationToken)
+    {
+        using var startupCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var connection = brokerPipe.WaitForConnectionAsync(startupCancellation.Token);
+        var exited = process.WaitForExitAsync(startupCancellation.Token);
+        try
+        {
+            var completed = await Task.WhenAny(connection, exited)
+                .WaitAsync(_options.StartupTimeout, cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (completed == exited)
+            {
+                await exited.ConfigureAwait(false);
+                throw new PdfWorkerUnavailableException(
+                    $"The sandboxed PDF worker exited before native startup completed (exit code {process.ExitCode}).");
+            }
+
+            await connection.ConfigureAwait(false);
+            if (process.HasExited)
+            {
+                throw new PdfWorkerUnavailableException(
+                    $"The sandboxed PDF worker exited during authenticated startup (exit code {process.ExitCode}).");
+            }
+        }
+        finally
+        {
+            startupCancellation.Cancel();
+            try
+            {
+                await Task.WhenAll(connection, exited).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Observe both canceled/faulted waits without replacing the startup outcome.
+            }
+        }
+    }
+
     private async Task EnsureStartedAsync(CancellationToken cancellationToken)
     {
         if (IsConnectionHealthy())
@@ -1055,9 +1096,7 @@ public sealed class PdfWorkerClient : IPdfEngineClient, IPdfPageMergeClient
                 await launch.StandardInput.WriteAsync(secret, cancellationToken).ConfigureAwait(false);
                 await launch.StandardInput.FlushAsync(cancellationToken).ConfigureAwait(false);
                 launch.StandardInput.Close();
-                await brokerPipe.WaitForConnectionAsync(cancellationToken)
-                    .WaitAsync(_options.StartupTimeout, cancellationToken)
-                    .ConfigureAwait(false);
+                await WaitForReadyConnectionAsync(brokerPipe, process, cancellationToken).ConfigureAwait(false);
 
                 pipe = brokerPipe;
                 connectionCancellation = new CancellationTokenSource();

@@ -39,9 +39,12 @@ internal static class Program
             }
 
             var secret = new LaunchSecret(secretBytes);
+            await using var server = new PdfWorkerServer(sessionId, secret, AppContext.BaseDirectory);
+            // Connecting advertises readiness to the broker. Complete native initialization
+            // first so its failure cannot race the broker's first document request.
+            await server.Ready.ConfigureAwait(false);
             await using var client = new NamedPipeClient(pipeName);
             var stream = await client.ConnectAsync(TimeSpan.FromSeconds(15)).ConfigureAwait(false);
-            await using var server = new PdfWorkerServer(sessionId, secret, AppContext.BaseDirectory);
             await server.RunAsync(stream).ConfigureAwait(false);
             return 0;
         }

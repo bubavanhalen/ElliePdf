@@ -23,12 +23,13 @@ $tests = Join-Path $repo 'tests\ElliePdf.Pdf.Client.Tests\ElliePdf.Pdf.Client.Te
 if ([string]::IsNullOrWhiteSpace($ReportPath)) {
     $ReportPath = Join-Path $repo "artifacts\soak\mixed-document-$($RuntimeIdentifier).json"
 }
+$ReportPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ReportPath)
 
 & dotnet build $worker -c $Configuration -p:Platform=$Platform -p:RuntimeIdentifier=$RuntimeIdentifier --no-restore
 if ($LASTEXITCODE -ne 0) { throw "Worker build failed with exit code $LASTEXITCODE." }
 
 $env:ELLIEPDF_SOAK_MINUTES = $DurationMinutes.ToString([Globalization.CultureInfo]::InvariantCulture)
-$env:ELLIEPDF_SOAK_REPORT_PATH = [IO.Path]::GetFullPath($ReportPath)
+$env:ELLIEPDF_SOAK_REPORT_PATH = $ReportPath
 try {
     & dotnet test $tests -c $Configuration -p:Platform=$Platform -p:RuntimeIdentifier=$RuntimeIdentifier --no-restore `
         --filter 'FullyQualifiedName~Mixed_document_open_render_search_close_soak_is_bounded' `
@@ -43,4 +44,4 @@ finally {
 if (-not (Test-Path -LiteralPath $ReportPath -PathType Leaf)) {
     throw 'The soak completed without producing its privacy-safe report.'
 }
-Write-Host "PASS mixed-document soak evidence: $([IO.Path]::GetFullPath($ReportPath))"
+Write-Host "PASS mixed-document soak evidence: $ReportPath"

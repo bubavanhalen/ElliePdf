@@ -194,52 +194,51 @@ internal static class BoundedFuzzHarness
         var temporaryDirectory = Path.Combine(Path.GetTempPath(), $"elliepdf-fuzz-{Guid.NewGuid():N}");
         Directory.CreateDirectory(temporaryDirectory);
 
-        await using var client = new PdfWorkerClient(new PdfWorkerClientOptions
-        {
-            WorkerExecutablePath = workerPath,
-            StartupTimeout = TimeSpan.FromSeconds(10),
-            DefaultOperationTimeout = limits.CaseDeadline,
-            HeartbeatInterval = TimeSpan.FromMilliseconds(250),
-            HeartbeatTimeout = TimeSpan.FromSeconds(2),
-            RequireAppContainerSandbox = true,
-            RequireRestrictedTokenSandbox = true
-        });
-
         try
         {
-            foreach (var (name, bytes) in PdfCorpusMutations(limits.CaseCount))
+            await using (var client = new PdfWorkerClient(new PdfWorkerClientOptions
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (bytes.Length is < 1 or > MaxCaseBytes)
-                    throw new InvalidDataException("The deterministic fuzz corpus exceeded its size bound.");
+                WorkerExecutablePath = workerPath,
+                StartupTimeout = TimeSpan.FromSeconds(10),
+                DefaultOperationTimeout = limits.CaseDeadline,
+                HeartbeatInterval = TimeSpan.FromMilliseconds(250),
+                HeartbeatTimeout = TimeSpan.FromSeconds(2),
+                RequireAppContainerSandbox = true,
+                RequireRestrictedTokenSandbox = true
+            }))
+            {
+                foreach (var (name, bytes) in PdfCorpusMutations(limits.CaseCount))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (bytes.Length is < 1 or > MaxCaseBytes)
+                        throw new InvalidDataException("The deterministic fuzz corpus exceeded its size bound.");
 
-                var beforePid = WorkerPid(client);
-                var path = Path.Combine(temporaryDirectory, $"{name}-{Guid.NewGuid():N}.pdf");
-                await File.WriteAllBytesAsync(path, bytes, cancellationToken).ConfigureAwait(false);
-                var outcome = await ExerciseCaseAsync(client, path, name, bytes, limits.CaseDeadline).ConfigureAwait(false);
-                outcomes.Add(outcome);
-                if (outcome.Outcome == "worker-crash") crashes++;
-                if (outcome.Outcome == "deadline") hangs++;
-                if (outcome.Outcome == "unexpected") unexpected++;
-                var afterPid = WorkerPid(client);
-                if (beforePid is not null && afterPid is not null && beforePid.Value != afterPid.Value)
-                    restarted++;
-                File.Delete(path);
+                    var beforePid = WorkerPid(client);
+                    var path = Path.Combine(temporaryDirectory, $"{name}-{Guid.NewGuid():N}.pdf");
+                    await File.WriteAllBytesAsync(path, bytes, cancellationToken).ConfigureAwait(false);
+                    var outcome = await ExerciseCaseAsync(client, path, name, bytes, limits.CaseDeadline).ConfigureAwait(false);
+                    outcomes.Add(outcome);
+                    if (outcome.Outcome == "worker-crash") crashes++;
+                    if (outcome.Outcome == "deadline") hangs++;
+                    if (outcome.Outcome == "unexpected") unexpected++;
+                    var afterPid = WorkerPid(client);
+                    if (beforePid is not null && afterPid is not null && beforePid.Value != afterPid.Value)
+                        restarted++;
 
-                // A hang is a fail-closed condition. The process has already been killed by
-                // ExerciseCaseAsync, and continuing would hide an unsafe worker state.
-                if (outcome.Outcome == "deadline")
-                    break;
+                    // ExerciseCaseAsync initiates termination when it hits a deadline.
+                    if (outcome.Outcome == "deadline")
+                        break;
+                }
             }
+
+            // Windows retains each duplicated source handle until its worker has exited.
+            var leaked = await WaitForWorkerExitAsync(workerPath, baselinePids, TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+            return new WorkerFuzzReport(mode, outcomes, crashes, hangs, unexpected, restarted, leaked);
         }
         finally
         {
             try { Directory.Delete(temporaryDirectory, recursive: true); } catch (IOException) { }
         }
-
-        await client.DisposeAsync().ConfigureAwait(false);
-        var leaked = await WaitForWorkerExitAsync(workerPath, baselinePids, TimeSpan.FromSeconds(2)).ConfigureAwait(false);
-        return new WorkerFuzzReport(mode, outcomes, crashes, hangs, unexpected, restarted, leaked);
     }
 
     public static async Task ExerciseWorkerRestartAsync(CancellationToken cancellationToken = default)
