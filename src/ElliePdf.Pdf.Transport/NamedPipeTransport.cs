@@ -1,4 +1,6 @@
 using System.IO.Pipes;
+using System.Security.AccessControl;
+using System.Security.Principal;
 
 namespace ElliePdf.Pdf.Transport;
 
@@ -25,11 +27,56 @@ public static class NamedPipeTransport
         return new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
     }
 
+    /// <summary>
+    /// Connects the sandboxed worker to its local broker, whose pipe owner is explicitly the
+    /// user's SID. Token default owners can instead be an enabled group on elevated hosts.
+    /// The launch secret still authenticates every transport envelope after this owner check.
+    /// </summary>
+    public static async ValueTask<NamedPipeClientStream> ConnectToWorkerBrokerAsync(
+        string pipeName, TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        if (!OperatingSystem.IsWindows())
+            throw new PlatformNotSupportedException("Worker broker pipes are supported on Windows only.");
+        ValidateName(pipeName);
+        if (pipeName.Contains('\\') || pipeName.Contains('/'))
+            throw new ArgumentException("A local worker broker pipe name is required.", nameof(pipeName));
+        if (timeout <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(timeout));
+
+        var stream = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        try
+        {
+            await stream.ConnectAsync(timeout, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var owner = stream.GetAccessControl().GetOwner(typeof(SecurityIdentifier));
+                using var identity = WindowsIdentity.GetCurrent();
+                if (identity.User is null || owner is not SecurityIdentifier ownerSid || !ownerSid.Equals(identity.User))
+                    throw new WorkerBrokerOwnershipException();
+            }
+            catch (Exception exception) when (exception is not WorkerBrokerOwnershipException)
+            {
+                throw new WorkerBrokerOwnershipException(exception);
+            }
+            return stream;
+        }
+        catch
+        {
+            await stream.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
     private static void ValidateName(string name)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         if (name.Length > 256 || name.Contains('\0')) throw new ArgumentOutOfRangeException(nameof(name));
     }
+}
+
+public sealed class WorkerBrokerOwnershipException : UnauthorizedAccessException
+{
+    internal WorkerBrokerOwnershipException(Exception? innerException = null)
+        : base("The worker broker pipe owner could not be verified as the current user.", innerException) { }
 }
 
 public sealed class NamedPipeServer : IAsyncDisposable

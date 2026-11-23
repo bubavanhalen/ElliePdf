@@ -52,7 +52,7 @@ internal static partial class WorkerAppContainerProcess
             AccessControlType.Allow));
         security.AddAccessRule(new PipeAccessRule(
             appContainerIdentity,
-            PipeAccessRights.ReadWrite | PipeAccessRights.Synchronize,
+            PipeAccessRights.ReadWrite | PipeAccessRights.Synchronize | PipeAccessRights.ReadPermissions,
             AccessControlType.Allow));
 
         return NamedPipeServerStreamAcl.Create(

@@ -1,4 +1,7 @@
 using System.Text.Json;
+using System.IO.Pipes;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using ElliePdf.Domain.Documents;
 using ElliePdf.Pdf.Contracts;
 using ElliePdf.Pdf.Transport;
@@ -8,6 +11,42 @@ namespace ElliePdf.Pdf.Transport.Tests;
 
 public sealed class TransportTests
 {
+    [Fact]
+    public async Task WorkerBrokerConnectionAcceptsExplicitUserOwnerAndTransfersData()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        using var identity = WindowsIdentity.GetCurrent();
+        var user = identity.User!;
+        var security = new PipeSecurity();
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        security.SetOwner(user);
+        security.AddAccessRule(new PipeAccessRule(user, PipeAccessRights.FullControl, AccessControlType.Allow));
+        var name = $"ElliePdf-owner-test-{Guid.NewGuid():N}";
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await using var server = NamedPipeServerStreamAcl.Create(
+            name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous,
+            0, 0, security);
+        var accepted = server.WaitForConnectionAsync(timeout.Token);
+        await using var client = await NamedPipeTransport.ConnectToWorkerBrokerAsync(
+            name, TimeSpan.FromSeconds(5), timeout.Token);
+        await accepted;
+        var received = new byte[1];
+        var reading = server.ReadExactlyAsync(received, timeout.Token);
+        await client.WriteAsync(new byte[] { 42 }, timeout.Token);
+        await reading;
+        Assert.Equal(42, received[0]);
+    }
+
+    [Theory]
+    [InlineData("server/pipe")]
+    [InlineData("server\\pipe")]
+    public async Task WorkerBrokerConnectionRejectsNonlocalPipeNames(string name)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await NamedPipeTransport.ConnectToWorkerBrokerAsync(name, TimeSpan.FromSeconds(1)));
+    }
+
     [Fact]
     public void PermissionsResponseRoundTripsWithSourceGeneratedIpcContext()
     {

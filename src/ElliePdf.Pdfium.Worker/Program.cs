@@ -7,6 +7,7 @@ internal static class Program
 {
     private const int UsageError = 64;
     private const int AuthenticationError = 65;
+    private const int BrokerOwnershipError = 66;
     private const int WorkerFailure = 70;
 
     public static async Task<int> Main(string[] args)
@@ -43,10 +44,14 @@ internal static class Program
             // Connecting advertises readiness to the broker. Complete native initialization
             // first so its failure cannot race the broker's first document request.
             await server.Ready.ConfigureAwait(false);
-            await using var client = new NamedPipeClient(pipeName);
-            var stream = await client.ConnectAsync(TimeSpan.FromSeconds(15)).ConfigureAwait(false);
+            await using var stream = await NamedPipeTransport.ConnectToWorkerBrokerAsync(
+                pipeName, TimeSpan.FromSeconds(15)).ConfigureAwait(false);
             await server.RunAsync(stream).ConfigureAwait(false);
             return 0;
+        }
+        catch (WorkerBrokerOwnershipException)
+        {
+            return BrokerOwnershipError;
         }
         catch (OperationCanceledException)
         {
