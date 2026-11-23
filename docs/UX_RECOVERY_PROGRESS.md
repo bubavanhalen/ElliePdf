@@ -76,8 +76,16 @@ Final native captures: [dark](evidence/ux-recovery-2026-09-07/native-preview-dar
 
 - Commit `58f2a67` is pushed to draft PR #5. Successful protected signing now feeds same-run x64 and ARM64 interactive jobs. Each job checks provenance, the detached signed checksum record, package contents and signature, then verifies the installed executable and activates that package explicitly. The interactive jobs do not receive signing credentials.
 - Actionlint passed for the signing, preview and CI workflows. The signed UIA preflight rejected four negative cases using the real unsigned candidate as input: stale run attempt, wrong package hash, tampered SBOM and an unsigned MSIX. Protected runner execution and the manual accessibility matrix remain open.
-- The 10,000-iteration save-integrity harness is still running in the isolated RC 3 candidate. The live child processes reached iterations 6706 and 6707. The report is written at completion.
+- The Release save-integrity harness completed all 10,000 forced-termination cases in the isolated RC 3 candidate. All 11 save stages passed. Invalid or missing destinations, unreached boundaries, failed child terminations, journal parse failures and unknown outcomes were all zero. Report SHA-256 `6B75DB1AC9DC90838619DCDC4AEA7662F96DFD2C51C37234DD3CCD4E8A786A19`.
 - The read-only preview candidate job now runs on draft PRs. It records the tested pin and lock patch, toolchain fingerprint, SBOM, and hashes of the inspected x64 and ARM64 packages. Updating the proposal branch is limited to scheduled or manual default-branch runs after candidate validation. The committed toolchain still requires promotion after the candidate passes the governance gates.
+
+## Hosted preview and reader reliability follow-up
+
+- Hosted RC 3 built x64 and found a test that raced session disposal completion. The application suite passed locally with the synchronization corrected, including 24 repeated runs of the affected test.
+- The next hosted run found a broken pipe during worker startup and an input file still held open during fuzz cleanup. The worker now initializes PDFium before connecting its pipe, the broker observes early exit within its startup deadline, and the fuzz harness cleans up temporary files after worker exit. The local Release fuzz run before these changes covered 1,024 inputs with zero crashes, deadlines, unexpected outcomes, or leaked workers. The updated worker passed the five-test fuzz smoke and the 24-test client suite locally.
+- A one-minute x64 lifecycle smoke completed 219 cycles and 4,376 operations with zero worker restarts. A relative report-path bug found during the run is fixed. The eight-hour soak remains a release gate.
+- Continuous fit zoom now uses metadata for the active tab's current page. An outdated layout request cannot publish dimensions after a tab or view change. The mixed-page tab interaction still needs desktop replay.
+- Scheduled reference performance now requires 48 ETW reports covering 100%, 150%, and 200% display scaling, tied to the same-run x64 MSIX. A deterministic 14.8 MB raster fixture covers cold activation. The verifier passed synthetic positive and rejection tests. Product benchmarks and frozen competitor baselines remain open.
 
 ## Remaining review checklist
 

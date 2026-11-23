@@ -40,6 +40,7 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
     private readonly UiHostContext _uiHost;
     private CancellationTokenSource? _renderCts;
     private CancellationTokenSource? _continuousRenderCts;
+    private CancellationTokenSource? _continuousLayoutCts;
     private CancellationTokenSource? _singleViewportRenderCts;
     private CancellationTokenSource? _searchCts;
     private CancellationTokenSource? _semanticCts;
@@ -1610,6 +1611,8 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         _renderCts?.Dispose();
         _continuousRenderCts?.Cancel();
         _continuousRenderCts?.Dispose();
+        _continuousLayoutCts?.Cancel();
+        _continuousLayoutCts?.Dispose();
         _singleViewportRenderCts?.Cancel();
         _singleViewportRenderCts?.Dispose();
         _searchCts?.Cancel();
@@ -1878,7 +1881,6 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
 
         var generation = AdvanceDocumentRenderGeneration(document);
         _singleRenderGeneration = generation;
-        _continuousRenderGeneration = generation;
         if (ShowContinuousViewer)
         {
             await RenderContinuousPagesAsync(generation);
@@ -1892,8 +1894,13 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         await RenderCurrentPageAsync(generation);
     }
 
-    private Task RenderContinuousPagesAsync(RenderGeneration? generation = null)
+    private async Task RenderContinuousPagesAsync(RenderGeneration? generation = null)
     {
+        _continuousLayoutCts?.Cancel();
+        _continuousLayoutCts?.Dispose();
+        _continuousLayoutCts = new CancellationTokenSource();
+        var layoutCancellation = _continuousLayoutCts;
+        var token = layoutCancellation.Token;
         var document = _tabService.ActiveDocument;
         if (document is null || document.PageCount == 0)
         {
@@ -1907,7 +1914,45 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
             _continuousDocument = null;
             _continuousScale = 0;
             _continuousPageExtents = null;
-            return Task.CompletedTask;
+            return;
+        }
+
+        var pageIndex = _tabService.CurrentPageIndex;
+        try
+        {
+            // Page metadata is cached by the engine session. Resolve fit modes from
+            // this tab's page, rather than dimensions left by a single-page render.
+            var (width, height) = await RunDocumentOtherAsync(
+                document, cancellation => _pdfService.GetPageSizeAsync(document, pageIndex, cancellation), token);
+            token.ThrowIfCancellationRequested();
+            if (!ReferenceEquals(layoutCancellation, _continuousLayoutCts)
+                || !ReferenceEquals(document, _tabService.ActiveDocument)
+                || pageIndex != _tabService.CurrentPageIndex
+                || !ShowContinuousViewer)
+            {
+                return;
+            }
+
+            _pageWidthPoints = width;
+            _pageHeightPoints = height;
+            PageWidthPoints = width;
+            PageHeightPoints = height;
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception exception) when (exception is PdfResourceLimitException
+            or PdfiumDependencyException
+            or PdfWorkerUnavailableException
+            or InvalidOperationException)
+        {
+            if (ReferenceEquals(layoutCancellation, _continuousLayoutCts)
+                && ReferenceEquals(document, _tabService.ActiveDocument))
+            {
+                SetStatus(exception.Message, InfoBarSeverity.Error);
+            }
+            return;
         }
 
         var scale = ResolveRenderScale();
@@ -1916,8 +1961,10 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
             && Math.Abs(_continuousScale - scale) < 0.001
             && ContinuousPages.Count == document.PageCount)
         {
+            if (generation is { } existingGeneration)
+                _continuousRenderGeneration = existingGeneration;
             UpdateSearchHighlights();
-            return Task.CompletedTask;
+            return;
         }
 
         _continuousRenderCts?.Cancel();
@@ -1979,7 +2026,6 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         NotifyZoomChanged();
         UpdateSearchHighlights();
         PageNavigationRequested?.Invoke(this, currentPageIndex);
-        return Task.CompletedTask;
     }
 
     public async Task<bool> EnsureContinuousPageRenderedAsync(
