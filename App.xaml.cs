@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using ElliePdf.Application;
 using ElliePdf.Benchmarking;
 using ElliePdf.Diagnostics;
@@ -23,11 +24,13 @@ public partial class App : Microsoft.UI.Xaml.Application
 {
     private const string MainInstanceKey = "ElliePdf.Main";
     private readonly SemaphoreSlim _activationGate = new(1, 1);
+    private readonly TaskCompletionSource _initialActivationQueued = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly int _launchOperationId = TelemetryOperation.NextId();
     private readonly long _launchStarted = TelemetryOperation.StartTimestamp();
     private readonly BenchmarkDriverRequest? _benchmarkDriver = ParseBenchmarkDriver();
     private readonly ServiceProvider _services;
     private AppInstance? _mainInstance;
+    private CancellationTokenSource? _activationRelayCancellation;
     private MainWindow? _window;
     private Microsoft.UI.Dispatching.DispatcherQueue? _dispatcherQueue;
     private Task? _disposeServicesTask;
@@ -138,13 +141,22 @@ public partial class App : Microsoft.UI.Xaml.Application
             return;
         }
 
+        var files = GetActivationFiles(activation, Environment.GetCommandLineArgs().Skip(1));
         var registeredInstance = AppInstance.FindOrRegisterForKey(MainInstanceKey);
         if (!registeredInstance.IsCurrent)
         {
             var redirected = false;
             try
             {
-                await registeredInstance.RedirectActivationToAsync(activation);
+                if (files.Length > 0)
+                {
+                    // Packaged classic launches can receive file paths only on the process command line.
+                    await FileActivationRelay.SendAsync(registeredInstance.ProcessId, files);
+                }
+                else
+                {
+                    await registeredInstance.RedirectActivationToAsync(activation);
+                }
                 redirected = true;
             }
             finally
@@ -154,13 +166,20 @@ public partial class App : Microsoft.UI.Xaml.Application
                     TelemetryOperation.ElapsedMicroseconds(activationStarted),
                     redirected);
                 await DisposeServicesAsync();
-                Exit();
+                // This instance never creates a window or acquires a document session.
+                Environment.Exit(redirected ? 0 : 1);
             }
             return;
         }
 
+        _dispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
         _mainInstance = registeredInstance;
         _mainInstance.Activated += OnMainInstanceActivated;
+        _activationRelayCancellation = new CancellationTokenSource();
+        _ = _services.GetRequiredService<BackgroundTaskSupervisor>().Track(
+            FileActivationRelay.ListenAsync(registeredInstance.ProcessId,
+                paths => QueueRedirectedActivation(() => FilterPdfPaths(paths)), _activationRelayCancellation.Token),
+            "file-activation-relay");
 
         var settingsService = _services.GetRequiredService<IUserSettingsService>();
         await settingsService.InitializeAsync();
@@ -170,7 +189,6 @@ public partial class App : Microsoft.UI.Xaml.Application
         }
 
         _window = _services.GetRequiredService<MainWindow>();
-        _dispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
         _window.Closed += OnWindowClosed;
         if (settingsService.Settings.PersistViewState)
         {
@@ -181,24 +199,34 @@ public partial class App : Microsoft.UI.Xaml.Application
             _launchOperationId,
             TelemetryOperation.ElapsedMicroseconds(_launchStarted));
         _ = _services.GetRequiredService<BackgroundTaskSupervisor>()
-            .Track(ProcessActivationAsync(activation, activationOperationId, activationStarted), "initial-activation");
+            .Track(ProcessActivationAsync(files, activationOperationId, activationStarted), "initial-activation");
+        _initialActivationQueued.TrySetResult();
     }
 
-    private void OnMainInstanceActivated(object? sender, AppActivationArguments activation)
+    private void OnMainInstanceActivated(object? sender, AppActivationArguments activation) =>
+        QueueRedirectedActivation(() => GetActivationFiles(activation));
+
+    private bool QueueRedirectedActivation(Func<string[]> getFiles)
     {
         var operationId = TelemetryOperation.NextId();
         var started = TelemetryOperation.StartTimestamp();
         ElliePdfEventSource.Log.ActivationStart(operationId);
         ElliePdfEventSource.Log.ActivationReceived(operationId);
-        _ = _dispatcherQueue?.TryEnqueue(() =>
+        return _dispatcherQueue?.TryEnqueue(() =>
         {
             _ = _services.GetRequiredService<BackgroundTaskSupervisor>()
-                .Track(ProcessActivationAsync(activation, operationId, started), "redirected-activation");
-        });
+                .Track(ProcessRedirectedActivationAsync(getFiles(), operationId, started), "redirected-activation");
+        }) == true;
+    }
+
+    private async Task ProcessRedirectedActivationAsync(string[] files, int operationId, long started)
+    {
+        await _initialActivationQueued.Task;
+        await ProcessActivationAsync(files, operationId, started);
     }
 
     private async Task ProcessActivationAsync(
-        AppActivationArguments activation,
+        IReadOnlyList<string> filePaths,
         int operationId,
         long started)
     {
@@ -220,21 +248,9 @@ public partial class App : Microsoft.UI.Xaml.Application
                 }
             }
 
-            if (activation.Kind == ExtendedActivationKind.File
-                && activation.Data is FileActivatedEventArgs fileArgs)
+            if (filePaths.Count > 0)
             {
-                var filePaths = fileArgs.Files
-                    .OfType<StorageFile>()
-                    .Where(file => string.Equals(file.FileType, ".pdf", StringComparison.OrdinalIgnoreCase))
-                    .Select(file => file.Path)
-                    .Where(path => !string.IsNullOrWhiteSpace(path))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToArray();
-
-                if (filePaths.Length > 0)
-                {
-                    await mainWindow.OpenFilesAsync(filePaths);
-                }
+                await mainWindow.OpenFilesAsync(filePaths);
             }
 
             mainWindow.BringToForeground();
@@ -250,6 +266,66 @@ public partial class App : Microsoft.UI.Xaml.Application
         }
     }
 
+    private static string[] GetActivationFiles(
+        AppActivationArguments activation,
+        IEnumerable<string>? processArguments = null)
+    {
+        IEnumerable<string> paths = activation.Data switch
+        {
+            IFileActivatedEventArgs file => file.Files.OfType<StorageFile>().Select(static item => item.Path),
+            ILaunchActivatedEventArgs launch => SplitLaunchArguments(launch.Arguments),
+            _ => []
+        };
+        if (activation.Kind == ExtendedActivationKind.Launch && processArguments is not null)
+        {
+            paths = paths.Concat(processArguments);
+        }
+
+        return FilterPdfPaths(paths);
+    }
+
+    private static string[] FilterPdfPaths(IEnumerable<string> paths) =>
+        paths.Where(static path => Path.IsPathFullyQualified(path)
+                && string.Equals(Path.GetExtension(path), ".pdf", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+    private static string[] SplitLaunchArguments(string arguments)
+    {
+        if (string.IsNullOrWhiteSpace(arguments))
+        {
+            return [];
+        }
+
+        // Supply a program name so CommandLineToArgvW applies regular quoting rules to every argument.
+        var argv = CommandLineToArgvW("ElliePdf " + arguments, out var count);
+        if (argv == IntPtr.Zero)
+        {
+            return [];
+        }
+
+        try
+        {
+            var result = new string[count - 1];
+            for (var index = 1; index < count; index++)
+            {
+                result[index - 1] = Marshal.PtrToStringUni(Marshal.ReadIntPtr(argv, index * IntPtr.Size)) ?? "";
+            }
+
+            return result;
+        }
+        finally
+        {
+            _ = LocalFree(argv);
+        }
+    }
+
+    [LibraryImport("shell32.dll", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial IntPtr CommandLineToArgvW(string commandLine, out int argumentCount);
+
+    [LibraryImport("kernel32.dll")]
+    private static partial IntPtr LocalFree(IntPtr memory);
+
     private Task DisposeServicesAsync() =>
         _disposeServicesTask ??= _services.DisposeAsync().AsTask();
 
@@ -260,6 +336,12 @@ public partial class App : Microsoft.UI.Xaml.Application
             _window.Closed -= OnWindowClosed;
         }
 
+        if (_mainInstance is not null)
+        {
+            _mainInstance.Activated -= OnMainInstanceActivated;
+        }
+        _activationRelayCancellation?.Cancel();
+
         try
         {
             await DisposeServicesAsync();
@@ -267,6 +349,10 @@ public partial class App : Microsoft.UI.Xaml.Application
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"Failed to dispose application services: {ex}");
+        }
+        finally
+        {
+            _activationRelayCancellation?.Dispose();
         }
     }
 
