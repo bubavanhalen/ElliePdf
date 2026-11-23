@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../ElliePdf.Core/ElliePdf.Core.csproj" />
+    <ProjectReference Include="../../src/ElliePdf.Domain/ElliePdf.Domain.csproj" />
+    <ProjectReference Include="../../src/ElliePdf.Infrastructure/ElliePdf.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../../Services/AnnotationStore.cs" Link="Services/AnnotationStore.cs" />
+    <Compile Include="../../Services/IAnnotationStore.cs" Link="Services/IAnnotationStore.cs" />
+    <Compile Include="../../Services/IUserSettingsService.cs" Link="Services/IUserSettingsService.cs" />
+    <Compile Include="../../Services/UserSettings.cs" Link="Services/UserSettings.cs" />
+    <Compile Include="../../Services/ElliePdfJsonContext.cs" Link="Services/ElliePdfJsonContext.cs" />
+    <Compile Include="../../Models/PageOverlayDocument.cs" Link="Models/PageOverlayDocument.cs" />
+  </ItemGroup>
+</Project>

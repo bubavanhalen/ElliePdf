@@ -41,7 +41,7 @@ public sealed class PageRenderCache
 
     public void InvalidateDocument(PdfDocumentSession document)
     {
-        var prefix = $"{document.Id:N}:";
+        var prefix = $"{document.EngineSession.DocumentId.Value:D}:";
         var keys = _entries.Keys.Where(key => key.StartsWith(prefix, StringComparison.Ordinal)).ToArray();
         foreach (var key in keys)
         {
@@ -51,5 +51,5 @@ public sealed class PageRenderCache
     }
 
     private static string CreateKey(PdfDocumentSession document, int pageIndex, double scale) =>
-        $"{document.Id:N}:{pageIndex}:{scale:F3}";
+        $"{document.EngineSession.DocumentId.Value:D}:{pageIndex}:{scale:F3}";
 }

@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "dependencies": {
+    "net11.0": {
+      "elliepdf.domain": {
+        "type": "Project"
+      },
+      "elliepdf.pdf.contracts": {
+        "type": "Project",
+        "dependencies": {
+          "ElliePdf.Domain": "[1.0.0, )"
+        }
+      }
+    },
+    "net11.0/win-arm64": {},
+    "net11.0/win-x64": {}
+  }
+}

@@ -1,0 +1,8 @@
+self-hosted-runner:
+  labels:
+    - elliepdf-arm64
+    - elliepdf-performance
+    - elliepdf-interactive
+    - elliepdf-signing
+    - elliepdf-store
+    - elliepdf-package-vm

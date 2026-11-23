@@ -1,0 +1,29 @@
+{
+  "version": 2,
+  "dependencies": {
+    "net11.0": {
+      "bblanchon.PDFium.Win32": {
+        "type": "Direct",
+        "requested": "[154.0.8021, )",
+        "resolved": "154.0.8021",
+        "contentHash": "7/9/DeeREtMyLPqSsFf60N8c41Tr1LAZHv/RGF5E9dK8XLxevZKemqAUHfw+mhtHf+4TnRMS22Rl37rRJiljTQ=="
+      }
+    },
+    "net11.0/win-arm64": {
+      "bblanchon.PDFium.Win32": {
+        "type": "Direct",
+        "requested": "[154.0.8021, )",
+        "resolved": "154.0.8021",
+        "contentHash": "7/9/DeeREtMyLPqSsFf60N8c41Tr1LAZHv/RGF5E9dK8XLxevZKemqAUHfw+mhtHf+4TnRMS22Rl37rRJiljTQ=="
+      }
+    },
+    "net11.0/win-x64": {
+      "bblanchon.PDFium.Win32": {
+        "type": "Direct",
+        "requested": "[154.0.8021, )",
+        "resolved": "154.0.8021",
+        "contentHash": "7/9/DeeREtMyLPqSsFf60N8c41Tr1LAZHv/RGF5E9dK8XLxevZKemqAUHfw+mhtHf+4TnRMS22Rl37rRJiljTQ=="
+      }
+    }
+  }
+}

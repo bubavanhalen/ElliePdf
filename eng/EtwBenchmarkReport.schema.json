@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ElliePdf ETW benchmark evidence report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "runId", "machineClass", "powerMode", "temperature", "scenario", "startedUtc", "collection", "metrics", "gates"],
+  "properties": {
+    "schemaVersion": { "const": "1.0-etw" },
+    "runId": { "type": "string", "pattern": "^[a-f0-9]{32}$" },
+    "machineClass": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9._%-]+$" },
+    "powerMode": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9._%-]+$" },
+    "temperature": { "enum": ["cold", "warm", "unspecified"] },
+    "scenario": { "enum": ["launch", "activation", "open", "first-page", "first-page-10000", "cached-navigation", "render", "random-jump", "zoom", "scroll", "cancellation", "search", "memory", "close-memory", "idle", "save-integrity", "reliability", "accessibility"] },
+    "startedUtc": { "type": "string", "format": "date-time" },
+    "collection": {
+      "type": "object", "additionalProperties": false,
+      "required": ["provider", "eventCount", "measuredIterations", "warmups", "bootstrapSamples", "bootstrapSeed", "temperature"],
+      "properties": {
+        "provider": { "const": "ElliePdf" },
+        "eventCount": { "type": "integer", "minimum": 1 },
+        "measuredIterations": { "type": "integer", "minimum": 30 },
+        "warmups": { "type": "integer", "minimum": 0 },
+        "bootstrapSamples": { "const": 10000 },
+        "bootstrapSeed": { "const": 1729 },
+        "temperature": { "enum": ["cold", "warm", "unspecified"] }
+      }
+    },
+    "metrics": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["name", "unit", "statistics", "slo"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "unit": { "type": "string", "minLength": 1 },
+          "statistics": {
+            "type": "object", "additionalProperties": false,
+            "required": ["sampleCount", "median", "p95", "p99", "maximum", "minimum", "bootstrap95", "isStable"],
+            "properties": {
+              "sampleCount": { "type": "integer", "minimum": 30 },
+              "median": { "type": "number", "minimum": 0 },
+              "p95": { "type": "number", "minimum": 0 },
+              "p99": { "type": "number", "minimum": 0 },
+              "maximum": { "type": "number", "minimum": 0 },
+              "minimum": { "type": "number", "minimum": 0 },
+              "bootstrap95": {
+                "type": "object", "additionalProperties": false, "required": ["lower", "upper", "width"],
+                "properties": {
+                  "lower": { "type": "number", "minimum": 0 },
+                  "upper": { "type": "number", "minimum": 0 },
+                  "width": { "type": "number", "minimum": 0 }
+                }
+              },
+              "isStable": { "type": "boolean" }
+            }
+          },
+          "slo": {
+            "type": "object", "additionalProperties": false, "required": ["targetP95", "targetP99", "maximum", "minimum", "status"],
+            "properties": { "targetP95": { "type": ["number", "null"] }, "targetP99": { "type": ["number", "null"] }, "maximum": { "type": ["number", "null"] }, "minimum": { "type": ["number", "null"] }, "status": { "enum": ["pass", "fail"] } }
+          }
+        }
+      }
+    },
+    "frameAccounting": {
+      "type": ["object", "null"], "additionalProperties": false,
+      "required": ["droppedFrames", "presentedFrames", "droppedPercent"],
+      "properties": {
+        "droppedFrames": { "type": "number", "minimum": 0 },
+        "presentedFrames": { "type": "number", "minimum": 0 },
+        "droppedPercent": { "type": ["number", "null"], "minimum": 0 }
+      }
+    },
+    "gates": {
+      "type": "object", "additionalProperties": false, "required": ["requiredMetrics", "confidenceAndSlo", "overall", "failures"],
+      "properties": {
+        "requiredMetrics": { "enum": ["pass", "fail"] },
+        "confidenceAndSlo": { "enum": ["pass", "fail"] },
+        "overall": { "enum": ["pass", "fail"] },
+        "failures": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

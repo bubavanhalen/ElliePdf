@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "1.0",
+  "statisticalMethod": "linear-interpolated percentile; bootstrap 95% percentile CI; seed 1729; 10000 resamples",
+  "minimumIterations": 30,
+  "powerMode": "RECORD_BEFORE_RUN",
+  "machineClass": "RECORD_BEFORE_RUN",
+  "cacheClearingProcedure": "RECORD_ADMIN_CONTROLLED_PROCEDURE",
+  "comparators": [
+    { "name": "Adobe Acrobat Reader", "exactVersion": "RECORD_EXACT_VERSION", "settings": {}, "corpusHashes": [], "baselineP95": {} },
+    { "name": "Microsoft Edge PDF viewer", "exactVersion": "RECORD_EXACT_VERSION", "settings": {}, "corpusHashes": [], "baselineP95": {} },
+    { "name": "SumatraPDF", "exactVersion": "RECORD_EXACT_VERSION", "settings": {}, "corpusHashes": [], "baselineP95": {} }
+  ]
+}

@@ -1,0 +1,200 @@
+name: Weekly preview compatibility
+
+on:
+  schedule:
+    - cron: '41 2 * * 1'
+  workflow_dispatch:
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_ROLL_FORWARD: Disable
+
+jobs:
+  preview-candidate:
+    runs-on: windows-2025
+    timeout-minutes: 180
+    outputs:
+      changed: ${{ steps.preview.outputs.changed }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Set up corpus Python
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: '3.13.15'
+      - name: Generate and verify synthetic corpus
+        shell: pwsh
+        run: .\eng\Initialize-TestCorpus.ps1
+      - name: Discover and apply current .NET 11 and prerelease dependency pins
+        id: preview
+        shell: pwsh
+        run: .\eng\Update-PreviewPins.ps1 -Apply -WriteGitHubOutput
+      - name: Install candidate SDK
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: ${{ steps.preview.outputs.sdk }}
+      - name: Regenerate and verify package locks
+        shell: pwsh
+        run: |
+          dotnet restore ElliePdf.slnx --force-evaluate -p:RestoreLockedMode=false
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate lock regeneration failed.' }
+          dotnet tool restore
+      - name: Validate preview governance
+        shell: pwsh
+        run: |
+          .\eng\Verify-PdfiumNative.ps1
+          .\eng\Test-UpstreamWarningAllowlist.ps1
+          .\eng\Test-ResourceCompleteness.ps1
+          .\eng\Test-LocalizationUsage.ps1
+          .\eng\Test-MsixVersionMapping.ps1
+      - name: Restore and build x64
+        shell: pwsh
+        run: |
+          dotnet restore ElliePdf.slnx --locked-mode -p:Platform=x64 -p:RuntimeIdentifier=win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate x64 locked restore failed.' }
+          dotnet build ElliePdf.slnx -c Release -p:Platform=x64 --no-restore
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate x64 build failed.' }
+      - name: Run all x64 tests
+        shell: pwsh
+        run: |
+          $projects = Get-ChildItem -Recurse -Filter *.csproj | Where-Object {
+            ([xml](Get-Content -LiteralPath $_.FullName -Raw)).Project.PropertyGroup.IsTestProject -contains 'true'
+          } | Sort-Object FullName | ForEach-Object FullName
+          if ($projects.Count -eq 0) { throw 'No test projects were discovered.' }
+          foreach ($project in $projects) {
+            dotnet test $project -c Release -p:Platform=x64 -p:RuntimeIdentifier=win-x64 --no-restore
+            if ($LASTEXITCODE -ne 0) { throw "Candidate tests failed: $project" }
+          }
+      - name: Benchmark harness self-test
+        shell: pwsh
+        run: |
+          dotnet run --project .\Benchmark\Benchmark.csproj -c Release --no-restore -- --mode self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate benchmark harness self-test failed.' }
+      - name: Restore and build ARM64
+        shell: pwsh
+        run: |
+          dotnet restore ElliePdf.slnx --locked-mode -p:Platform=ARM64 -p:RuntimeIdentifier=win-arm64
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate ARM64 locked restore failed.' }
+          dotnet build ElliePdf.slnx -c Release -p:Platform=ARM64 --no-restore
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate ARM64 build failed.' }
+      - name: NativeAOT publish and package x64
+        shell: pwsh
+        run: |
+          .\eng\Publish-ReleaseArtifacts.ps1 -Platform x64 -RuntimeIdentifier win-x64 -Package
+          .\eng\Test-SourceLink.ps1 -SymbolsPath artifacts\symbols\win-x64
+      - name: NativeAOT publish and package ARM64
+        shell: pwsh
+        run: |
+          .\eng\Publish-ReleaseArtifacts.ps1 -Platform ARM64 -RuntimeIdentifier win-arm64 -Package
+          .\eng\Test-SourceLink.ps1 -SymbolsPath artifacts\symbols\win-arm64
+      - name: Inspect packages and record candidate evidence
+        shell: pwsh
+        run: |
+          .\eng\Get-ToolchainFingerprint.ps1 -OutputPath preview-toolchain-fingerprint.json
+          .\eng\Generate-Sbom.ps1 -OutputPath preview-sbom.json
+          .\eng\Test-ReleaseEvidence.ps1 -SbomPath preview-sbom.json
+          $packages = foreach ($architecture in 'x64', 'arm64') {
+            $files = @(Get-ChildItem -LiteralPath "artifacts/package/win-$architecture" -Filter *.msix -File)
+            if ($files.Count -ne 1) { throw "Expected one unsigned $architecture MSIX." }
+            .\eng\Test-MsixPayload.ps1 -PackagePath $files[0].FullName -ExpectedArchitecture $architecture | Out-Host
+            [ordered]@{
+              architecture = $architecture
+              name = $files[0].Name
+              sha256 = (Get-FileHash -LiteralPath $files[0].FullName -Algorithm SHA256).Hash
+            }
+          }
+          [ordered]@{ sourceCommit = $env:GITHUB_SHA; packages = @($packages) } |
+            ConvertTo-Json -Depth 4 | Set-Content -LiteralPath preview-package-evidence.json -Encoding utf8
+      - name: Record the tested pins and locks
+        if: steps.preview.outputs.changed == 'true'
+        shell: pwsh
+        run: |
+          $untrackedLocks = @(git ls-files --others --exclude-standard -- ':(glob)**/packages.lock.json')
+          if ($LASTEXITCODE -ne 0 -or $untrackedLocks.Count -ne 0) { throw 'The candidate produced unexpected lock files.' }
+          $pinPaths = @('global.json', 'Directory.Packages.props', ':(glob)**/packages.lock.json')
+          $patch = Join-Path $env:RUNNER_TEMP 'preview-pins.patch'
+          git diff --binary --output=$patch HEAD -- @pinPaths
+          if ($LASTEXITCODE -ne 0 -or (Get-Item -LiteralPath $patch).Length -eq 0) { throw 'No tested pin patch was produced.' }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: steps.preview.outputs.changed == 'true'
+        with:
+          name: preview-candidate-pins
+          path: ${{ runner.temp }}/preview-pins.patch
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: preview-candidate-evidence
+          path: |
+            preview-toolchain-fingerprint.json
+            preview-sbom.json
+            preview-package-evidence.json
+            artifacts/publish/win-x64
+            artifacts/publish/win-arm64
+            artifacts/package/win-x64
+            artifacts/package/win-arm64
+            artifacts/symbols/win-x64
+            artifacts/symbols/win-arm64
+            artifacts/benchmark-report.json
+  propose:
+    needs: preview-candidate
+    if: >-
+      needs.preview-candidate.outputs.changed == 'true' &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: windows-2025
+    permissions:
+      contents: write
+      pull-requests: write
+    concurrency:
+      group: elliepdf-preview-proposal
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: preview-candidate-pins
+          path: ${{ runner.temp }}/candidate-pins
+      - name: Propose validated pin update
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          $branch = 'automation/preview-stack'
+          $patch = Join-Path $env:RUNNER_TEMP 'candidate-pins/preview-pins.patch'
+          git apply --check -- $patch
+          if ($LASTEXITCODE -ne 0) { throw 'The tested pin patch does not apply to its validation commit.' }
+          git apply --index -- $patch
+          if ($LASTEXITCODE -ne 0) { throw 'Applying the tested pins failed.' }
+          $staged = @(git diff --cached --name-only)
+          if ($LASTEXITCODE -ne 0 -or $staged.Count -eq 0) { throw 'No tested pin changes are staged.' }
+          foreach ($file in $staged) {
+            if ($file -cnotin @('global.json', 'Directory.Packages.props') -and $file -cnotmatch '(^|/)packages\.lock\.json$') {
+              throw "The tested pin patch contains an unexpected file: $file"
+            }
+          }
+          $remote = "refs/heads/$branch"
+          $remoteEntry = @(git ls-remote --heads origin $remote)
+          if ($LASTEXITCODE -ne 0 -or $remoteEntry.Count -gt 1) { throw 'The proposal branch could not be resolved.' }
+          $previous = if ($remoteEntry.Count -eq 1) { ($remoteEntry[0] -split '\s+')[0] } else { '' }
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m "chore: validate newest preview stack"
+          if ($LASTEXITCODE -ne 0) { throw 'The tested pin commit could not be created.' }
+          git push "--force-with-lease=${remote}:$previous" origin "HEAD:$remote"
+          if ($LASTEXITCODE -ne 0) { throw 'The proposal push failed or the branch changed concurrently.' }
+          $existing = gh pr list --head $branch --state open --json number --jq '.[0].number'
+          if ($LASTEXITCODE -ne 0) { throw 'Could not check for an existing pin proposal.' }
+          if ([string]::IsNullOrWhiteSpace($existing)) {
+            gh pr create --head $branch --base $env:DEFAULT_BRANCH `
+              --title 'chore: validate newest preview stack' `
+              --body 'Candidate passed locked restore, x64/ARM64 build, x64 tests, benchmark self-test, NativeAOT publish, packaging, provenance, and warning-policy checks. Complete the required consecutive green validation runs and release performance gates before promotion.'
+            if ($LASTEXITCODE -ne 0) { throw 'The pin proposal PR could not be created.' }
+          }

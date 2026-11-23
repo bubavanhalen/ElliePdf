@@ -1,0 +1,134 @@
+name: Store Flighting
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Exact signed release tag whose artifact was approved
+        required: true
+        type: string
+      signing_run_id:
+        description: Successful Release Signing workflow run ID
+        required: true
+        type: string
+      target:
+        description: Package flight or stable Store submission
+        required: true
+        type: choice
+        options:
+          - flight
+          - stable
+      flight_id:
+        description: Package flight ID (required only for flight)
+        required: false
+        default: ''
+        type: string
+      operation:
+        description: Approved operation to perform
+        required: true
+        type: choice
+        options:
+          - status
+          - submit
+          - rollout
+          - halt
+          - finalize
+      percentage:
+        description: Initial or updated rollout percentage (submit/rollout only)
+        required: false
+        default: '5'
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  ELLIEPDF_STORE_FLIGHTING: '1'
+  ELLIEPDF_STORE_ENVIRONMENT: store-production
+  DOTNET_ROLL_FORWARD: Disable
+
+jobs:
+  store-release:
+    if: github.ref == 'refs/heads/master'
+    runs-on: [self-hosted, windows, x64, elliepdf-store]
+    environment: store-production
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Execute release automation only from the exact trusted workflow
+          # commit. The selected release tag is data and is resolved below.
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Verify signing run and download its exact artifact
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIGNING_RUN_ID: ${{ inputs.signing_run_id }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
+        run: |
+          if ($env:SIGNING_RUN_ID -notmatch '^[1-9][0-9]*$') { throw 'signing_run_id must be a positive integer.' }
+          if ($env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') { throw 'release_tag is invalid.' }
+          $automationCommit = (git rev-parse --verify HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $automationCommit -notmatch '^[0-9a-f]{40}$' -or $automationCommit -cne $env:GITHUB_SHA) { throw 'Could not verify the trusted automation checkout.' }
+          $tagCommit = (git rev-parse --verify "refs/tags/$env:RELEASE_TAG^{commit}").Trim()
+          if ($LASTEXITCODE -ne 0 -or $tagCommit -notmatch '^[0-9a-f]{40}$') { throw 'Could not resolve the selected release tag to a commit.' }
+          $run = gh api "repos/$env:SOURCE_REPOSITORY/actions/runs/$env:SIGNING_RUN_ID" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $run.conclusion -ne 'success' -or $run.name -ne 'Release Signing' -or $run.event -notin @('push', 'workflow_dispatch')) { throw 'The selected run is not a successful Release Signing run.' }
+          $expectedRunPath = if ($run.event -eq 'push') {
+            '^\.github/workflows/release-signing\.yml@(?:refs/tags/)?' + [Regex]::Escape($env:RELEASE_TAG) + '$'
+          } else {
+            '^\.github/workflows/release-signing\.yml@(?:refs/heads/)?master$'
+          }
+          if ([string]$run.path -notmatch $expectedRunPath) { throw "The signing workflow was loaded from an untrusted ref: $($run.path)" }
+          if ($run.event -eq 'push' -and [string]$run.head_sha -cne $tagCommit) { throw 'The tag-push signing run commit does not match the selected release tag.' }
+          $artifactRoot = Join-Path $PWD ("artifacts/store-input-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT")
+          if (Test-Path -LiteralPath $artifactRoot) { throw "Refusing stale Store artifact directory: $artifactRoot" }
+          New-Item -ItemType Directory -Path $artifactRoot | Out-Null
+          gh run download $env:SIGNING_RUN_ID --repo $env:SOURCE_REPOSITORY --name "signed-release-$env:RELEASE_TAG" --dir $artifactRoot
+          if ($LASTEXITCODE -ne 0) { throw 'Signed release artifact download failed.' }
+          "ELLIEPDF_SIGNING_RUN_ID=$env:SIGNING_RUN_ID" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "ELLIEPDF_AUTOMATION_COMMIT=$automationCommit" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "ELLIEPDF_SOURCE_COMMIT=$tagCommit" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "ELLIEPDF_SOURCE_REPOSITORY=$env:SOURCE_REPOSITORY" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "ELLIEPDF_STORE_ARTIFACT_ROOT=$artifactRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: 9.0.x
+      - name: Configure Microsoft Store CLI
+        uses: microsoft/microsoft-store-apppublisher@cc9910a8d59f2eb55cbb83df0a3800cf3b5300e0 # v1.4
+        with:
+          version: v0.4.1
+      - name: Execute approved Store operation
+        shell: pwsh
+        env:
+          ELLIEPDF_RUNNER_ENVIRONMENT: ${{ runner.environment }}
+          ELLIEPDF_STORE_APPROVED: ${{ vars.ELLIEPDF_STORE_APPROVED }}
+          ELLIEPDF_STORE_EPHEMERAL_RUNNER: ${{ vars.ELLIEPDF_STORE_EPHEMERAL_RUNNER }}
+          ELLIEPDF_STORE_IDENTITY_NAME: ${{ vars.ELLIEPDF_STORE_IDENTITY_NAME }}
+          ELLIEPDF_STORE_PUBLISHER: ${{ vars.ELLIEPDF_STORE_PUBLISHER }}
+          ELLIEPDF_STORE_PRODUCT_ID: ${{ vars.ELLIEPDF_STORE_PRODUCT_ID }}
+          ELLIEPDF_ALLOWED_FLIGHT_IDS: ${{ vars.ELLIEPDF_ALLOWED_FLIGHT_IDS }}
+          ELLIEPDF_STORE_AUTH_CERT_THUMBPRINT: ${{ vars.ELLIEPDF_STORE_AUTH_CERT_THUMBPRINT }}
+          STORE_OPERATION: ${{ inputs.operation }}
+          STORE_TARGET: ${{ inputs.target }}
+          STORE_FLIGHT_ID: ${{ inputs.flight_id }}
+          STORE_RELEASE_TAG: ${{ inputs.release_tag }}
+          STORE_PERCENTAGE: ${{ inputs.percentage }}
+          AZURE_AD_TENANT_ID: ${{ secrets.AZURE_AD_TENANT_ID }}
+          SELLER_ID: ${{ secrets.SELLER_ID }}
+          AZURE_AD_APPLICATION_CLIENT_ID: ${{ secrets.AZURE_AD_APPLICATION_CLIENT_ID }}
+        run: |
+          $params = @{
+            Operation = $env:STORE_OPERATION
+            Target = $env:STORE_TARGET
+            ProductId = $env:ELLIEPDF_STORE_PRODUCT_ID
+            ReleaseTag = $env:STORE_RELEASE_TAG
+            ArtifactRoot = $env:ELLIEPDF_STORE_ARTIFACT_ROOT
+            Execute = $true
+          }
+          if (-not [string]::IsNullOrWhiteSpace($env:STORE_FLIGHT_ID)) { $params.FlightId = $env:STORE_FLIGHT_ID }
+          if ($env:STORE_OPERATION -in @('submit', 'rollout')) { $params.Percentage = [int]$env:STORE_PERCENTAGE }
+          .\eng\Invoke-StoreFlight.ps1 @params

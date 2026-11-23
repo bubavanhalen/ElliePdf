@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <RootNamespace>ElliePdf.Semantics</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ElliePdf.Pdf.Contracts\ElliePdf.Pdf.Contracts.csproj" />
+  </ItemGroup>
+</Project>

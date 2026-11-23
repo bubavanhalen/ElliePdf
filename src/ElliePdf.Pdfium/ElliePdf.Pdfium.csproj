@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <RootNamespace>ElliePdf.Pdfium</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="bblanchon.PDFium.Win32" GeneratePathProperty="true" />
+  </ItemGroup>
+
+  <Target Name="CopyVerifiedPdfiumAsset" AfterTargets="Build" Condition="'$(RuntimeIdentifier)' == 'win-x64' or '$(RuntimeIdentifier)' == 'win-arm64'">
+    <PropertyGroup>
+      <_PdfiumAsset>$(Pkgbblanchon_PDFium_Win32)\runtimes\$(RuntimeIdentifier)\native\pdfium.dll</_PdfiumAsset>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(_PdfiumAsset)')" Text="PDFium package asset missing for $(RuntimeIdentifier): $(_PdfiumAsset)." />
+    <Copy SourceFiles="$(_PdfiumAsset)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

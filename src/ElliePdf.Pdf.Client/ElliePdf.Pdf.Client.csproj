@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net11.0-windows10.0.26100.0</TargetFramework>
+    <RootNamespace>ElliePdf.Pdf.Client</RootNamespace>
+    <IsTrimmable>true</IsTrimmable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\ElliePdf.Core\ElliePdf.Core.csproj" />
+    <ProjectReference Include="..\ElliePdf.Pdf.Contracts\ElliePdf.Pdf.Contracts.csproj" />
+    <ProjectReference Include="..\ElliePdf.Pdf.Transport\ElliePdf.Pdf.Transport.csproj" />
+  </ItemGroup>
+</Project>
