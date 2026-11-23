@@ -11,13 +11,14 @@ param(
     [switch] $Interactive,
     [switch] $Execute,
     [switch] $RequireFixture,
-    [switch] $RequireHighContrast
+    [switch] $RequireHighContrast,
+    [string] $InstalledAumid
 )
 
 $ErrorActionPreference = 'Stop'
 
 if (-not $Interactive) {
-    Write-Host 'UIA inventory only: run with -Interactive -Execute -TargetPath <signed ElliePdf.exe> on a dedicated desktop session.'
+    Write-Host 'UIA inventory only: run with -Interactive -Execute -InstalledAumid <package-family!application-id> on a dedicated desktop session.'
     Write-Host 'The fixed desktop procedure is documented in eng/UIA-PROCEDURE.md.'
     exit 0
 }
@@ -26,8 +27,24 @@ if (-not $Execute) {
     throw 'Interactive UIA mode is fail-closed: pass both -Interactive and -Execute.'
 }
 
-if ([string]::IsNullOrWhiteSpace($TargetPath) -or -not (Test-Path -LiteralPath $TargetPath -PathType Leaf)) {
-    throw 'Interactive UIA mode requires an existing -TargetPath.'
+$usePackageActivation = -not [string]::IsNullOrWhiteSpace($InstalledAumid)
+if (-not $usePackageActivation -and [string]::IsNullOrWhiteSpace($TargetPath)) {
+    throw 'Interactive UIA mode requires -InstalledAumid or an existing -TargetPath.'
+}
+if (-not [string]::IsNullOrWhiteSpace($TargetPath) -and -not (Test-Path -LiteralPath $TargetPath -PathType Leaf)) {
+    throw 'TargetPath was provided but does not exist.'
+}
+if ($usePackageActivation) {
+    $identityParts = $InstalledAumid.Split('!')
+    if ($identityParts.Count -ne 2 -or [string]::IsNullOrWhiteSpace($identityParts[1])) {
+        throw 'InstalledAumid must be an installed package family name followed by ! and its application Id.'
+    }
+    $packages = @(Get-AppxPackage | Where-Object { $_.PackageFamilyName -ceq $identityParts[0] })
+    if ($packages.Count -ne 1) { throw 'InstalledAumid did not identify exactly one package installed for the current user.' }
+    $manifest = Get-AppxPackageManifest -Package $packages[0].PackageFullName
+    $applications = @($manifest.Package.Applications.Application | Where-Object { $_.Id -ceq $identityParts[1] })
+    if ($applications.Count -ne 1) { throw 'InstalledAumid application Id was not found in the installed package manifest.' }
+    Add-Type -Path (Join-Path $PSScriptRoot 'UiaPackageActivation.cs')
 }
 
 if (-not [string]::IsNullOrWhiteSpace($FixturePath) -and -not (Test-Path -LiteralPath $FixturePath -PathType Leaf)) {
@@ -70,7 +87,7 @@ public static class ElliePdfNativeWindowing
 }
 '@
 
-$resolvedTargetPath = [IO.Path]::GetFullPath($TargetPath)
+$resolvedTargetPath = if ([string]::IsNullOrWhiteSpace($TargetPath)) { $null } else { (Resolve-Path -LiteralPath $TargetPath).ProviderPath }
 $resolvedResultPath = [IO.Path]::GetFullPath($ResultPath)
 [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($resolvedResultPath)) | Out-Null
 
@@ -79,7 +96,9 @@ $report = [ordered]@{
     schemaVersion = 'uia-1.0'
     startedUtc = [DateTimeOffset]::UtcNow.ToString('o')
     target = [ordered]@{
-        executableName = [IO.Path]::GetFileName($resolvedTargetPath)
+        executableName = if ($resolvedTargetPath) { [IO.Path]::GetFileName($resolvedTargetPath) } else { $null }
+        activationMode = if ($usePackageActivation) { 'installed-aumid' } else { 'direct-executable' }
+        processOwnershipVerified = $false
         interactive = $true
         executed = $true
     }
@@ -264,7 +283,29 @@ function Send-Keys([string] $Keys) {
 }
 
 function Start-FileActivation([string] $Path) {
-    Start-Process -FilePath $Path | Out-Null
+    if ($usePackageActivation) {
+        $activatedProcess = [Diagnostics.Process]::GetProcessById([ElliePdfPackageActivation]::Activate($InstalledAumid, $Path))
+        try {
+            Assert-TargetProcess $activatedProcess
+            Require ($activatedProcess.Id -eq $process.Id) 'File activation was routed to a different process; refusing to continue against the original window.'
+        }
+        finally { $activatedProcess.Dispose() }
+    }
+    else {
+        # Legacy executable callers explicitly retain the default-association behavior.
+        Start-Process -FilePath $Path | Out-Null
+    }
+}
+
+function Assert-TargetProcess([Diagnostics.Process] $Candidate) {
+    Require (-not $Candidate.HasExited) 'The activated process exited before ownership could be verified.'
+    if ($usePackageActivation) {
+        Require ([ElliePdfPackageActivation]::GetProcessApplicationId($Candidate) -ceq $InstalledAumid) 'Activated process application identity did not match InstalledAumid.'
+    }
+    if ($resolvedTargetPath) {
+        $actualPath = [IO.Path]::GetFullPath($Candidate.MainModule.FileName)
+        Require ([StringComparer]::OrdinalIgnoreCase.Equals($actualPath, $resolvedTargetPath)) 'Activated process executable path did not match TargetPath.'
+    }
 }
 
 function Assert-PageIdentity($Window, [int] $ExpectedPage, [int] $ExpectedCount, [TimeSpan] $Timeout) {
@@ -346,9 +387,22 @@ function Test-VirtualizedPages($Window, [int] $ExpectedPageCount) {
 }
 
 $process = $null
+$ownsProcess = $false
 $temporarySecondFixture = $null
 try {
-    $process = Start-Process -FilePath $resolvedTargetPath -PassThru
+    if ($usePackageActivation) {
+        $preexistingProcessIds = @(Get-Process | Select-Object -ExpandProperty Id)
+        $process = [Diagnostics.Process]::GetProcessById([ElliePdfPackageActivation]::Activate($InstalledAumid, $null))
+        Assert-TargetProcess $process
+        Require ($process.Id -notin $preexistingProcessIds) 'Activation reused a preexisting process; close ElliePdf on the dedicated desktop and rerun.'
+    }
+    else {
+        $process = Start-Process -FilePath $resolvedTargetPath -PassThru
+        Assert-TargetProcess $process
+    }
+    $ownsProcess = $true
+    $report.target.processOwnershipVerified = $true
+    Add-Check 'activation-process-ownership' 'pass' 'Activated process identity matched the requested target before UIA interaction.'
     $timeout = [TimeSpan]::FromSeconds($LaunchTimeoutSeconds)
     $interactionTimeout = [TimeSpan]::FromSeconds($InteractionTimeoutSeconds)
     $window = Wait-ForWindow $process $timeout
@@ -474,7 +528,8 @@ catch {
 finally {
     if ($process -is [Diagnostics.Process]) {
         try {
-            if (-not $process.HasExited) {
+            if ($ownsProcess -and -not $process.HasExited) {
+                Assert-TargetProcess $process
                 $process.Kill($true)
             }
         }

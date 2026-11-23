@@ -16,8 +16,6 @@ permissions:
 
 env:
   DOTNET_ROLL_FORWARD: Disable
-  ELLIEPDF_RELEASE_SIGNING: '1'
-  ELLIEPDF_RELEASE_ENVIRONMENT: release-signing
 
 jobs:
   build-sign-and-validate:
@@ -25,6 +23,9 @@ jobs:
     runs-on: [self-hosted, windows, x64, elliepdf-signing]
     environment: release-signing
     timeout-minutes: 180
+    env:
+      ELLIEPDF_RELEASE_SIGNING: '1'
+      ELLIEPDF_RELEASE_ENVIRONMENT: release-signing
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -62,3 +63,49 @@ jobs:
             THIRD_PARTY_NOTICES.md
             SUPPORTED_WINDOWS.md
             third_party/pdfium/154.0.8021/PROVENANCE.md
+
+  signed-ui-validation:
+    needs: build-sign-and-validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner-architecture: x64
+            architecture: x64
+          - runner-architecture: ARM64
+            architecture: arm64
+    runs-on: [self-hosted, windows, "${{ matrix.runner-architecture }}", elliepdf-interactive]
+    timeout-minutes: 120
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+      SIGNED_UI_INPUT: artifacts/signed-ui-input-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.architecture }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.release_tag || github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check artifact input directory
+        shell: pwsh
+        run: |
+          if (Test-Path -LiteralPath $env:SIGNED_UI_INPUT) { throw 'Signed UIA artifact directory already exists.' }
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: signed-release-${{ inputs.release_tag || github.ref_name }}
+          path: ${{ env.SIGNED_UI_INPUT }}
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: '3.13.15'
+      - name: Generate and verify synthetic corpus
+        shell: pwsh
+        run: .\eng\Initialize-TestCorpus.ps1
+      - name: Install and validate the exact signed package
+        shell: pwsh
+        run: |
+          .\eng\Invoke-SignedUiValidation.ps1 -ArtifactRoot $env:SIGNED_UI_INPUT -Tag $env:RELEASE_TAG `
+            -Architecture '${{ matrix.architecture }}' -OutputDirectory 'artifacts/uia/${{ matrix.architecture }}' -Execute
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: signed-uia-${{ matrix.architecture }}
+          path: artifacts/uia/${{ matrix.architecture }}
