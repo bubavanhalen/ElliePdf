@@ -4,9 +4,9 @@
     "net11.0": {
       "Microsoft.NET.ILLink.Tasks": {
         "type": "Direct",
-        "requested": "[11.0.0-preview.7.26381.103, )",
-        "resolved": "11.0.0-preview.7.26381.103",
-        "contentHash": "UpCNpEWY31Zr5mKOmgbIRFZCltcoin2vh6t7ENl1i94zW5LJZVLnsIAdpBNWVqpe03k3REzMkjhkO4GhxZl2mA=="
+        "requested": "[11.0.0-rc.3.26522.148, )",
+        "resolved": "11.0.0-rc.3.26522.148",
+        "contentHash": "SWnTMx96mhBr9LCOySJg1ETlEFFHVsPGdVT02JnYhtqk1+Vke1J7RU3VkKwEiErBr4FJ42Uu4k7GdOtkRuvs/Q=="
       },
       "elliepdf.domain": {
         "type": "Project"
