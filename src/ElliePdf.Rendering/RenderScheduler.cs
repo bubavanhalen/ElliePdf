@@ -376,9 +376,10 @@ public sealed class RenderScheduler : IAsyncDisposable
         {
             if (_singleFlight.TryGetValue(job.Identity, out var current) && ReferenceEquals(current, job))
                 _singleFlight.Remove(job.Identity);
+            // Waiters can resume immediately after publication and read BusyCount.
+            Interlocked.Decrement(ref _busy);
         }
         job.CompleteAll(status, lease, error);
-        Interlocked.Decrement(ref _busy);
         RaiseBusyChanged();
     }
 

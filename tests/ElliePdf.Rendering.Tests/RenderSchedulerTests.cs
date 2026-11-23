@@ -223,7 +223,7 @@ public sealed class RenderSchedulerTests
         var release = NewSignal();
         await using var scheduler = new RenderScheduler(async (request, _) =>
         {
-            started.SetResult(true);
+            started.TrySetResult(true);
             await release.Task;
             return Lease(request);
         });
@@ -232,7 +232,8 @@ public sealed class RenderSchedulerTests
         var two = scheduler.EnqueueAsync(Request(EngineJobPriority.OtherVisible, page: 1));
         Assert.Equal(2, scheduler.BusyCount);
         release.SetResult(true);
-        await Task.WhenAll(one, two);
+        var results = await Task.WhenAll(one, two);
+        Assert.All(results, result => Assert.Equal(RenderJobCompletionStatus.Published, result.Status));
         Assert.Equal(0, scheduler.BusyCount);
     }
 
