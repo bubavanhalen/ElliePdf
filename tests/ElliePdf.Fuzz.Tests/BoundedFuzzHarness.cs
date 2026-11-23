@@ -316,17 +316,17 @@ internal static class BoundedFuzzHarness
         {
             return WorkerFuzzCaseOutcome.Create(name, bytes, "rejected");
         }
-        catch (PdfWorkerUnavailableException)
+        catch (PdfWorkerUnavailableException exception)
         {
-            return WorkerFuzzCaseOutcome.Create(name, bytes, "worker-crash");
+            return WorkerFuzzCaseOutcome.Create(name, bytes, "worker-crash", exception.GetBaseException());
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException exception)
         {
-            return WorkerFuzzCaseOutcome.Create(name, bytes, "cancelled");
+            return WorkerFuzzCaseOutcome.Create(name, bytes, "deadline", exception);
         }
-        catch
+        catch (Exception exception)
         {
-            return WorkerFuzzCaseOutcome.Create(name, bytes, "unexpected");
+            return WorkerFuzzCaseOutcome.Create(name, bytes, "unexpected", exception.GetBaseException());
         }
     }
 
@@ -442,12 +442,16 @@ internal sealed record WorkerFuzzLimits(int CaseCount, TimeSpan CaseDeadline)
     };
 }
 
-internal sealed record WorkerFuzzCaseOutcome(string Name, string Sha256, string Outcome)
+internal sealed record WorkerFuzzCaseOutcome(string Name, string Sha256, string Outcome, string? FailureClass, int? ErrorCode)
 {
-    public static WorkerFuzzCaseOutcome Create(string name, ReadOnlySpan<byte> bytes, string outcome)
-        => new(name, Convert.ToHexString(SHA256.HashData(bytes)), outcome);
+    public static WorkerFuzzCaseOutcome Create(string name, ReadOnlySpan<byte> bytes, string outcome, Exception? failure = null)
+        => new(name, Convert.ToHexString(SHA256.HashData(bytes)), outcome, failure?.GetType().Name, failure?.HResult);
 
-    public string PrivacySafeLine() => $"{Name} sha256={Sha256} outcome={Outcome}";
+    public string PrivacySafeLine()
+    {
+        var line = $"{Name} sha256={Sha256} outcome={Outcome}";
+        return FailureClass is null ? line : $"{line} failure={FailureClass} error=0x{ErrorCode:X8}";
+    }
 }
 
 internal sealed record WorkerFuzzReport(

@@ -64,17 +64,15 @@ public sealed class BoundedFuzzHarnessTests
         }
 
         Assert.NotEmpty(report.Cases);
-        Assert.Contains(report.Cases, item => item.Outcome == "accepted");
-        Assert.Equal(0, report.DeadlineCount);
-        Assert.Equal(0, report.UnexpectedOutcomeCount);
-        Assert.Equal(0, report.WorkerCrashCount);
         Assert.Equal(0, report.LeakedWorkerProcessCount);
         Assert.All(report.Cases, item =>
         {
+            Assert.True(item.Outcome is "accepted" or "rejected", item.PrivacySafeLine());
             Assert.Matches("^pdf-\\d{4}$", item.Name);
             Assert.Matches("^[0-9A-F]{64}$", item.Sha256);
             Assert.DoesNotContain("%PDF", item.PrivacySafeLine(), StringComparison.Ordinal);
         });
+        Assert.Contains(report.Cases, item => item.Outcome == "accepted");
     }
 
     [Fact(Timeout = 120_000)]
