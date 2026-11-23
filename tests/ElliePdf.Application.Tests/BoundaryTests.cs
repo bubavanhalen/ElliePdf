@@ -6,6 +6,26 @@ namespace ElliePdf.Application.Tests;
 public sealed class BoundaryTests
 {
     [Fact]
+    public void Password_open_distinguishes_cancel_from_an_explicit_empty_password()
+    {
+        string root = FindRepositoryRoot();
+        string source = File.ReadAllText(Path.Combine(root, "Services", "DocumentOpenService.cs"));
+
+        Assert.Contains("if (password is null)", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("string.IsNullOrEmpty(password)", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WinUi_password_prompt_serializes_dialogs_and_dispatches_the_whole_prompt()
+    {
+        string root = FindRepositoryRoot();
+        string source = File.ReadAllText(Path.Combine(root, "Dialogs", "WinUiPdfPasswordPrompt.cs"));
+
+        Assert.Contains("_dialogGate.WaitAsync(cancellationToken)", source, StringComparison.Ordinal);
+        Assert.Contains("_uiHost.RunOnUiThreadAsync(async () =>", source, StringComparison.Ordinal);
+        Assert.Contains("dialog.DispatcherQueue.TryEnqueue(dialog.Hide)", source, StringComparison.Ordinal);
+    }
+    [Fact]
     public void Application_sources_contain_no_ui_framework_types()
     {
         string root = FindRepositoryRoot();

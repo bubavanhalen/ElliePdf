@@ -68,7 +68,7 @@ public sealed class PdfWorkerServer : IAsyncDisposable
         {
             foreach (var operation in _operations.Values)
             {
-                operation.Cancellation.Cancel();
+                operation.TryCancel();
             }
 
             var pending = _operations.Values.Select(static operation => operation.Task).ToArray();
@@ -96,7 +96,7 @@ public sealed class PdfWorkerServer : IAsyncDisposable
         _shutdown.Cancel();
         foreach (var operation in _operations.Values)
         {
-            operation.Cancellation.Cancel();
+            operation.TryCancel();
         }
 
         await _leases.DisposeAsync().ConfigureAwait(false);
@@ -193,7 +193,7 @@ public sealed class PdfWorkerServer : IAsyncDisposable
         {
             if (_operations.TryRemove(envelope.CorrelationId, out var removed))
             {
-                removed.Cancellation.Dispose();
+                removed.Dispose();
             }
         }
     }
@@ -483,11 +483,8 @@ public sealed class PdfWorkerServer : IAsyncDisposable
     private async Task HandleCancellationAsync(Stream stream, TransportEnvelope envelope)
     {
         var message = Deserialize(envelope.Payload, TransportJsonContext.Default.CancelMessage).Validate();
-        var accepted = _operations.TryGetValue(message.TargetCorrelationId, out var operation);
-        if (accepted)
-        {
-            operation!.Cancellation.Cancel();
-        }
+        var accepted = _operations.TryGetValue(message.TargetCorrelationId, out var operation)
+            && operation.TryCancel();
 
         await WriteAcknowledgementAsync(stream, envelope, accepted).ConfigureAwait(false);
     }
@@ -622,10 +619,34 @@ public sealed class PdfWorkerServer : IAsyncDisposable
         _ => "The PDF worker could not complete the operation."
     };
 
-    private sealed class OperationState(CancellationTokenSource cancellation)
+    private sealed class OperationState(CancellationTokenSource cancellation) : IDisposable
     {
-        public CancellationTokenSource Cancellation { get; } = cancellation;
+        private readonly object _gate = new();
+        private bool _disposed;
+
         public Task Task { get; set; } = Task.CompletedTask;
+
+        public bool TryCancel()
+        {
+            lock (_gate)
+            {
+                if (_disposed)
+                {
+                    return false;
+                }
+                cancellation.Cancel();
+                return true;
+            }
+        }
+
+        public void Dispose()
+        {
+            lock (_gate)
+            {
+                _disposed = true;
+                cancellation.Dispose();
+            }
+        }
     }
 
 }

@@ -1326,7 +1326,7 @@ public sealed class PdfWorkerClient : IPdfEngineClient, IPdfPageMergeClient
         var correlationId = Guid.NewGuid();
         var deadline = DateTimeOffset.UtcNow + timeout;
         var envelope = TransportEnvelope.Create(kind, secret, identity, payload, payloadType, correlationId, deadline);
-        var pending = new PendingRequest(identity);
+        var pending = new PendingRequest(identity, generation);
         if (!_pending.TryAdd(correlationId, pending))
         {
             throw new InvalidOperationException("Unable to allocate a unique worker request identity.");
@@ -1334,26 +1334,24 @@ public sealed class PdfWorkerClient : IPdfEngineClient, IPdfPageMergeClient
 
         try
         {
-            await WriteEnvelopeAsync(stream, envelope, cancellationToken).ConfigureAwait(false);
-            return await pending.Completion.Task.WaitAsync(timeout, cancellationToken).ConfigureAwait(false);
+            await WriteEnvelopeAsync(stream, envelope, deadline, cancellationToken).ConfigureAwait(false);
+            var remaining = deadline - DateTimeOffset.UtcNow;
+            return await pending.Completion.Task.WaitAsync(
+                remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             _pending.TryRemove(correlationId, out _);
             if (sendCancellation)
             {
-                _ = SendCancellationBestEffortAsync(identity, correlationId);
+                _ = SendCancellationBestEffortAsync(identity, correlationId, generation);
             }
             throw;
         }
         catch (TimeoutException exception)
         {
             ElliePdfEventSource.Log.WorkerBudgetExceeded(TelemetryOperation.NextId(), 1);
-            if (sendCancellation)
-            {
-                _ = SendCancellationBestEffortAsync(identity, correlationId);
-            }
-            FailConnection(new PdfWorkerUnavailableException("The PDF worker exceeded an operation deadline.", exception), expectedGeneration: null, terminate: true);
+            FailConnection(new PdfWorkerUnavailableException("The PDF worker exceeded an operation deadline.", exception), generation, terminate: true);
             _pending.TryRemove(correlationId, out _);
             RecordCrashOnce(generation, identity);
             throw new PdfWorkerUnavailableException("The PDF worker exceeded an operation deadline.", exception);
@@ -1363,7 +1361,7 @@ public sealed class PdfWorkerClient : IPdfEngineClient, IPdfPageMergeClient
             || exception is IOException and not PdfWorkerRemoteException)
         {
             var unavailable = new PdfWorkerUnavailableException("The PDF worker transport failed.", exception);
-            FailConnection(unavailable, expectedGeneration: null, terminate: true);
+            FailConnection(unavailable, generation, terminate: true);
             _pending.TryRemove(correlationId, out _);
             // A process-exit callback can detach the connection after the state snapshot above
             // but before this request reaches _pending. In that narrow window FailConnection
@@ -1379,7 +1377,7 @@ public sealed class PdfWorkerClient : IPdfEngineClient, IPdfPageMergeClient
         }
     }
 
-    private async Task SendCancellationBestEffortAsync(TransportIdentity identity, Guid targetCorrelationId)
+    private async Task SendCancellationBestEffortAsync(TransportIdentity identity, Guid targetCorrelationId, long generation)
     {
         try
         {
@@ -1387,7 +1385,7 @@ public sealed class PdfWorkerClient : IPdfEngineClient, IPdfPageMergeClient
             byte[] secret;
             lock (_stateSync)
             {
-                if (_pipe is null || _secret is null)
+                if (_pipe is null || _secret is null || generation != _workerGeneration)
                 {
                     return;
                 }
@@ -1402,23 +1400,50 @@ public sealed class PdfWorkerClient : IPdfEngineClient, IPdfPageMergeClient
                 identity,
                 message,
                 TransportJsonContext.Default.CancelMessage);
-            await WriteEnvelopeAsync(stream, envelope, CancellationToken.None).ConfigureAwait(false);
+            await WriteEnvelopeAsync(stream, envelope, DateTimeOffset.UtcNow + TimeSpan.FromSeconds(1), CancellationToken.None)
+                .ConfigureAwait(false);
         }
-        catch
+        catch (Exception exception) when (exception is IOException or ObjectDisposedException or TimeoutException)
         {
+            // If the cancellation frame was interrupted, the connection cannot be reused.
+            FailConnection(new PdfWorkerUnavailableException("The PDF worker transport failed.", exception), generation, terminate: true);
         }
     }
 
-    private async ValueTask WriteEnvelopeAsync(Stream stream, TransportEnvelope envelope, CancellationToken cancellationToken)
+    private async ValueTask WriteEnvelopeAsync(
+        Stream stream, TransportEnvelope envelope, DateTimeOffset deadline, CancellationToken cancellationToken)
     {
         await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await new LengthPrefixedFrameCodec().WriteAsync(stream, envelope, cancellationToken).ConfigureAwait(false);
+            await WriteFrameAsync(stream, envelope, deadline, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             _writeGate.Release();
+        }
+    }
+
+    internal static async ValueTask WriteFrameAsync(
+        Stream stream, TransportEnvelope envelope, DateTimeOffset deadline, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var remaining = deadline - DateTimeOffset.UtcNow;
+        if (remaining <= TimeSpan.Zero)
+        {
+            throw new TimeoutException("The worker write deadline expired.");
+        }
+
+        // Once the prefix is sent, caller cancellation cannot interrupt the frame.
+        // If the pipe stalls mid-frame, discard the connection instead of reusing it.
+        using var writeTimeout = new CancellationTokenSource(remaining);
+        try
+        {
+            await new LengthPrefixedFrameCodec().WriteAsync(stream, envelope, writeTimeout.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException exception) when (writeTimeout.IsCancellationRequested)
+        {
+            throw new TimeoutException("The worker write deadline expired.", exception);
         }
     }
 
@@ -1489,7 +1514,7 @@ public sealed class PdfWorkerClient : IPdfEngineClient, IPdfPageMergeClient
         var crashedDocuments = new HashSet<DocumentId>();
         foreach (var pair in _pending.ToArray())
         {
-            if (_pending.TryRemove(pair.Key, out var pending))
+            if (pair.Value.Generation == failedGeneration && _pending.TryRemove(pair.Key, out var pending))
             {
                 if (pending.Identity.DocumentId is Guid documentId)
                 {
@@ -1568,9 +1593,10 @@ public sealed class PdfWorkerClient : IPdfEngineClient, IPdfPageMergeClient
         }
     }
 
-    private sealed class PendingRequest(TransportIdentity identity)
+    private sealed class PendingRequest(TransportIdentity identity, long generation)
     {
         public TransportIdentity Identity { get; } = identity;
+        public long Generation { get; } = generation;
         public TaskCompletionSource<TransportEnvelope> Completion { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
     }

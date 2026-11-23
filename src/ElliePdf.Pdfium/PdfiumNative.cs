@@ -10,6 +10,7 @@ internal static partial class PdfiumNative
     private static nint _loadedLibrary;
     private static int _libraryReferenceCount;
     private static bool _resolverInstalled;
+    private static bool _modulePinEstablished;
 
     internal const int RenderAnnotations = 0x01;
     internal const uint WhiteArgb = 0xFFFFFFFF;
@@ -57,7 +58,10 @@ internal static partial class PdfiumNative
                         NativeLibrary.SetDllImportResolver(typeof(PdfiumNative).Assembly, ResolveLibrary);
                         _resolverInstalled = true;
                     }
+                }
 
+                if (_libraryReferenceCount == 0)
+                {
                     FPDF_InitLibrary();
                 }
 
@@ -84,15 +88,21 @@ internal static partial class PdfiumNative
                 if (_libraryReferenceCount == 0)
                 {
                     FPDF_DestroyLibrary();
-                    _loadedLibrary = 0;
                 }
 
                 // Every engine constructor calls LoadLibraryEx and therefore owns
-                // one Windows loader reference, even when the returned module base
-                // address is shared. Balance every one of those references. Keeping
-                // only the last FreeLibrary call leaked modules across repeated lane
-                // creation and made init/destroy stress dependent on test ordering.
-                _ = FreeLibrary(libraryHandle);
+                // one Windows loader reference. Keep exactly one reference for the
+                // process lifetime because generated P/Invoke stubs cache native
+                // entry-point addresses; unloading the module would leave those
+                // cached addresses dangling when a later engine lane starts.
+                if (_libraryReferenceCount == 0 && !_modulePinEstablished)
+                {
+                    _modulePinEstablished = true;
+                }
+                else
+                {
+                    _ = FreeLibrary(libraryHandle);
+                }
             }
         }
     }

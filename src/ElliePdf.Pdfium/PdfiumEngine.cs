@@ -79,8 +79,9 @@ public sealed class PdfiumEngine : IDisposable
             var handle = PdfiumNative.FPDF_LoadCustomDocument(access.Pointer, password);
             if (handle == 0)
             {
+                uint errorCode = PdfiumNative.FPDF_GetLastError();
                 access.Dispose();
-                return null;
+                throw new PdfiumNativeException("The brokered PDF could not be opened.", errorCode);
             }
 
             return new PdfiumDocumentHandle(this, handle, access);

@@ -10,6 +10,11 @@ public sealed class DocumentWorkspace : IAsyncDisposable
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Dictionary<string, DocumentContext> _documents =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, PendingOpen> _pendingOpens =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<PendingOpen> _runningOpens = [];
+    private readonly List<Exception> _openCleanupFailures = [];
+    private readonly CancellationTokenSource _lifetimeCancellation = new();
     private DocumentContext? _activeDocument;
     private bool _disposed;
     private int _disposeStarted;
@@ -81,6 +86,8 @@ public sealed class DocumentWorkspace : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         string canonicalPath = CanonicalizePath(path);
+        PendingOpen pending;
+        bool startOpen = false;
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -93,35 +100,164 @@ public sealed class DocumentWorkspace : IAsyncDisposable
                 }
                 return existing;
             }
-
-            DocumentId documentId = DocumentId.New();
-            string displayName = Path.GetFileName(canonicalPath);
-            DocumentOpenRequest request = new(documentId, canonicalPath, displayName);
-            IPdfEngineSession? session = null;
-            try
+            if (_pendingOpens.TryGetValue(canonicalPath, out pending!)
+                && pending.Completion.Task.IsCompleted)
             {
-                session = await _sessionFactory.OpenAsync(request, cancellationToken)
-                    .ConfigureAwait(false);
-                DocumentContext context = new(request, session);
-                _documents.Add(canonicalPath, context);
-                session = null; // DocumentContext is now the sole lifetime owner.
-                if (activate)
+                _pendingOpens.Remove(canonicalPath);
+                pending = null!;
+            }
+            if (pending is null)
+            {
+                pending = new PendingOpen(_lifetimeCancellation.Token);
+                _pendingOpens.Add(canonicalPath, pending);
+                _runningOpens.Add(pending);
+                startOpen = true;
+            }
+            pending.WaiterCount++;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        if (startOpen)
+        {
+            _ = RunPendingOpenAsync(canonicalPath, pending);
+        }
+
+        try
+        {
+            DocumentContext context = await pending.Completion.Task.WaitAsync(cancellationToken)
+                .ConfigureAwait(false);
+            if (activate)
+            {
+                await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
                 {
+                    ObjectDisposedException.ThrowIf(_disposed, this);
                     _activeDocument = context;
                 }
-                return context;
+                finally
+                {
+                    _gate.Release();
+                }
+            }
+            return context;
+        }
+        finally
+        {
+            await ReleasePendingWaiterAsync(canonicalPath, pending).ConfigureAwait(false);
+        }
+    }
+
+    private async Task RunPendingOpenAsync(string canonicalPath, PendingOpen pending)
+    {
+        DocumentId documentId = DocumentId.New();
+        var request = new DocumentOpenRequest(documentId, canonicalPath, Path.GetFileName(canonicalPath));
+        IPdfEngineSession? session = null;
+        try
+        {
+            session = await _sessionFactory.OpenAsync(request, pending.Cancellation.Token)
+                .ConfigureAwait(false);
+            await _gate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+            try
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                pending.Cancellation.Token.ThrowIfCancellationRequested();
+                if (pending.WaiterCount == 0)
+                {
+                    throw new OperationCanceledException(pending.Cancellation.Token);
+                }
+                if (_documents.TryGetValue(canonicalPath, out DocumentContext? existing))
+                {
+                    pending.Completion.TrySetResult(existing);
+                    return;
+                }
+                var context = new DocumentContext(request, session);
+                _documents.Add(canonicalPath, context);
+                session = null;
+                pending.Completion.TrySetResult(context);
             }
             finally
+            {
+                _gate.Release();
+            }
+        }
+        catch (OperationCanceledException) when (pending.Cancellation.IsCancellationRequested)
+        {
+            pending.Completion.TrySetCanceled(pending.Cancellation.Token);
+        }
+        catch (Exception exception)
+        {
+            pending.Completion.TrySetException(exception);
+        }
+        finally
+        {
+            Exception? cleanupFailure = null;
+            try
             {
                 if (session is not null)
                 {
                     await session.DisposeAsync().ConfigureAwait(false);
                 }
             }
+            catch (Exception exception)
+            {
+                cleanupFailure = exception;
+                pending.Completion.TrySetException(exception);
+            }
+
+            await _gate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+            try
+            {
+                if (_pendingOpens.TryGetValue(canonicalPath, out PendingOpen? current)
+                    && ReferenceEquals(current, pending))
+                {
+                    _pendingOpens.Remove(canonicalPath);
+                }
+                _runningOpens.Remove(pending);
+                if (cleanupFailure is not null)
+                {
+                    _openCleanupFailures.Add(cleanupFailure);
+                }
+            }
+            finally
+            {
+                _gate.Release();
+            }
+            pending.Cancellation.Dispose();
+            pending.RunnerCompletion.TrySetResult();
+        }
+    }
+
+    private async ValueTask ReleasePendingWaiterAsync(string canonicalPath, PendingOpen pending)
+    {
+        bool cancel = false;
+        await _gate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            pending.WaiterCount--;
+            if (pending.WaiterCount == 0 && !pending.Completion.Task.IsCompleted
+                && _pendingOpens.TryGetValue(canonicalPath, out PendingOpen? current)
+                && ReferenceEquals(current, pending))
+            {
+                cancel = true;
+            }
         }
         finally
         {
             _gate.Release();
+        }
+        if (cancel)
+        {
+            try
+            {
+                pending.Cancellation.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // The runner completed between releasing the gate and cancellation.
+            }
         }
     }
 
@@ -243,14 +379,44 @@ public sealed class DocumentWorkspace : IAsyncDisposable
 
         try
         {
+            PendingOpen[] pending;
             await _gate.WaitAsync().ConfigureAwait(false);
             try
             {
                 _disposed = true;
+                pending = _runningOpens.ToArray();
+            }
+            finally
+            {
+                _gate.Release();
+            }
+            List<Exception>? failures = null;
+            try
+            {
+                _lifetimeCancellation.Cancel();
+            }
+            catch (Exception exception)
+            {
+                (failures ??= []).Add(exception);
+            }
+            foreach (PendingOpen open in pending)
+            {
+                try { await open.RunnerCompletion.Task.ConfigureAwait(false); }
+                catch (Exception exception) { (failures ??= []).Add(exception); }
+            }
+
+            await _gate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                if (_openCleanupFailures.Count > 0)
+                {
+                    failures ??= [];
+                    failures.AddRange(_openCleanupFailures);
+                    _openCleanupFailures.Clear();
+                }
                 DocumentContext[] contexts = _documents.Values.ToArray();
                 _documents.Clear();
                 _activeDocument = null;
-                List<Exception>? failures = null;
                 foreach (DocumentContext context in contexts)
                 {
                     try
@@ -272,6 +438,7 @@ public sealed class DocumentWorkspace : IAsyncDisposable
                 _gate.Release();
             }
             _disposeCompletion.TrySetResult();
+            _lifetimeCancellation.Dispose();
         }
         catch (Exception exception)
         {
@@ -285,5 +452,22 @@ public sealed class DocumentWorkspace : IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         string fullPath = Path.GetFullPath(path.Trim());
         return Path.TrimEndingDirectorySeparator(fullPath);
+    }
+
+    private sealed class PendingOpen : IDisposable
+    {
+        public PendingOpen(CancellationToken lifetimeCancellation)
+        {
+            Cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetimeCancellation);
+        }
+
+        public CancellationTokenSource Cancellation { get; }
+        public TaskCompletionSource<DocumentContext> Completion { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource RunnerCompletion { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int WaiterCount { get; set; }
+
+        public void Dispose() => Cancellation.Dispose();
     }
 }

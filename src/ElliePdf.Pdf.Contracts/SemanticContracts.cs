@@ -180,6 +180,12 @@ public sealed record PdfLink
 
 public sealed record PageLinks
 {
+    [JsonConstructor]
+    public PageLinks(DocumentId documentId, PageId pageId, int pageIndex, ImmutableArray<PdfLink> links)
+        : this(documentId, pageId, pageIndex, (IEnumerable<PdfLink>)(links.IsDefault ? [] : links))
+    {
+    }
+
     public PageLinks(DocumentId documentId, PageId pageId, int pageIndex, IEnumerable<PdfLink> links)
     {
         if (documentId.Value == Guid.Empty) throw new ArgumentException("The document id must not be empty.", nameof(documentId));

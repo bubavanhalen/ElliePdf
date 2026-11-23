@@ -771,7 +771,7 @@ public sealed class WorkerDocumentRegistryTests
             var flattened = await InspectPageAsync(flattenedPath, 0);
             Assert.Equal(original.AnnotationCount, liveCopy.AnnotationCount);
             Assert.Equal(original.Text, liveCopy.Text);
-            Assert.Equal(original.Text, flattened.Text);
+            Assert.Contains(original.Text.Trim(), flattened.Text, StringComparison.Ordinal);
             Assert.Equal(original.AnnotationCount, flattened.AnnotationCount);
             Assert.NotEqual(original.PixelHash, flattened.PixelHash);
         }

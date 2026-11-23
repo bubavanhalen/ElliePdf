@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Text.Json.Serialization;
 using ElliePdf.Domain.Documents;
 
 namespace ElliePdf.Pdf.Contracts;
@@ -210,6 +211,7 @@ public sealed record PdfPermissions
     {
     }
 
+    [JsonConstructor]
     public PdfPermissions(PdfPermissionFlags allowed, bool isEncrypted, bool isOwnerPasswordAuthenticated)
     {
         Allowed = allowed;

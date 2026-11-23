@@ -8,6 +8,102 @@ namespace ElliePdf.Pdf.Client.Tests;
 
 public sealed class PdfWorkerClientTests
 {
+    [Fact]
+    public async Task Caller_cancellation_after_prefix_preserves_complete_worker_frame()
+    {
+        using var caller = new CancellationTokenSource();
+        using var stream = new CancelCallerAfterFirstWriteStream(caller);
+        var envelope = TransportEnvelope.Create(
+            TransportMessageKind.Heartbeat,
+            new byte[32],
+            TransportIdentity.ForSession(Guid.NewGuid()),
+            new HeartbeatMessage(DateTimeOffset.UtcNow, 1),
+            TransportJsonContext.Default.HeartbeatMessage);
+
+        await PdfWorkerClient.WriteFrameAsync(stream, envelope, DateTimeOffset.UtcNow.AddSeconds(5), caller.Token);
+
+        Assert.True(caller.IsCancellationRequested);
+        stream.Position = 0;
+        var decoded = await new LengthPrefixedFrameCodec().ReadAsync(stream);
+        Assert.NotNull(decoded);
+        Assert.Equal(envelope.CorrelationId, decoded.CorrelationId);
+        Assert.Equal(stream.Length, stream.Position);
+    }
+
+    private sealed class CancelCallerAfterFirstWriteStream(CancellationTokenSource caller) : MemoryStream
+    {
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            bool firstWrite = Position == 0;
+            cancellationToken.ThrowIfCancellationRequested();
+            await base.WriteAsync(buffer, cancellationToken);
+            if (firstWrite)
+            {
+                caller.Cancel();
+            }
+        }
+    }
+
+    [Fact(Timeout = 60_000)]
+    public async Task Real_worker_maps_encrypted_open_to_password_error_and_accepts_correct_password()
+    {
+        await using var client = CreateClient();
+        string fixture = Fixture("synthetic-encrypted.pdf");
+
+        PdfWorkerRemoteException missing = await Assert.ThrowsAsync<PdfWorkerRemoteException>(() =>
+            client.OpenSessionAsync(
+                new DocumentOpenRequest(DocumentId.New(), new PdfSourceHandle(fixture)),
+                CancellationToken.None).AsTask());
+        Assert.Equal("password_required_or_incorrect", missing.Code);
+
+        PdfWorkerRemoteException wrong = await Assert.ThrowsAsync<PdfWorkerRemoteException>(() =>
+            client.OpenSessionAsync(
+                new DocumentOpenRequest(DocumentId.New(), new PdfSourceHandle(fixture), "wrong-password"),
+                CancellationToken.None).AsTask());
+        Assert.Equal("password_required_or_incorrect", wrong.Code);
+
+        await using var session = await client.OpenSessionAsync(
+            new DocumentOpenRequest(DocumentId.New(), new PdfSourceHandle(fixture), "ellie-test"),
+            CancellationToken.None);
+        PdfMetadata metadata = await session.GetMetadataAsync(CancellationToken.None);
+        Assert.True(metadata.IsEncrypted);
+        Assert.Equal(2, metadata.PageCount);
+    }
+
+    [Fact(Timeout = 60_000)]
+    public async Task Password_failures_and_encrypted_open_preserve_existing_worker_session()
+    {
+        await using var client = CreateClient();
+        await using var vector = await client.OpenSessionAsync(
+            new DocumentOpenRequest(
+                DocumentId.New(),
+                new PdfSourceHandle(Fixture("synthetic-vector-small.pdf"))),
+            CancellationToken.None);
+        var page = await vector.GetPageMetadataAsync(0, CancellationToken.None);
+
+        string encrypted = Fixture("synthetic-encrypted.pdf");
+        PdfWorkerRemoteException missing = await Assert.ThrowsAsync<PdfWorkerRemoteException>(() =>
+            client.OpenSessionAsync(
+                new DocumentOpenRequest(DocumentId.New(), new PdfSourceHandle(encrypted)),
+                CancellationToken.None).AsTask());
+        Assert.Equal("password_required_or_incorrect", missing.Code);
+        PdfWorkerRemoteException wrong = await Assert.ThrowsAsync<PdfWorkerRemoteException>(() =>
+            client.OpenSessionAsync(
+                new DocumentOpenRequest(DocumentId.New(), new PdfSourceHandle(encrypted), "wrong-password"),
+                CancellationToken.None).AsTask());
+        Assert.Equal("password_required_or_incorrect", wrong.Code);
+        await using var protectedSession = await client.OpenSessionAsync(
+            new DocumentOpenRequest(DocumentId.New(), new PdfSourceHandle(encrypted), "ellie-test"),
+            CancellationToken.None);
+
+        PdfMetadata metadata = await vector.GetMetadataAsync(CancellationToken.None);
+        Assert.Equal(3, metadata.PageCount);
+        await using var pixels = await vector.RenderAsync(
+            CreateRenderRequest(vector.DocumentId, page.Id, new TileAddress(0, 0, 64, 64, 1)),
+            CancellationToken.None);
+        Assert.True(pixels.ByteLength > 0);
+    }
+
     [Fact(Timeout = 60_000)]
     public async Task Real_worker_invokes_only_actionless_push_buttons_without_form_value_writes()
     {
@@ -93,6 +189,14 @@ public sealed class PdfWorkerClientTests
         var text = await vectorSession.GetPageTextAsync(textRequest, CancellationToken.None);
         Assert.Contains("ElliePdf", text.Text, StringComparison.Ordinal);
         Assert.NotEmpty(text.Spans);
+
+        // Semantic publication requests these three endpoints after text extraction.
+        // Exercise the complete first-page RPC sequence against the vector fixture so
+        // an ancillary serialization or permission failure cannot hide behind search.
+        var permissions = await vectorSession.GetPermissionsAsync(CancellationToken.None);
+        Assert.True(permissions.CanCopy);
+        Assert.Empty((await vectorSession.GetPageLinksAsync(0, CancellationToken.None)).Links);
+        Assert.Empty((await vectorSession.GetFormWidgetsAsync(0, CancellationToken.None)).Widgets);
 
         var search = await vectorSession.SearchPageAsync(
             new PageSearchRequest(textRequest, "ElliePdf", SearchGeneration.Initial),

@@ -9,6 +9,60 @@ namespace ElliePdf.Pdf.Transport.Tests;
 public sealed class TransportTests
 {
     [Fact]
+    public void PermissionsResponseRoundTripsWithSourceGeneratedIpcContext()
+    {
+        var expected = new PdfPermissions(
+            PdfPermissionFlags.Copy | PdfPermissionFlags.Accessibility,
+            isEncrypted: true,
+            isOwnerPasswordAuthenticated: false);
+
+        var json = JsonSerializer.Serialize(
+            new PermissionsResponse(expected),
+            WorkerProtocolJsonContext.Default.PermissionsResponse);
+        var actual = JsonSerializer.Deserialize(
+            json,
+            WorkerProtocolJsonContext.Default.PermissionsResponse);
+
+        Assert.NotNull(actual);
+        Assert.Equal(expected.Allowed, actual.Permissions.Allowed);
+        Assert.Equal(expected.IsEncrypted, actual.Permissions.IsEncrypted);
+        Assert.Equal(expected.IsOwnerPasswordAuthenticated, actual.Permissions.IsOwnerPasswordAuthenticated);
+        Assert.True(actual.Permissions.CanCopy);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PageLinksResponseRoundTripsEmptyAndNonemptyLinksWithSourceGeneratedIpcContext(bool includeLink)
+    {
+        var documentId = DocumentId.New();
+        var pageId = PageId.New();
+        PdfLink[] links = includeLink
+            ? [new PdfLink(PdfLinkKind.Uri, new PdfRect(10, 20, 30, 40), "https://example.com")]
+            : [];
+        var expected = new PageLinks(documentId, pageId, 0, links);
+
+        var json = JsonSerializer.Serialize(
+            new PageLinksResponse(expected),
+            WorkerProtocolJsonContext.Default.PageLinksResponse);
+        var actual = JsonSerializer.Deserialize(
+            json,
+            WorkerProtocolJsonContext.Default.PageLinksResponse);
+
+        Assert.NotNull(actual);
+        Assert.Equal(documentId, actual.Links.DocumentId);
+        Assert.Equal(pageId, actual.Links.PageId);
+        Assert.Equal(0, actual.Links.PageIndex);
+        Assert.Equal(links.Length, actual.Links.Links.Length);
+        if (includeLink)
+        {
+            Assert.Equal(PdfLinkKind.Uri, actual.Links.Links[0].Kind);
+            Assert.Equal("https://example.com", actual.Links.Links[0].Uri);
+            Assert.Equal(new PdfRect(10, 20, 30, 40), actual.Links.Links[0].Bounds);
+        }
+    }
+
+    [Fact]
     public void WorkerOperationIdsRemainStableAcrossAdditiveProtocolChanges()
     {
         Assert.Equal(0, (int)WorkerOperation.OpenDocument);
