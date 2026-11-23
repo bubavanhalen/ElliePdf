@@ -58,8 +58,13 @@
     </Page.Resources>
 
     <Grid x:Name="RootGrid" Background="Transparent">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
         <controls:PdfPageViewer
             x:Name="PageViewer"
+            Grid.Row="1"
             Margin="56,0,56,0"
             Canvas.ZIndex="0"
             AutomationProperties.Name="{x:Bind ViewModel.PageLabel, Mode=OneWay}"
@@ -82,6 +87,7 @@
 
         <ScrollViewer
             x:Name="ContinuousScrollViewer"
+            Grid.Row="1"
             Margin="56,0,56,0"
             Canvas.ZIndex="0"
             AutomationProperties.Name="{x:Bind ViewModel.PageLabel, Mode=OneWay}"
@@ -138,6 +144,7 @@
 
         <!-- Empty state -->
         <Grid
+            Grid.Row="1"
             Padding="48"
             Canvas.ZIndex="5"
             Visibility="{x:Bind helpers:VisibilityHelper.FromBoolean(ViewModel.ShowEmptyState), Mode=OneWay}">
@@ -182,6 +189,7 @@
         <Border
             x:Name="ReaderSidebar"
             x:Uid="Reader_Sidebar"
+            Grid.Row="1"
             Width="320"
             Margin="0,0,0,92"
             Canvas.ZIndex="10"
@@ -340,11 +348,12 @@
             </Grid>
         </Border>
 
-        <!-- Slim tab strip: only when multiple documents are open -->
+        <!-- Document header: occupies its own row, including for a single document. -->
         <TabView
             x:Name="DocumentTabs"
             x:Uid="Reader_DocumentTabs"
-            Margin="104,4,260,0"
+            Grid.Row="0"
+            Margin="12,4,12,0"
             Canvas.ZIndex="20"
             VerticalAlignment="Top"
             AddTabButtonClick="DocumentTabs_AddTabButtonClick"
@@ -361,6 +370,7 @@
         <CommandBar
             x:Name="ReaderCommandBar"
             x:Uid="Reader_CommandBar"
+            Grid.Row="1"
             Margin="12"
             Canvas.ZIndex="30"
             HorizontalAlignment="Stretch"
@@ -501,6 +511,7 @@
         <CommandBar
             x:Name="EditCommandBar"
             x:Uid="Reader_EditCommandBar"
+            Grid.Row="1"
             Margin="12"
             Canvas.ZIndex="30"
             HorizontalAlignment="Stretch"
@@ -612,6 +623,7 @@
 
         <Popup
             x:Name="InkPalettePopup"
+            Grid.RowSpan="2"
             Canvas.ZIndex="40"
             IsLightDismissEnabled="True">
             <Border
@@ -719,6 +731,7 @@
         <!-- Minimal status + page indicator -->
         <StackPanel
             x:Name="ReaderStatusArea"
+            Grid.Row="1"
             Margin="0,0,0,64"
             Canvas.ZIndex="30"
             HorizontalAlignment="Center"
@@ -741,6 +754,7 @@
 
         <TextBlock
             x:Name="FocusModeAnnouncement"
+            Grid.Row="1"
             Width="1"
             Height="1"
             IsHitTestVisible="False"

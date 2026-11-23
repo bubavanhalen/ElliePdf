@@ -190,7 +190,7 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
 
     public bool ShowEmptyState => !HasDocument;
 
-    public bool ShowTabBar => TabCount > 1;
+    public bool ShowTabBar => TabCount > 0;
 
     public bool IsSidebarOpen => IsThumbnailPanelOpen || IsOutlinePanelOpen || IsSearchPanelOpen;
 

@@ -15,12 +15,14 @@ public sealed partial class ReaderPage
     {
         if (!ReaderDesignPreview.IsEnabled) return;
 
+        RootGrid.RowDefinitions.Clear();
         RootGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RootGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RootGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         RootGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RootGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         foreach (var child in RootGrid.Children.OfType<FrameworkElement>()) Grid.SetRow(child, 2);
+        Grid.SetRowSpan(InkPalettePopup, 1);
         Grid.SetRow(DocumentTabs, 0);
         Grid.SetRow(ReaderCommandBar, 1);
         Grid.SetRow(EditCommandBar, 1);
