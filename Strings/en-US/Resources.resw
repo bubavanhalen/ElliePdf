@@ -250,4 +250,11 @@
   <data name="Settings_LabsDescription.Text" xml:space="preserve"><value>Experimental editing features are still under development.</value></data>
   <data name="Settings_EnableLabs.Header" xml:space="preserve"><value>Enable Labs</value></data>
   <data name="Settings_Save.Content" xml:space="preserve"><value>Save settings</value></data>
+  <data name="Preview_Menu" xml:space="preserve"><value>Menu</value></data>
+  <data name="Preview_Subtitle" xml:space="preserve"><value>Design preview</value></data>
+  <data name="Preview_System" xml:space="preserve"><value>System</value></data>
+  <data name="Preview_Light" xml:space="preserve"><value>Light</value></data>
+  <data name="Preview_Dark" xml:space="preserve"><value>Dark</value></data>
+  <data name="Preview_Theme" xml:space="preserve"><value>Preview theme</value></data>
+  <data name="Preview_Navigation" xml:space="preserve"><value>Page and zoom controls</value></data>
 </root>

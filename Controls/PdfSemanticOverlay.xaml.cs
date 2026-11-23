@@ -136,12 +136,31 @@ public sealed partial class PdfSemanticOverlay : UserControl
             IsHitTestVisible = CanCopy,
             AcceptsReturn = false,
             TextWrapping = TextWrapping.NoWrap,
+            MinWidth = 0,
+            MinHeight = 0,
+            IsTextScaleFactorEnabled = false,
+            // The PDF raster owns the glyphs. Blend the native selection over it
+            // so an opaque system accent does not hide the selected PDF text.
+            Opacity = 0.35,
             Padding = new Thickness(0),
             BorderThickness = new Thickness(0),
             Background = new SolidColorBrush(Color.FromArgb(0, 0, 0, 0)),
             Foreground = new SolidColorBrush(Color.FromArgb(1, 0, 0, 0)),
             FontSize = Math.Clamp((span.FontSize ?? 11) * DisplayScale, 8, 96)
         };
+        // Native TextBox focus/hover states replace the local Background and
+        // Foreground with theme resources. Keep this semantic layer invisible
+        // in every state; only the native selection highlight should be painted.
+        // Scope these overrides to text spans, never to editable form controls.
+        var transparent = new SolidColorBrush(Color.FromArgb(0, 0, 0, 0));
+        var textForeground = new SolidColorBrush(Color.FromArgb(1, 0, 0, 0));
+        foreach (var state in new[] { string.Empty, "PointerOver", "Focused", "Disabled" })
+        {
+            box.Resources["TextControlBackground" + state] = transparent;
+            box.Resources["TextControlBorderBrush" + state] = transparent;
+            box.Resources["TextControlForeground" + state] = textForeground;
+        }
+        box.Resources["TextControlBorderThemeThicknessFocused"] = new Thickness(0);
         AutomationProperties.SetName(box, span.Text);
         AutomationProperties.SetHelpText(
             box,
@@ -157,7 +176,7 @@ public sealed partial class PdfSemanticOverlay : UserControl
             var start = span.StartIndex + box.SelectionStart;
             var end = start + box.SelectionLength;
             var selection = SemanticTextSelection.Create(
-                [SemanticPage],
+                new[] { SemanticPage },
                 new TextPosition(SemanticPage.Metadata.PageIndex, start),
                 new TextPosition(SemanticPage.Metadata.PageIndex, end));
             TextSelectionChanged?.Invoke(this, new SemanticTextSelectionChangedEventArgs(selection));

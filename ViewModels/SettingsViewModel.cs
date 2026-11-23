@@ -73,12 +73,13 @@ public sealed partial class SettingsViewModel : ObservableObject
     public partial InfoBarSeverity StatusSeverity { get; private set; } = InfoBarSeverity.Informational;
 
     public IReadOnlyList<PdfZoomMode> ZoomModeOptions { get; } =
-    [
+    new PdfZoomMode[]
+    {
         PdfZoomMode.FitWidth,
         PdfZoomMode.FitPage,
         PdfZoomMode.ActualSize,
         PdfZoomMode.Custom
-    ];
+    };
 
     [RelayCommand]
     private async Task SaveAsync()

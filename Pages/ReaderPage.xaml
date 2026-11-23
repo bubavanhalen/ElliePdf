@@ -718,6 +718,7 @@
 
         <!-- Minimal status + page indicator -->
         <StackPanel
+            x:Name="ReaderStatusArea"
             Margin="0,0,0,64"
             Canvas.ZIndex="30"
             HorizontalAlignment="Center"

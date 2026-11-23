@@ -19,6 +19,7 @@ public sealed partial class MainPage : Page
     private readonly Stack<string> _workspaceHistory = [];
     private string _currentWorkspace = "read";
     private bool _isSelectingWorkspace;
+    private TitleBar? _previewTitleBar;
 
     public FlowDirection UiFlowDirection => System.Globalization.CultureInfo.CurrentUICulture.TextInfo.IsRightToLeft
         ? FlowDirection.RightToLeft
@@ -42,6 +43,10 @@ public sealed partial class MainPage : Page
         _uiHost = uiHost;
 
         InitializeComponent();
+        if (ReaderDesignPreview.IsEnabled)
+        {
+            InitializeDesignPreviewHeader();
+        }
         OrganizeNavItem.Visibility = IsLabsEnabled() ? Visibility.Visible : Visibility.Collapsed;
         Loaded += MainPage_Loaded;
         _navigation.WorkspaceRequested += OnWorkspaceRequested;
@@ -77,7 +82,7 @@ public sealed partial class MainPage : Page
 
     private void MainPage_Loaded(object sender, RoutedEventArgs e)
     {
-        _uiHost.SetTitleBar(WindowDragSurface);
+        _uiHost.SetTitleBar(_previewTitleBar is not null ? _previewTitleBar : WindowDragSurface);
         UpdateTitleBarDragRegion();
         SyncShellButtons();
     }
@@ -86,7 +91,7 @@ public sealed partial class MainPage : Page
 
     private void UpdateTitleBarDragRegion()
     {
-        if (ActualWidth <= 0)
+        if (_previewTitleBar is not null || ActualWidth <= 0)
         {
             return;
         }
@@ -94,6 +99,55 @@ public sealed partial class MainPage : Page
         // The tab strip reserves 108 epx before this region. Keep the draggable
         // element inside that reservation so caption hit testing never steals a tab.
         WindowDragSurface.Width = Math.Clamp(48 + (ActualWidth - 500) * 0.12, 48, 96);
+    }
+
+    private void InitializeDesignPreviewHeader()
+    {
+        var root = (Grid)Content;
+        var navigationButtons = ShellNavigationButtons;
+        root.Children.Clear();
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        navigationButtons.Margin = new Thickness(0);
+        navigationButtons.VerticalAlignment = VerticalAlignment.Center;
+        PaneToggleButton.Width = double.NaN;
+        PaneToggleButton.Padding = new Thickness(12, 0, 12, 0);
+        PaneToggleButton.Content = new TextBlock { Text = AppResources.Get("Preview_Menu") };
+        var theme = new ComboBox
+        {
+            ItemsSource = new[] { AppResources.Get("Preview_System"), AppResources.Get("Preview_Light"), AppResources.Get("Preview_Dark") },
+            SelectedIndex = 0,
+            MinWidth = 100,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(theme, AppResources.Get("Preview_Theme"));
+        theme.SelectionChanged += (_, _) =>
+        {
+            // Mica and native captions follow the window content theme, not a
+            // nested page override. Keep all surfaces in the same theme scope.
+            var themeRoot = _uiHost.Window.Content as FrameworkElement ?? root;
+            themeRoot.RequestedTheme = theme.SelectedIndex switch
+            {
+                1 => ElementTheme.Light,
+                2 => ElementTheme.Dark,
+                _ => ElementTheme.Default
+            };
+            _uiHost.Window.AppWindow.TitleBar.PreferredTheme = themeRoot.ActualTheme == ElementTheme.Light
+                ? Microsoft.UI.Windowing.TitleBarTheme.Light
+                : Microsoft.UI.Windowing.TitleBarTheme.Dark;
+        };
+        _previewTitleBar = new TitleBar
+        {
+            Title = AppResources.Get("MainWindow/Title"),
+            Subtitle = AppResources.Get("Preview_Subtitle"),
+            LeftHeader = navigationButtons,
+            RightHeader = theme,
+            IconSource = new FontIconSource { Glyph = "\uE8A5" }
+        };
+        NavView.Margin = new Thickness(0);
+        Grid.SetRow(NavView, 1);
+        root.Children.Add(_previewTitleBar);
+        root.Children.Add(NavView);
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)

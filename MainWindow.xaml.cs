@@ -50,6 +50,8 @@ public sealed partial class MainWindow : Window
         _diagnostics = diagnostics;
         _uiHost = uiHost;
         InitializeComponent();
+        // Window.Title is not a dependency property: localize it after XAML loading.
+        Title = AppResources.Get("MainWindow/Title");
         _uiHost.Attach(this);
 
         var uiSettings = new Windows.UI.ViewManagement.UISettings();

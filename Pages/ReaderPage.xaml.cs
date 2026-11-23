@@ -67,6 +67,7 @@ public sealed partial class ReaderPage : Page
         _printTabs = printTabs;
         _uiHost = uiHost;
         InitializeComponent();
+        InitializeDesignPreviewLayout();
         DataContext = ViewModel;
         ContinuousPagesItems.RenderTransform = _continuousPinchTransform;
         ContinuousPagesItems.ManipulationMode = ManipulationModes.Scale;
@@ -84,7 +85,7 @@ public sealed partial class ReaderPage : Page
         PageViewer.ViewportHeightChanged += OnViewportHeightChanged;
         PageViewer.PagePointerPressed += (_, _) =>
         {
-            if (ViewModel.IsReadMode)
+            if (ViewModel.IsReadMode && !_shellLayout.ReservesDocumentSpace)
             {
                 ViewModel.ClosePanels();
             }
@@ -337,6 +338,7 @@ public sealed partial class ReaderPage : Page
         // At narrow widths the command bar occupies all available width and relies on dynamic overflow.
         ReaderCommandBar.MaxWidth = RootGrid.ActualWidth < 1_000 ? double.PositiveInfinity : 960;
         EditCommandBar.MaxWidth = ReaderCommandBar.MaxWidth;
+        ApplyDesignPreviewLayout();
     }
 
     private void UpdateSidebarHeading()
@@ -411,7 +413,7 @@ public sealed partial class ReaderPage : Page
 
     private void ContinuousScrollViewer_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        if (ViewModel.IsReadMode)
+        if (ViewModel.IsReadMode && !_shellLayout.ReservesDocumentSpace)
         {
             ViewModel.ClosePanels();
         }
@@ -728,6 +730,10 @@ public sealed partial class ReaderPage : Page
 
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
+        if (_previewPageLabel is not null && e.PropertyName == nameof(ReaderViewModel.PageLabel))
+        {
+            _previewPageLabel.Text = ViewModel.PageLabel;
+        }
         if (e.PropertyName is nameof(ReaderViewModel.PagePixelWidth)
             or nameof(ReaderViewModel.PagePixelHeight))
         {
@@ -1064,6 +1070,7 @@ public sealed partial class ReaderPage : Page
             : Visibility.Collapsed;
 
         PageViewer.ContentBottomInset = _isFocusMode ? 0 : 112;
+        ApplyDesignPreviewLayout();
     }
 
     private void CycleFocus(bool reverse)
@@ -1084,7 +1091,8 @@ public sealed partial class ReaderPage : Page
             return ReaderFocusZone.Tabs;
         }
 
-        if (IsDescendantOf(focused, ReaderCommandBar) || IsDescendantOf(focused, EditCommandBar))
+        if (IsDescendantOf(focused, ReaderCommandBar) || IsDescendantOf(focused, EditCommandBar)
+            || (_previewNavigationBar is not null && IsDescendantOf(focused, _previewNavigationBar)))
         {
             return ReaderFocusZone.Commands;
         }

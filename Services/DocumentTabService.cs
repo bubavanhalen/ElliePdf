@@ -14,6 +14,7 @@ public sealed class DocumentTabService : IDocumentTabService, IAsyncDisposable
     private readonly IRecentFilesService _recentFilesService;
     private readonly IAnnotationStore _annotationStore;
     private readonly IPdfService _pdfService;
+    private readonly IUserSettingsService _settingsService;
     private readonly List<DocumentTab> _tabs = [];
     private Guid? _activeTabId;
 
@@ -22,13 +23,15 @@ public sealed class DocumentTabService : IDocumentTabService, IAsyncDisposable
         WorkspacePdfEngineSessionFactory workspaceSessionFactory,
         IRecentFilesService recentFilesService,
         IAnnotationStore annotationStore,
-        IPdfService pdfService)
+        IPdfService pdfService,
+        IUserSettingsService settingsService)
     {
         _workspace = workspace;
         _workspaceSessionFactory = workspaceSessionFactory;
         _recentFilesService = recentFilesService;
         _annotationStore = annotationStore;
         _pdfService = pdfService;
+        _settingsService = settingsService;
         _annotationStore.RecoveryCheckpointCompleted += OnRecoveryCheckpointCompleted;
     }
 
@@ -143,7 +146,10 @@ public sealed class DocumentTabService : IDocumentTabService, IAsyncDisposable
         }
 
         var session = _workspaceSessionFactory.GetRequiredSession(context.Id);
-        var tab = new DocumentTab(session, context);
+        var tab = new DocumentTab(session, context)
+        {
+            ZoomMode = _settingsService.Settings.DefaultZoomMode
+        };
         var openedTabCommitted = false;
         try
         {
@@ -464,7 +470,10 @@ public sealed class DocumentTabService : IDocumentTabService, IAsyncDisposable
         var loadedTabCommitted = false;
         try
         {
-            var tab = new DocumentTab(_workspaceSessionFactory.GetRequiredSession(context.Id), context);
+            var tab = new DocumentTab(_workspaceSessionFactory.GetRequiredSession(context.Id), context)
+            {
+                ZoomMode = _settingsService.Settings.DefaultZoomMode
+            };
             if (await LoadAndReplayRecoveryAsync(tab, cancellationToken))
             {
                 tab.MarkRecoveredContent();

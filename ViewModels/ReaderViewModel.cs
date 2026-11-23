@@ -381,6 +381,7 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
     public string ZoomLabel => $"{Math.Round(EffectiveZoomScale * 100)}%";
 
     public double EffectiveZoomScale => ShowContinuousViewer && _continuousScale > 0
+        && ReferenceEquals(_continuousDocument, _tabService.ActiveDocument)
         ? _continuousScale * 72d / 96d
         : ResolveRenderScale() * 72d / 96d;
 
@@ -490,7 +491,6 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         try
         {
             await _tabService.OpenOrActivateTabAsync(path, cancellationToken);
-            ApplyDefaultZoomMode();
             SelectedTabId = _tabService.ActiveTabId;
             SyncTabItems();
             NotifyDocumentChanged();
@@ -525,7 +525,6 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
 
         SelectedTabId = _tabService.ActiveTabId;
         SyncTabItems();
-        ApplyDefaultZoomMode();
         NotifyDocumentChanged();
         await RefreshRenderedPagesAsync(navigateToCurrentPage: true);
         await RefreshRecentFilesAsync(cancellationToken);
@@ -1581,7 +1580,7 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
             return;
         }
 
-        await _documentCollectionViewModel.ImportDocumentsAsync([tab.FilePath], append: false);
+        await _documentCollectionViewModel.ImportDocumentsAsync(new[] { tab.FilePath }, append: false);
         ToolMode = ReaderToolMode.Read;
         _navigation.RequestWorkspace("organize");
     }
@@ -1649,6 +1648,7 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
 
     private void NotifyDocumentChanged()
     {
+        NotifyZoomChanged();
         OnPropertyChanged(nameof(HasDocument));
         OnPropertyChanged(nameof(DocumentTitle));
         OnPropertyChanged(nameof(PageLabel));
@@ -1793,38 +1793,6 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
             _viewportHeight);
     }
 
-    private async Task RefreshPageDimensionsAsync(CancellationToken cancellationToken)
-    {
-        var document = _tabService.ActiveDocument;
-        if (document is null || document.PageCount == 0)
-        {
-            _pageWidthPoints = 612f;
-            _pageHeightPoints = 792f;
-            return;
-        }
-
-        var (width, height) = await RunDocumentOtherAsync(
-            document,
-            token => _pdfService.GetPageSizeAsync(
-                document,
-                _tabService.CurrentPageIndex,
-                token),
-            cancellationToken);
-        _pageWidthPoints = width;
-        _pageHeightPoints = height;
-    }
-
-    private void ApplyDefaultZoomMode()
-    {
-        _tabService.ZoomMode = _settingsService.Settings.DefaultZoomMode;
-        if (_tabService.ZoomMode == PdfZoomMode.ActualSize)
-        {
-            _tabService.ZoomScale = 1.0;
-        }
-
-        NotifyZoomChanged();
-    }
-
     private void UpdateSearchHighlights()
     {
         IReadOnlyList<PdfRect> highlights = [];
@@ -1963,8 +1931,7 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         var placeholderHeightPoints = Math.Max(1, PageHeightPoints);
         var currentPageIndex = _tabService.CurrentPageIndex;
 
-        var oldPages = ContinuousPages.ToDictionary(static page => page.PageIndex);
-        var oldScale = _continuousScale;
+        var sameDocument = ReferenceEquals(_continuousDocument, document);
         var pages = Enumerable.Range(0, document.PageCount)
             .Select(pageIndex => new RenderedPageViewModel(
                 pageIndex,
@@ -1973,9 +1940,10 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
                 placeholderWidthPoints,
                 placeholderHeightPoints))
             .ToArray();
-        if (oldScale > 0)
+        if (sameDocument && _continuousScale > 0)
         {
-            var scaleRatio = scale / oldScale;
+            var oldPages = ContinuousPages.ToDictionary(static page => page.PageIndex);
+            var scaleRatio = scale / _continuousScale;
             foreach (var page in pages)
             {
                 if (!oldPages.TryGetValue(page.PageIndex, out var oldPage) || !oldPage.HasPixels)
@@ -2007,6 +1975,8 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
 
         _continuousDocument = document;
         _continuousScale = scale;
+        RefreshGpuTileProtection();
+        NotifyZoomChanged();
         UpdateSearchHighlights();
         PageNavigationRequested?.Invoke(this, currentPageIndex);
         return Task.CompletedTask;
@@ -2028,6 +1998,7 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         var generationCancellation = _continuousRenderCts;
         if (document is null
             || generationCancellation is null
+            || !ReferenceEquals(document, _tabService.ActiveDocument)
             || (uint)pageIndex >= (uint)ContinuousPages.Count)
         {
             return false;
@@ -2063,6 +2034,7 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
             linkedCancellation.Token.ThrowIfCancellationRequested();
 
             if (!ReferenceEquals(document, _continuousDocument)
+                || !ReferenceEquals(document, _tabService.ActiveDocument)
                 || !ReferenceEquals(generationCancellation, _continuousRenderCts)
                 || (uint)pageIndex >= (uint)ContinuousPages.Count
                 || !ReferenceEquals(page, ContinuousPages[pageIndex]))
@@ -2244,10 +2216,25 @@ public sealed partial class ReaderViewModel : ObservableObject, IDisposable
         var token = _renderCts.Token;
         var pageIndex = _tabService.CurrentPageIndex;
 
+        if (PageTiles.Count > 0 && PageTiles[0].Key.DocumentId != document.EngineSession.DocumentId)
+        {
+            PageTiles.Clear();
+            RefreshGpuTileProtection();
+        }
+        PrepareSemanticDocument(document);
+
         try
         {
             IsBusy = true;
-            await RefreshPageDimensionsAsync(token);
+            var (width, height) = await RunDocumentOtherAsync(
+                document, cancellation => _pdfService.GetPageSizeAsync(document, pageIndex, cancellation), token);
+            token.ThrowIfCancellationRequested();
+            if (!ReferenceEquals(document, _tabService.ActiveDocument) || pageIndex != _tabService.CurrentPageIndex)
+            {
+                return;
+            }
+            _pageWidthPoints = width;
+            _pageHeightPoints = height;
             var scale = ResolveRenderScale();
             _singleRenderGeneration = generation ?? AdvanceDocumentRenderGeneration(document);
             PagePixelWidth = checked((int)Math.Ceiling(_pageWidthPoints * scale));

@@ -3,8 +3,9 @@
     "ElliePdf (Package)": {
       "commandName": "MsixPackage"
     },
-    "ElliePdf (Unpackaged)": {
-      "commandName": "Project"
+    "ElliePdf (Design preview)": {
+      "commandName": "MsixPackage",
+      "commandLineArgs": "--design-preview"
     }
   }
 }

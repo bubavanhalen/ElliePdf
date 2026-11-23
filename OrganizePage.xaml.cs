@@ -197,7 +197,7 @@ public sealed partial class OrganizePage : Page
         var result = await dialog.ShowAsync();
         if (result == ContentDialogResult.Primary)
         {
-            await _uiHost.OpenFilesAsync([outputPath]);
+            await _uiHost.OpenFilesAsync(new[] { outputPath });
         }
     }
 

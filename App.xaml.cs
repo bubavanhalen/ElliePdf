@@ -117,6 +117,10 @@ public partial class App : Microsoft.UI.Xaml.Application
         ElliePdfEventSource.Log.ActivationStart(activationOperationId);
         ElliePdfEventSource.Log.ActivationReceived(activationOperationId);
         var activation = AppInstance.GetCurrent().GetActivatedEventArgs();
+        var launchArguments = activation.Data is ILaunchActivatedEventArgs launch ? launch.Arguments : args.Arguments;
+        ReaderDesignPreview.Configure(string.IsNullOrWhiteSpace(launchArguments)
+            ? string.Join(' ', Environment.GetCommandLineArgs().Skip(1))
+            : launchArguments);
         if (_benchmarkDriver is not null)
         {
             var succeeded = false;
@@ -289,7 +293,7 @@ public partial class App : Microsoft.UI.Xaml.Application
             }
 
             var openStarted = TelemetryOperation.StartTimestamp();
-            await _window.OpenFilesAsync([fixture]);
+            await _window.OpenFilesAsync(new[] { fixture });
             BenchmarkDriver.WriteMetric(
                 "open.completed",
                 "ms",

@@ -54,7 +54,7 @@ public sealed class DocumentOpenService : IDocumentOpenService
                 new PdfPasswordPromptRequest { FilePath = path, IsRetry = isRetry },
                 cancellationToken);
 
-            if (string.IsNullOrEmpty(password))
+            if (password is null)
             {
                 throw new OperationCanceledException("Password entry was cancelled.");
             }

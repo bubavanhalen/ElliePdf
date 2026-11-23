@@ -327,7 +327,7 @@ public sealed partial class ReaderPage
         {
             var from = checked((int)Math.Clamp(fromBox.Value, 1, pageCount)) - 1;
             var to = checked((int)Math.Clamp(toBox.Value, from + 1, pageCount)) - 1;
-            selection = PrintPageSelection.Custom([new PdfPrintPageRange(from, to)]);
+            selection = PrintPageSelection.Custom(new[] { new PdfPrintPageRange(from, to) });
         }
         else
         {
@@ -430,7 +430,7 @@ public sealed partial class ReaderPage
         var description = job.Options!.GetPageDescription((uint)(pageNumber - 1));
         var request = new PrintPipelineRequest(
             job.Document.EngineSession.DocumentId,
-            PrintPageSelection.Custom([new PdfPrintPageRange(pageIndex, pageIndex)]),
+            PrintPageSelection.Custom(new[] { new PdfPrintPageRange(pageIndex, pageIndex) }),
             job.Target!,
             job.Scaling);
         var consumer = new WinUiPrintSurfaceConsumer(

@@ -18,5 +18,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ElliePdf.Core\ElliePdf.Core.csproj" />
+    <Compile Include="..\Services\ReaderDesignPreview.cs" Link="ReaderDesignPreview.cs" />
   </ItemGroup>
 </Project>
