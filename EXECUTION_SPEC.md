@@ -1,6 +1,6 @@
 # ElliePdf Production Execution Specification
 
-- Status: Execution baseline v1.0; ready for backlog decomposition
+- Status: Engineering execution baseline; product acceptance reopened after desktop UX/design regressions. Apply the additional gates in [UX and design recovery plan](docs/UX_DESIGN_RECOVERY_PLAN.md).
 - Target: Production-quality Windows PDF reader
 - Primary platform: WinUI 3, .NET 11 preview, newest compatible preview toolchain
 - Planning assumption: Four core Windows/C# engineers, dedicated QA from Sprint 1, and part-time product design and security support
@@ -12,7 +12,7 @@ Turn ElliePdf from a functional alpha into one of the fastest, most elegant PDF 
 
 The work is reader-first. A production release must excel at opening, displaying, navigating, searching, selecting and printing PDFs before advanced editing and organization are promoted from preview status.
 
-Success is defined by measured performance, zero-loss saving, accessibility, native-parser isolation and repeatable signed releases. Feature count is not a success metric.
+Success requires speed, usability and visual design to pass equal, independent acceptance gates. None can compensate for failure in another. Zero-loss saving, accessibility, native-parser isolation and repeatable signed releases remain mandatory. Feature count, successful builds and unit-test totals are not substitutes for acceptance of the actual application. The [UX and design recovery plan](docs/UX_DESIGN_RECOVERY_PLAN.md) defines the baseline comparison, user design checkpoints, real-app journeys and additional completion evidence.
 
 ### 1.1 Audit-to-execution traceability
 
