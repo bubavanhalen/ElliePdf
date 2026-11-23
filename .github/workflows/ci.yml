@@ -278,6 +278,10 @@ jobs:
     timeout-minutes: 600
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: unsigned-release-win-x64
+          path: ${{ runner.temp }}/perf-candidate-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Set up corpus Python
         uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
@@ -304,15 +308,35 @@ jobs:
         shell: pwsh
         run: .\eng\Invoke-MixedDocumentSoak.ps1 -Configuration Release -DurationMinutes 480
       - name: Dedicated UI/comparator ETW suite (fail closed)
+        id: reference-suite
         env:
           ELLIEPDF_REFERENCE_SUITE_PATH: ${{ vars.ELLIEPDF_REFERENCE_SUITE_PATH }}
+          CANDIDATE_DIRECTORY: ${{ runner.temp }}/perf-candidate-${{ github.run_id }}-${{ github.run_attempt }}
         shell: pwsh
         run: |
-          if (-not (Test-Path .\Benchmark\comparators.manifest.json)) { throw 'Comparator manifest is missing.' }
           if ([string]::IsNullOrWhiteSpace($env:ELLIEPDF_REFERENCE_SUITE_PATH)) { throw 'ELLIEPDF_REFERENCE_SUITE_PATH is not configured on the dedicated performance agent.' }
           if (-not (Test-Path -LiteralPath $env:ELLIEPDF_REFERENCE_SUITE_PATH -PathType Leaf)) { throw 'The configured reference-suite driver was not found.' }
-          & $env:ELLIEPDF_REFERENCE_SUITE_PATH -RepositoryRoot (Resolve-Path .).Path
+          $packages = @(Get-ChildItem -LiteralPath $env:CANDIDATE_DIRECTORY -Recurse -Filter '*.msix' -File)
+          if ($packages.Count -ne 1) { throw 'Expected one x64 candidate MSIX from this run.' }
+          $packagePath = $packages[0].FullName
+          .\eng\Test-MsixPayload.ps1 -PackagePath $packagePath -ExpectedArchitecture x64
+          $originalHash = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash
+          $evidenceDirectory = Join-Path $env:RUNNER_TEMP ('perf-evidence-' + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $evidenceDirectory | Out-Null
+          pwsh -NoProfile -File $env:ELLIEPDF_REFERENCE_SUITE_PATH -RepositoryRoot (Resolve-Path .).Path `
+            -PackagePath $packagePath -SourceCommit $env:GITHUB_SHA -OutputDirectory $evidenceDirectory
           if ($LASTEXITCODE -ne 0) { throw "The configured reference-suite driver failed with exit code $LASTEXITCODE." }
+          if ((Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash -cne $originalHash) { throw 'The reference driver changed the downloaded package.' }
+          dotnet run --project .\Benchmark\Benchmark.csproj -c Release --no-restore -- `
+            --verify-reference-suite (Join-Path $evidenceDirectory 'suite.json') `
+            --candidate-package $packagePath --source-commit $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'Reference-suite evidence did not meet the performance gates.' }
+          "evidence=$evidenceDirectory" >> $env:GITHUB_OUTPUT
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: reference-performance-x64
+          path: ${{ steps.reference-suite.outputs.evidence }}/**/*.json
+          if-no-files-found: error
 
   ui-validation-x64:
     if: >-

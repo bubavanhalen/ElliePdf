@@ -12,7 +12,8 @@
     { "id": "synthetic-10000-pages", "file": "synthetic-10000-pages.pdf", "kind": "long-document", "pages": 10000, "sha256": "91D192C921193CAAB4BD952B71D1A75765988A2E548D59E1C31B0F5FB48B04CA" },
     { "id": "synthetic-huge-mediabox", "file": "synthetic-huge-mediabox.pdf", "kind": "huge-media-box", "pages": 1, "sha256": "F21C64CC2B6533FC07EB0EA1F43785F7BB804973D583D1E575E7F46B70DF22B4" },
     { "id": "synthetic-corrupt", "file": "synthetic-corrupt.pdf", "kind": "corrupt-input", "pages": 0, "expectedOpenFailure": true, "sha256": "8EB7DC36B937F9E25E6055233415502D892D512A6EBBEE962A9F3CE3384AC635" },
-    { "id": "synthetic-parser-stress", "file": "synthetic-parser-stress.pdf", "kind": "parser-stress", "pages": 20, "sha256": "D21D38CF85210444173329F6E7BF0C38324DBBB85793FC91BCE10BA78198D2A1" }
-    ,{ "id": "synthetic-1gb-padded", "file": "synthetic-1gb-padded.pdf", "kind": "one-gigabyte-padded", "pages": 1, "sizeBytes": 1073741824, "generation": "Generate-TestCorpus.py --include-1gb", "sha256": "5A54A8E2725B76FF10D82623A25F6745105321B8DEB509A562FC28811C01ECF7" }
+    { "id": "synthetic-parser-stress", "file": "synthetic-parser-stress.pdf", "kind": "parser-stress", "pages": 20, "sha256": "D21D38CF85210444173329F6E7BF0C38324DBBB85793FC91BCE10BA78198D2A1" },
+    { "id": "synthetic-activation-scan", "file": "synthetic-activation-scan.pdf", "kind": "activation-scan", "pages": 5, "sizeBytes": 14755273, "sha256": "539ED412B7A8E4794AEABAF0EF64B5BFC30DDEFAEC21349BF6CEC092B849FF16" },
+    { "id": "synthetic-1gb-padded", "file": "synthetic-1gb-padded.pdf", "kind": "one-gigabyte-padded", "pages": 1, "sizeBytes": 1073741824, "generation": "Generate-TestCorpus.py --include-1gb", "sha256": "5A54A8E2725B76FF10D82623A25F6745105321B8DEB509A562FC28811C01ECF7" }
   ]
 }

@@ -39,6 +39,7 @@ internal static class ComparatorManifestLoader
             foreach (var comparator in value.Comparators)
             {
                 if (IsPlaceholder(comparator.ExactVersion) || comparator.Settings.Count == 0 || comparator.CorpusHashes.Count == 0 ||
+                    comparator.Settings.Any(pair => IsPlaceholder(pair.Key) || IsPlaceholder(pair.Value)) ||
                     comparator.CorpusHashes.Any(IsPlaceholder) || comparator.BaselineP95 is null ||
                     comparator.BaselineP95.Any(pair => pair.Value <= 0 || !double.IsFinite(pair.Value)))
                     throw new ArgumentException($"Comparator '{comparator.Name}' is not frozen: exact version, settings, corpus hashes and valid p95 baselines are required for a release benchmark.");
@@ -69,5 +70,6 @@ internal static class ComparatorManifestLoader
         }
     }
 
-    private static bool IsPlaceholder(string value) => value.StartsWith("RECORD_", StringComparison.OrdinalIgnoreCase);
+    private static bool IsPlaceholder(string value) => string.IsNullOrWhiteSpace(value) ||
+        value.TrimStart().StartsWith("RECORD_", StringComparison.OrdinalIgnoreCase);
 }

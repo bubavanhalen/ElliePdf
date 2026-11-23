@@ -95,6 +95,28 @@ comparison remains blocked until the controlled reference-machine record is comp
 
 The scheduled self-hosted performance job additionally requires the repository
 variable `ELLIEPDF_REFERENCE_SUITE_PATH`. It must point to the controlled UI/comparator
-driver on that reference machine and accept `-RepositoryRoot`. The job fails closed
-when the driver, comparator records, or any resulting gate is missing; a printed
-handoff message is never treated as benchmark evidence.
+driver on that reference machine. The driver receives `-RepositoryRoot`,
+`-PackagePath` for the unsigned x64 MSIX from the same CI run, `-SourceCommit`,
+and `-OutputDirectory` for fresh evidence. Run the payload in a Windows package
+identity and keep the supplied MSIX byte-for-byte intact. For local signing,
+copy the package to a separate path first.
+
+Write `suite.json` to the output directory with `schemaVersion` set to
+`1.0-reference-suite`, the `sourceCommit`, the `packageSha256`, and a `runs`
+array. Each run declares `scenario`, `temperature`, `displayScalePercent`,
+`fixtureId`, `fixtureSha256`, and `report`, a relative path to its ETW benchmark
+JSON report. Keep the report names distinct. Repeat the scenario matrix at 100%,
+150%, and 200% display scaling. Record both cold and warm runs for activation
+and first-page presentation. Cold activation uses the 10–20 MB corpus fixture,
+the 10,000-page gate uses the 10,000-page corpus, and steady-state memory uses
+the 1,000-page corpus.
+
+```powershell
+dotnet run --project Benchmark/Benchmark.csproj -c Release -- `
+  --verify-reference-suite <suite.json> --candidate-package <candidate.msix> --source-commit <sha>
+```
+
+The verifier checks the package and corpus hashes, the reference machine and
+power mode, suite coverage, and the SLO and comparator gates. The dedicated
+runner is responsible for recording the actual package activation, fixture,
+display scaling and cache condition for each report.

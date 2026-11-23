@@ -18,14 +18,18 @@ internal static class Program
     {
         try
         {
+            if (args.Contains("--verify-reference-suite", StringComparer.Ordinal))
+            {
+                await VerifyReferenceSuiteAsync(args);
+                return 0;
+            }
             var options = Options.Parse(args);
             if (options.Help) { PrintUsage(); return 0; }
             var manifest = await LoadAndValidateManifestAsync(options.ManifestPath ?? FindDefaultManifest());
             ComparatorManifest? comparatorManifest = null;
             if (options.RequireComparators || options.Mode == "sample")
             {
-                var comparatorPath = File.Exists("Benchmark/comparators.manifest.json") ? "Benchmark/comparators.manifest.json" : Path.Combine(AppContext.BaseDirectory, "comparators.manifest.json");
-                comparatorManifest = await ComparatorManifestLoader.LoadAndValidateAsync(comparatorPath, requireRecordedValues: true);
+                comparatorManifest = await ComparatorManifestLoader.LoadAndValidateAsync(FindDefaultComparatorManifest(), requireRecordedValues: true);
                 if (options.TargetPath is null)
                     throw new InvalidOperationException("Release benchmark gates require --target process evidence; backend-proxy output is never releasable.");
                 CorpusFixture selectedFixture = SelectFixture(manifest, options.FixtureId);
@@ -61,11 +65,33 @@ internal static class Program
             foreach (var metric in metrics) Console.WriteLine($"SLO metric={metric.Name} p95={metric.Statistics.P95.ToString("F3", CultureInfo.InvariantCulture)} unit={metric.Unit} stable={metric.Statistics.IsStable}");
             return 0;
         }
-        catch (Exception ex) when (ex is ArgumentException or IOException or JsonException or NotSupportedException or InvalidOperationException or TimeoutException)
+        catch (Exception ex) when (ex is ArgumentException or IOException or JsonException or NotSupportedException or InvalidOperationException or TimeoutException or KeyNotFoundException or FormatException)
         {
             Console.Error.WriteLine($"benchmark: {ex.Message}");
             return 2;
         }
+    }
+
+    private static async Task VerifyReferenceSuiteAsync(string[] args)
+    {
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        for (var index = 0; index < args.Length; index += 2)
+        {
+            var option = args[index];
+            if (option is not ("--verify-reference-suite" or "--candidate-package" or "--source-commit" or "--manifest" or "--comparator-manifest") ||
+                index + 1 == args.Length || args[index + 1].StartsWith("--", StringComparison.Ordinal) ||
+                !values.TryAdd(option, args[index + 1]))
+                throw new ArgumentException($"Invalid or repeated reference suite option '{option}'.");
+        }
+        if (!values.TryGetValue("--candidate-package", out var package) ||
+            !values.TryGetValue("--source-commit", out var sourceCommit))
+            throw new ArgumentException("Reference suite verification requires --candidate-package and --source-commit.");
+
+        var corpus = await LoadAndValidateManifestAsync(values.GetValueOrDefault("--manifest") ?? FindDefaultManifest());
+        var comparators = await ComparatorManifestLoader.LoadAndValidateAsync(
+            values.GetValueOrDefault("--comparator-manifest") ?? FindDefaultComparatorManifest(), requireRecordedValues: true);
+        var runCount = await ReferenceSuiteVerifier.VerifyAsync(values["--verify-reference-suite"], package, sourceCommit, corpus, comparators);
+        Console.WriteLine($"Verified {runCount} reference performance reports for the supplied candidate.");
     }
 
     private sealed class MetricSeries(string unit, IEnumerable<double>? values = null)
@@ -231,8 +257,15 @@ internal static class Program
     }
 
     private static string FindDefaultManifest() => File.Exists("testdata/manifest.json") ? "testdata/manifest.json" : throw new FileNotFoundException("Use --manifest to specify a corpus manifest.");
+    private static string FindDefaultComparatorManifest() => File.Exists("Benchmark/comparators.manifest.json")
+        ? "Benchmark/comparators.manifest.json"
+        : Path.Combine(AppContext.BaseDirectory, "comparators.manifest.json");
     private static string Redact(string value) => value.Contains('\\') || value.Contains('/') || value.Contains(':') ? "redacted" : value.Trim();
-    private static void PrintUsage() => Console.WriteLine("ElliePdf benchmark\n  --target <exe>       Measure a real executable process\n  --target-arguments <a> Arguments; {fixture} and {iteration} expand\n  --ready-regex <rx>   Readiness line emitted by target (otherwise Win32 input idle)\n  --scenario <name>     launch|activation|open|first-page|first-page-10000|cached-navigation|render|random-jump|zoom|scroll|cancellation|search|memory|close-memory|idle|save-integrity|reliability|accessibility\n  --fixture <id>        Manifest fixture ID\n  --corpus-root <dir>   Fixture directory (default: testdata/generated)\n  --timeout-ms <n>      Readiness timeout (default: 10000)\n  --settle-ms <n>       Delay after readiness before memory sample\n  --mode <sample|self-test>  sample requires recorded comparators\n  --temperature <cold|warm|unspecified>  Cache temperature recorded in the report\n  --output <path>       JSON report\n  --iterations <n>      Measured iterations (minimum 30)\n  --warmups <n>         Warmup iterations\n  --require-comparators  Require exact comparator evidence\n  --help\n\nTarget protocol: emit 'ELLIEPDF_BENCHMARK_METRIC {\"name\":\"first-page.presented\",\"unit\":\"ms\",\"value\":123.4}' on stdout. Metric names and units come from a fixed privacy-safe schema.");
+    private static void PrintUsage()
+    {
+        Console.WriteLine("ElliePdf benchmark\n  --target <exe>       Measure a real executable process\n  --target-arguments <a> Arguments; {fixture} and {iteration} expand\n  --ready-regex <rx>   Readiness line emitted by target (otherwise Win32 input idle)\n  --scenario <name>     launch|activation|open|first-page|first-page-10000|cached-navigation|render|random-jump|zoom|scroll|cancellation|search|memory|close-memory|idle|save-integrity|reliability|accessibility\n  --fixture <id>        Manifest fixture ID\n  --corpus-root <dir>   Fixture directory (default: testdata/generated)\n  --timeout-ms <n>      Readiness timeout (default: 10000)\n  --settle-ms <n>       Delay after readiness before memory sample\n  --mode <sample|self-test>  sample requires recorded comparators\n  --temperature <cold|warm|unspecified>  Cache temperature recorded in the report\n  --output <path>       JSON report\n  --iterations <n>      Measured iterations (minimum 30)\n  --warmups <n>         Warmup iterations\n  --require-comparators  Require exact comparator evidence\n  --help\n\nTarget protocol: emit 'ELLIEPDF_BENCHMARK_METRIC {\"name\":\"first-page.presented\",\"unit\":\"ms\",\"value\":123.4}' on stdout. Metric names and units come from a fixed privacy-safe schema.");
+        Console.WriteLine("\nVerify published candidate evidence:\n  --verify-reference-suite <suite.json> --candidate-package <msix> --source-commit <sha>\n  Optional inputs: --manifest <corpus.json> --comparator-manifest <comparators.json>");
+    }
 
     private sealed record Options(string? ManifestPath, string? TargetPath, string TargetArguments, string? ReadyRegex, string Scenario, string? FixtureId, string? CorpusRoot, TimeSpan Timeout, TimeSpan Settle, string? OutputPath, int Iterations, int Warmups, string MachineClass, string PowerMode, string Temperature, string Mode, bool RequireComparators, bool Help)
     {

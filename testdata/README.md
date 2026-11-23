@@ -8,6 +8,8 @@ On Windows, use the same pinned Python 3.13 dependencies and manifest checks as 
 ./eng/Initialize-TestCorpus.ps1
 ```
 
+`synthetic-activation-scan.pdf` is a five-page, 14,755,273-byte raster fixture for the cold activation gate.
+
 The 1-GB stress fixture is deliberately opt-in and is never committed:
 
 ```powershell

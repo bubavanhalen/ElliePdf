@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import math
 import sys
@@ -28,6 +29,7 @@ OUTPUT_NAMES = (
     "synthetic-huge-mediabox.pdf",
     "synthetic-corrupt.pdf",
     "synthetic-parser-stress.pdf",
+    "synthetic-activation-scan.pdf",
     "synthetic-1gb-padded.pdf",
 )
 
@@ -85,6 +87,23 @@ def photo_scan(path: Path) -> None:
         c.setFillColor(black)
         c.setFont("Helvetica", 9)
         c.drawString(24, 48, f"Synthetic raster scan {page + 1}; no external image content")
+        c.showPage()
+    c.save()
+
+
+def activation_scan(path: Path) -> None:
+    """Build a 10–20 MB PDF with real raster payloads for cold activation."""
+    c = new_canvas(path, pagesize=A4)
+    c.setTitle("ElliePdf synthetic cold activation fixture")
+    page_width, page_height = A4
+    image_size = (1024, 768)
+    for page in range(1, 6):
+        seed = f"ElliePdf activation fixture raster page {page}".encode("ascii")
+        pixels = hashlib.shake_256(seed).digest(image_size[0] * image_size[1] * 3)
+        image = Image.frombytes("RGB", image_size, pixels)
+        c.drawImage(ImageReader(image), 24, 80, width=page_width - 48, height=page_height - 120)
+        c.setFont("Helvetica", 11)
+        c.drawString(24, 48, f"Synthetic raster activation page {page}")
         c.showPage()
     c.save()
 
@@ -397,9 +416,10 @@ def main() -> int:
     huge_mediabox(output / OUTPUT_NAMES[7])
     corrupt(output / OUTPUT_NAMES[8])
     parser_stress(output / OUTPUT_NAMES[9])
+    activation_scan(output / OUTPUT_NAMES[10])
     generated = len(OUTPUT_NAMES) - 1
     if len(sys.argv) == 3:
-        one_gigabyte_padded(output / OUTPUT_NAMES[10])
+        one_gigabyte_padded(output / OUTPUT_NAMES[11])
         generated += 1
     print(f"generated {generated} deterministic fixtures in {output}")
     return 0
